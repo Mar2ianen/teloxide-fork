@@ -169,7 +169,7 @@ impl Sticker {
 
     /// Returns `true` is this is a "normal" raster sticker.
     ///
-    /// Alias to [`self.format().is_raster()`].
+    /// Alias to [`self.format().is_static()`].
     ///
     /// [`self.format().is_static()`]: StickerFormat::is_static
     #[must_use]

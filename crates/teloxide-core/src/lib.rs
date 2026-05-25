@@ -7,7 +7,7 @@
 //!```toml
 //! teloxide-core = "0.13.0"
 //! ```
-//! _Compiler support: requires rustc 1.82+_.
+//! _Compiler support: requires rustc 1.85+_.
 //!
 //! ```
 //! # async {
@@ -73,7 +73,7 @@
 // (see: `teloxide`). We can't use `docsrs` as it breaks tokio compilation in this case.
 #![cfg_attr(
     all(any(docsrs, dep_docsrs), feature = "nightly"),
-    feature(doc_cfg, doc_auto_cfg, doc_notable_trait)
+    feature(doc_cfg, doc_notable_trait)
 )]
 #![cfg_attr(feature = "nightly", feature(type_alias_impl_trait))]
 #![cfg_attr(all(feature = "full", docsrs), deny(rustdoc::broken_intra_doc_links))]

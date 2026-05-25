@@ -27,7 +27,7 @@ env:
   # - down below in a matrix
   # - `Cargo.toml`
   # - **/CHANGELOG.md
-  rust_msrv: 1.82.0
+  rust_msrv: 1.85.0
 
   CI: 1
 
@@ -108,7 +108,7 @@ jobs:
             toolchain: nightly-2025-06-12
             features: "--features full nightly"
           - rust: msrv
-            toolchain: 1.82.0
+            toolchain: 1.85.0
             features: "--features full"
 
     steps:

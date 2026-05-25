@@ -1003,14 +1003,8 @@ mod tests {
                 "{\"data\": \"Bad Request: need administrator rights in the channel chat\"}",
                 ApiError::NotEnoughRightsToPostMessages,
             ),
-            (
-                "{\"data\": \"Bad Request: PARTICIPANT_ID_INVALID\"}",
-                ApiError::ParticipantIdInvalid,
-            ),
-            (
-                "{\"data\": \"Bad Request: CHAT_ADMIN_REQUIRED\"}",
-                ApiError::ChatAdminRequired,
-            ),
+            ("{\"data\": \"Bad Request: PARTICIPANT_ID_INVALID\"}", ApiError::ParticipantIdInvalid),
+            ("{\"data\": \"Bad Request: CHAT_ADMIN_REQUIRED\"}", ApiError::ChatAdminRequired),
             (
                 "{\"data\": \"Bad Request: bad webhook: HTTPS url must be provided for webhook\"}",
                 ApiError::WebhookRequireHttps,

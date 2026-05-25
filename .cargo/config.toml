@@ -6,6 +6,7 @@
 #
 # N.B.: when changing this, also change `package.metadata.docs.rs`
 docs = """doc
+--no-deps
 -Zrustdoc-scrape-examples
 --features=full --features=nightly
 --features=tokio/macros --features=tokio/rt-multi-thread

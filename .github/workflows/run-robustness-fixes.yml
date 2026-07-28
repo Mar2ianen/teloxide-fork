@@ -20,7 +20,9 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
+          import subprocess
           import textwrap
+          import traceback
 
           workflow = Path('.github/workflows/apply-robustness-fixes.yml').read_text()
           block = workflow.split('      - name: Apply fixes\n', 1)[1]
@@ -30,7 +32,13 @@ jobs:
               '          replace(\n              "crates/teloxide-core/src/serde_multipart/error.rs"',
               1,
           )[0]
-          exec(textwrap.dedent(script), {'__name__': '__main__'})
+
+          try:
+              exec(textwrap.dedent(script), {'__name__': '__main__'})
+          except BaseException:
+              details = traceback.format_exc()
+              subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
+              Path('.github/robustness-fixer-error.txt').write_text(details)
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -39,7 +47,7 @@ jobs:
 
       - run: cargo fmt --all
 
-      - name: Commit fixes
+      - name: Commit result
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -47,6 +55,7 @@ jobs:
                   crates/teloxide-core/src/types/sticker.rs \
                   crates/teloxide-core/src/types/update.rs \
                   crates/teloxide-core/src/serde_multipart/unserializers/input_file.rs \
-                  crates/teloxide-core/src/serde_multipart/unserializers.rs
+                  crates/teloxide-core/src/serde_multipart/unserializers.rs \
+                  .github/robustness-fixer-error.txt
           git commit -m "fix: harden malformed Telegram data handling"
           git push origin HEAD:fix/robustness-panics-and-updates

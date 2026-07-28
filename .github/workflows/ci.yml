@@ -121,6 +121,12 @@ jobs:
         with:
           toolchain: ${{ matrix.toolchain }}
 
+      - name: Install pinned rustfmt for codegen
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.rust_nightly }}
+          components: rustfmt
+
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
 

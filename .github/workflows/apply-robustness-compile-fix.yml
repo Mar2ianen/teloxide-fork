@@ -1,0 +1,74 @@
+name: Apply robustness compile fix
+
+on:
+  workflow_run:
+    workflows: [ Continuous integration ]
+    types: [ completed ]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.workflow_run.head_branch == 'ci/trigger-robustness-compile-master'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/robustness-panics-and-updates
+
+      - name: Apply fixes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("crates/teloxide-core/src/types/message.rs")
+          text = path.read_text()
+          old = """            User(_) => return None,
+            // Similarly to user chats, there is no way to create a link to a message in a normal,
+            // private group.
+            //
+            // (public groups are always supergroup which are in turn channels).
+            Group(_) => return None,
+            Channel(id) => id,
+"""
+          new = """            Some(User(_)) => return None,
+            // Similarly to user chats, there is no way to create a link to a message in a normal,
+            // private group.
+            //
+            // (public groups are always supergroup which are in turn channels).
+            Some(Group(_)) | None => return None,
+            Some(Channel(id)) => id,
+"""
+          if text.count(old) != 1:
+              raise SystemExit("Message::url_of match not found")
+          path.write_text(text.replace(old, new, 1))
+
+          path = Path("crates/teloxide-core/src/types/chat_id.rs")
+          text = path.read_text()
+          old = "ChatId(MAX_USER_ID + 1)"
+          new = "ChatId(super::MAX_USER_ID + 1)"
+          if text.count(old) != 1:
+              raise SystemExit("MAX_USER_ID test use not found")
+          path.write_text(text.replace(old, new, 1))
+
+          Path(".github/diagnostic-trigger").unlink(missing_ok=True)
+          Path(".github/robustness-check.log").unlink(missing_ok=True)
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-06-12
+          components: rustfmt
+
+      - run: cargo fmt --all
+
+      - name: Commit fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/teloxide-core/src/types/message.rs \
+                  crates/teloxide-core/src/types/chat_id.rs \
+                  .github/diagnostic-trigger \
+                  .github/robustness-check.log
+          git commit -m "fix: handle unknown chat IDs in message links"
+          git push origin HEAD:fix/robustness-panics-and-updates

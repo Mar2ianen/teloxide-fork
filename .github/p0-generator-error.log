@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/tmp/apply_bot_api_10_p0.py", line 164, in <module>
+    raise RuntimeError("InputPollOption impl shape changed")
+RuntimeError: InputPollOption impl shape changed

@@ -1,3 +1,4 @@
+# Trigger after workflow registration.
 name: Run robustness fixer
 
 on:

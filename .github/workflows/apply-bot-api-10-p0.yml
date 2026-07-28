@@ -4,6 +4,9 @@ on:
   push:
     branches: [ master ]
     paths: [ .github/workflows/apply-bot-api-10-p0.yml ]
+  pull_request:
+    branches: [ master ]
+    paths: [ .github/p0-trigger ]
 
 permissions:
   contents: write

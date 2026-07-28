@@ -34,7 +34,7 @@ impl ChatId {
     /// Returns `true` if this is an id of a user.
     #[must_use]
     pub fn is_user(self) -> bool {
-        matches!(self.to_bare(), BareChatId::User(_))
+        matches!(self.to_bare(), Some(BareChatId::User(_)))
     }
 
     /// Returns `true` if this is an id of a group.
@@ -42,37 +42,37 @@ impl ChatId {
     /// Note: supergroup is **not** considered a group.
     #[must_use]
     pub fn is_group(self) -> bool {
-        matches!(self.to_bare(), BareChatId::Group(_))
+        matches!(self.to_bare(), Some(BareChatId::Group(_)))
     }
 
     /// Returns `true` if this is an id of a channel.
     #[must_use]
     pub fn is_channel_or_supergroup(self) -> bool {
-        matches!(self.to_bare(), BareChatId::Channel(_))
+        matches!(self.to_bare(), Some(BareChatId::Channel(_)))
     }
 
     /// Returns user id, if this is an id of a user.
     #[must_use]
     pub fn as_user(self) -> Option<UserId> {
         match self.to_bare() {
-            BareChatId::User(u) => Some(u),
-            BareChatId::Group(_) | BareChatId::Channel(_) => None,
+            Some(BareChatId::User(u)) => Some(u),
+            Some(BareChatId::Group(_) | BareChatId::Channel(_)) | None => None,
         }
     }
 
     /// Converts this id to "bare" MTProto peer id.
     ///
     /// See [`BareChatId`] for more.
-    pub(crate) fn to_bare(self) -> BareChatId {
+    pub(crate) fn to_bare(self) -> Option<BareChatId> {
         use BareChatId::*;
 
         match self.0 {
-            id @ MIN_MARKED_CHAT_ID..=MAX_MARKED_CHAT_ID => Group(-id as _),
+            id @ MIN_MARKED_CHAT_ID..=MAX_MARKED_CHAT_ID => Some(Group(-id as _)),
             id @ MIN_MARKED_CHANNEL_ID..=MAX_MARKED_CHANNEL_ID => {
-                Channel((MAX_MARKED_CHANNEL_ID - id) as _)
+                Some(Channel((MAX_MARKED_CHANNEL_ID - id) as _))
             }
-            id @ MIN_USER_ID..=MAX_USER_ID => User(UserId(id as _)),
-            id => panic!("malformed chat id: {id}"),
+            id @ MIN_USER_ID..=MAX_USER_ID => Some(User(UserId(id as _))),
+            _ => None,
         }
     }
 }
@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn chonky_user_id_to_bare() {
-        assert!(matches!(ChatId(5298363099).to_bare(), BareChatId::User(UserId(5298363099))));
+        assert!(matches!(ChatId(5298363099).to_bare(), Some(BareChatId::User(UserId(5298363099)))));
     }
 
     #[test]
@@ -142,9 +142,9 @@ mod tests {
         fn assert_identity(x: u64) {
             use BareChatId::*;
 
-            assert_eq!(User(UserId(x)), User(UserId(x)).to_bot_api().to_bare());
-            assert_eq!(Group(x), Group(x).to_bot_api().to_bare());
-            assert_eq!(Channel(x), Channel(x).to_bot_api().to_bare());
+            assert_eq!(Some(User(UserId(x))), User(UserId(x)).to_bot_api().to_bare());
+            assert_eq!(Some(Group(x)), Group(x).to_bot_api().to_bare());
+            assert_eq!(Some(Channel(x)), Channel(x).to_bot_api().to_bare());
         }
 
         // Somewhat random numbers
@@ -153,6 +153,17 @@ mod tests {
 
         // rust 2021 when :(
         ids.iter().copied().for_each(assert_identity);
+    }
+
+    #[test]
+    fn unknown_ranges_are_not_classified() {
+        for chat_id in [ChatId(i64::MIN), ChatId(MAX_USER_ID + 1)] {
+            assert_eq!(chat_id.to_bare(), None);
+            assert!(!chat_id.is_user());
+            assert!(!chat_id.is_group());
+            assert!(!chat_id.is_channel_or_supergroup());
+            assert_eq!(chat_id.as_user(), None);
+        }
     }
 
     #[test]

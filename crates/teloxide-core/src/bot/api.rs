@@ -1770,7 +1770,7 @@ impl Requester for Bot {
         )
     }
 
-    type PostStory = JsonRequest<payloads::PostStory>;
+    type PostStory = MultipartRequest<payloads::PostStory>;
 
     fn post_story(
         &self,
@@ -1784,7 +1784,7 @@ impl Requester for Bot {
         )
     }
 
-    type EditStory = JsonRequest<payloads::EditStory>;
+    type EditStory = MultipartRequest<payloads::EditStory>;
 
     fn edit_story(
         &self,

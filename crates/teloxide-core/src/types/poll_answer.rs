@@ -1,4 +1,4 @@
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 
 use crate::types::{Chat, MaybeAnonymousUser, PollId, User};
 
@@ -43,7 +43,10 @@ struct VoterDe {
 
 fn deserialize_voter<'d, D: Deserializer<'d>>(d: D) -> Result<MaybeAnonymousUser, D::Error> {
     let VoterDe { voter_chat, user } = VoterDe::deserialize(d)?;
-    Ok(voter_chat.map(MaybeAnonymousUser::Chat).or(user.map(MaybeAnonymousUser::User)).unwrap())
+    voter_chat
+        .map(MaybeAnonymousUser::Chat)
+        .or_else(|| user.map(MaybeAnonymousUser::User))
+        .ok_or_else(|| D::Error::custom("poll answer has neither `voter_chat` nor `user`"))
 }
 
 #[cfg(test)]
@@ -94,5 +97,16 @@ mod tests {
 
         let poll_answer: PollAnswer = serde_json::from_str(json).unwrap();
         assert!(poll_answer.voter.is_chat());
+    }
+
+    #[test]
+    fn poll_answer_without_voter_is_rejected() {
+        let json = r#"{
+            "poll_id": "POLL_ID",
+            "option_ids": []
+        }"#;
+
+        let error = serde_json::from_str::<PollAnswer>(json).unwrap_err();
+        assert!(error.to_string().contains("neither `voter_chat` nor `user`"));
     }
 }

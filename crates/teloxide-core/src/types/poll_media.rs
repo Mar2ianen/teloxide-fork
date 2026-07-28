@@ -52,7 +52,11 @@ pub enum InputPollMedia {
 #[serde(rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
 pub enum InputPollOptionMedia {
+    Animation(crate::types::InputMediaAnimation),
+    LivePhoto(crate::types::InputMediaLivePhoto),
+    Location(crate::types::InputMediaLocation),
     Photo(crate::types::InputMediaPhoto),
     Sticker(crate::types::InputMediaSticker),
+    Venue(crate::types::InputMediaVenue),
     Video(crate::types::InputMediaVideo),
 }

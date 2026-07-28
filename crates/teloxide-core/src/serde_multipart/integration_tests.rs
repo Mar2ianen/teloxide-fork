@@ -63,7 +63,10 @@ fn multipart_parts(body: &[u8], boundary: &str) -> BTreeMap<String, Vec<u8>> {
             .expect("multipart part name")
             .to_owned();
 
-        assert!(parts.insert(name, contents.as_bytes().to_vec()).is_none(), "duplicate part");
+        assert!(
+            parts.insert(name, contents.as_bytes().to_vec()).is_none(),
+            "duplicate part"
+        );
     }
 
     parts
@@ -93,7 +96,14 @@ async fn send_poll_attach_ids_match_multipart_file_parts() {
 
     let content_type = request.headers()[CONTENT_TYPE].to_str().unwrap();
     let boundary = content_type.split("boundary=").nth(1).expect("multipart boundary");
-    let body = request.body_mut().take().unwrap().collect().await.unwrap().to_bytes();
+    let body = request
+        .body_mut()
+        .take()
+        .unwrap()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     let parts = multipart_parts(&body, boundary);
 
     let mut attach_ids = Vec::new();
@@ -104,7 +114,12 @@ async fn send_poll_attach_ids_match_multipart_file_parts() {
 
     let file_part_ids: BTreeSet<_> = parts
         .keys()
-        .filter(|name| !matches!(name.as_str(), "chat_id" | "question" | "options" | "media" | "explanation_media"))
+        .filter(|name| {
+            !matches!(
+                name.as_str(),
+                "chat_id" | "question" | "options" | "media" | "explanation_media"
+            )
+        })
         .cloned()
         .collect();
     let attach_id_set: BTreeSet<_> = attach_ids.iter().cloned().collect();

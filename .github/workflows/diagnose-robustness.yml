@@ -15,23 +15,58 @@ jobs:
         with:
           ref: fix/robustness-panics-and-updates
 
+      - name: Apply compile fixes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("crates/teloxide-core/src/types/message.rs")
+          text = path.read_text()
+          old = """            User(_) => return None,
+            // Similarly to user chats, there is no way to create a link to a message in a normal,
+            // private group.
+            //
+            // (public groups are always supergroup which are in turn channels).
+            Group(_) => return None,
+            Channel(id) => id,
+"""
+          new = """            Some(User(_)) => return None,
+            // Similarly to user chats, there is no way to create a link to a message in a normal,
+            // private group.
+            //
+            // (public groups are always supergroup which are in turn channels).
+            Some(Group(_)) | None => return None,
+            Some(Channel(id)) => id,
+"""
+          if text.count(old) != 1:
+              raise SystemExit("Message::url_of match not found")
+          path.write_text(text.replace(old, new, 1))
+
+          path = Path("crates/teloxide-core/src/types/chat_id.rs")
+          text = path.read_text()
+          old = "ChatId(MAX_USER_ID + 1)"
+          new = "ChatId(super::MAX_USER_ID + 1)"
+          if text.count(old) != 1:
+              raise SystemExit("MAX_USER_ID test use not found")
+          path.write_text(text.replace(old, new, 1))
+
+          Path(".github/diagnostic-trigger").unlink(missing_ok=True)
+          Path(".github/robustness-check.log").unlink(missing_ok=True)
+
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2025-06-12
-          components: clippy
+          components: rustfmt
 
-      - name: Capture diagnostics
-        shell: bash
-        run: |
-          set +e
-          cargo check --examples --features full > .github/robustness-check.log 2>&1
-          cargo clippy --all-targets --features "full nightly" -- -D warnings >> .github/robustness-check.log 2>&1
-          exit 0
+      - run: cargo fmt --all
 
-      - name: Commit diagnostics
+      - name: Commit fixes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github/robustness-check.log
-          git commit -m "ci: capture robustness diagnostics"
+          git add crates/teloxide-core/src/types/message.rs \
+                  crates/teloxide-core/src/types/chat_id.rs \
+                  .github/diagnostic-trigger \
+                  .github/robustness-check.log
+          git commit -m "fix: handle unknown chat IDs in message links"
           git push origin HEAD:fix/robustness-panics-and-updates

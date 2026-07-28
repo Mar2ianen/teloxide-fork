@@ -1,83 +1,83 @@
 # AGENTS.md
 
-This file defines the working rules for coding agents in this repository.
-It applies to the entire repository unless a more specific `AGENTS.md` exists in a subdirectory.
+This file defines the working rules for coding agents operating in this repository.
 
-## Repository purpose
+## Mission
 
-This repository is a development fork of `teloxide` focused on keeping Telegram Bot API support current while preserving upstream compatibility and code quality.
+Maintain a high-quality `teloxide` fork with current Telegram Bot API support.
 
-The fork has two important long-lived branches:
+Current priorities:
 
-- `master` is a clean mirror of upstream `teloxide/teloxide`
-- `next` is the integration branch for fork-specific development
+1. Finish and independently audit Telegram Bot API 10.0 support
+2. Move directly to Telegram Bot API 10.2
+3. Keep `master` usable as a clean upstream mirror
+4. Keep all fork-specific development on `next` and feature branches
+5. Prefer evidence, generated consistency, and wire-level tests over "it compiles"
 
-Never make fork-specific commits on `master`.
-Never open a fork feature PR against `master`.
-Create work branches from `next` and target PRs back to `next`.
+Do not claim full API coverage merely because codegen or CI is green. Local schemas can be internally consistent and still differ from Telegram's official API.
 
-## Start every task by checking the repository state
+## Branch policy
 
-Before editing code:
+- `master` is the upstream mirror
+- `next` is the integration branch for the fork
+- Create every change from `next`
+- Merge feature branches back into `next` through a pull request
+- Never develop directly on `master`
+- Never force-update `master` during normal local development
+- Do not merge a Bot API update directly into `master`
 
-```shell
-git status --short --branch
+Recommended start:
+
+```bash
 git fetch --all --prune
 git switch next
 git pull --ff-only origin next
-git switch -c <type>/<short-task-name>
+git switch -c <type>/<short-description>
 ```
 
-Do not assume that a SHA, API version, generated file, or known TODO from an old conversation is still current.
-Inspect the branch and the relevant source files first.
+Use focused branch names, for example:
 
-Useful initial commands:
-
-```shell
-git log --oneline --decorate -20
-just --list
-cargo metadata --no-deps --format-version 1 >/dev/null
+```text
+fix/business-account-gift-filters
+feat/bot-api-10-2-rich-blocks
+test/send-poll-multipart
+audit/bot-api-10-methods
 ```
 
-## Non-negotiable rules
+## Sources of truth
 
-1. Do not push directly to `master`
-2. Do not use stale technical branches as a base
-3. Do not edit generated files as the primary source of a change
-4. Do not claim complete Telegram Bot API coverage without an external audit against the official documentation
-5. Do not treat green codegen as proof that the local schemas match Telegram
-6. Do not add `InputFile`-containing fields without tracing multipart transport end to end
-7. Do not silently drop unsupported rich entities or media
-8. Do not weaken tests, lints, derives, or public types merely to make code compile
-9. Do not add broad `allow` attributes without a narrow, documented reason
-10. Do not merge code that has not passed the relevant test matrix
+Use sources in this order:
 
-## Source-of-truth hierarchy
+1. Official Telegram Bot API changelog
+2. Official Telegram Bot API documentation for the exact target version
+3. An archived copy of the official documentation when the current docs have moved beyond the target version
+4. Existing `teloxide` architecture and compatibility conventions
+5. Repository schemas and generated code
 
-For Telegram Bot API work, use sources in this order:
+The following files are inputs to generation, but are not authoritative Telegram specifications:
 
-1. Official Telegram Bot API documentation and changelog
-2. An archived documentation snapshot for the exact target API version
-3. `crates/teloxide-core/schema.ron` for method code generation
-4. `crates/teloxide-core/custom_v2.json` for schema consistency checks
-5. Generated Rust files
+```text
+crates/teloxide-core/schema.ron
+crates/teloxide-core/custom_v2.json
+```
 
-`schema.ron` and `custom_v2.json` are hand-maintained mirrors. They can agree with each other and still both be wrong.
+Both are maintained manually. A green schema check proves that they agree with each other and with generated Rust code. It does not prove that either schema agrees with Telegram.
 
-When updating the API, audit all of the following:
+For every API update, maintain an explicit external checklist covering:
 
-- new methods
-- removed or renamed methods
-- new parameters on existing methods
-- required versus optional parameters
-- parameter types and numeric ranges
-- return types
-- new objects and fields
-- renamed or replaced fields
-- enum variants and tagged-union representation
-- multipart behavior
-- serialization names
-- documentation-only semantic changes
+- New methods
+- Removed or renamed methods
+- New method parameters
+- Changed required/optional status
+- Changed parameter types or ranges
+- Changed return types
+- New objects
+- New object fields
+- Removed or renamed fields
+- New enum variants
+- Multipart behavior
+- Serde tagging and flattening
+- Documentation-only behavioral changes
 
 ## Repository map
 
@@ -85,246 +85,371 @@ Important locations:
 
 ```text
 crates/teloxide-core/schema.ron
-    Handwritten method schema used by codegen
+    Hand-written method schema used by code generation
 
 crates/teloxide-core/custom_v2.json
-    Independent method/object schema used by consistency tests
-
-crates/teloxide-core/src/codegen/
-    Schema parsing, patching, checks, and generators
-
-crates/teloxide-core/src/payloads/
-    Generated request payloads and payload codegen
-
-crates/teloxide-core/src/requests/
-    Requester traits, request types, and generated adaptor fan-out
+    Independent API schema used by schema consistency checks
 
 crates/teloxide-core/src/types/
-    Telegram API objects, enums, IDs, serde implementations, and media traversal
+    Telegram API objects and input objects
+
+crates/teloxide-core/src/payloads/
+    Generated request payloads
+
+crates/teloxide-core/src/requests/
+    Request traits, generated requester methods, adaptors, and transport types
 
 crates/teloxide-core/src/serde_multipart/
-    Multipart form construction and wire-format tests
+    Multipart form construction and attachment extraction
+
+crates/teloxide-core/src/codegen/
+    Schema loading, patching, generation, and schema checks
 
 crates/teloxide/src/utils/render/
     HTML and MarkdownV2 rendering
 
 .github/workflows/ci.yml
-    Authoritative GitHub CI matrix
-
-Justfile
-    Fast local development commands
-
-CODE_STYLE.md
-    Project Rust and documentation style
-
-CONTRIBUTING.md
-    Upstream contribution and Bot API update guidance
+    Authoritative CI matrix
 ```
 
-## Generated code workflow
+Read `CONTRIBUTING.md` and `CODE_STYLE.md` before broad changes.
 
-Generated files normally contain a preamble similar to:
+## Generated code
 
-```rust
-//! Generated by `codegen_payloads`, do not edit by hand.
+Files containing a preamble such as:
+
+```text
+Generated by `codegen_*`, do not edit by hand.
 ```
 
-For method changes, edit both schemas first:
+must not be maintained manually.
+
+Correct workflow:
+
+1. Update hand-written types when required
+2. Update `schema.ron`
+3. Update `custom_v2.json`
+4. Update codegen rules or patches when required
+5. Run codegen
+6. Review the generated diff
+7. Add semantic and transport tests
+8. Run the full checks
+
+Direct edits to generated files are allowed only as temporary diagnostics. Never commit those temporary edits as the final implementation.
+
+Run the codegen consistency checks with:
+
+```bash
+cargo test -p teloxide-core --features "full nightly" codegen -- --nocapture
+```
+
+A Bot API method change is incomplete when only its payload file changed. Verify generated propagation into:
+
+- Payload
+- Setters
+- `Requester`
+- `Bot`
+- Adaptors
+- Erased requester support where applicable
+- Trace/default parse mode/throttle adaptors where applicable
+- Multipart request type where applicable
+
+## Type and serde rules
+
+For new Telegram objects:
+
+- Derive `Clone`, `Debug`, `PartialEq`, `Serialize`, and `Deserialize`
+- Add `Eq` and `Hash` only when their semantics are actually correct
+- Add `schemars::JsonSchema` under the repository's existing test configuration
+- Use dedicated ID newtypes instead of raw integers or strings when the codebase already follows that convention
+- Match the official wire representation, not the prettiest Rust representation
+- Use `Box` where recursive enums or large variants require indirection
+- Preserve established `serde` conventions for tagged, untagged, and flattened enums
+- Add fixtures for every nontrivial enum shape
+
+Do not fake `Eq` or `Hash` for types containing `InputFile`, floating-point values, or media that would be silently ignored by equality.
+
+Do not add catch-all variants merely to make deserialization pass unless forward compatibility is an intentional design decision and tested.
+
+For custom deserializers:
+
+- Test every dispatch branch
+- Test unknown and malformed inputs
+- Test ambiguous field combinations
+- Test that ordinary messages do not become service messages
+- Avoid duplicating Telegram's field dispatch in multiple places
+
+## Method schema rules
+
+When changing an existing method, verify all of the following against official docs:
+
+- Parameter name
+- Required or optional
+- Exact type
+- Numeric range
+- Maximum collection length
+- Mutual exclusion rules
+- Private-chat, business, forum, or channel restrictions
+- Multipart requirements
+- Return type
+
+Update both schema files in the same change:
 
 ```text
 crates/teloxide-core/schema.ron
 crates/teloxide-core/custom_v2.json
 ```
 
-Then run the codegen checks:
+Do not accept a PR that updates one and leaves the other stale.
 
-```shell
-cargo test -p teloxide-core --features "full nightly" codegen -- --nocapture
-```
+## Multipart and `InputFile` invariants
 
-Some generators update files and make the first run fail to show a diff. Inspect the failure rather than blindly ignoring it, then rerun until the command exits successfully with a clean working tree apart from intended changes.
+Any payload that can contain a local `InputFile`, including through nested input objects, must use multipart transport.
 
-After codegen:
+Required invariants:
 
-```shell
-cargo fmt --all
-git diff --check
-git status --short
-```
+1. The request type is `MultipartRequest`, not `JsonRequest`
+2. The payload implements `MultipartPayload`
+3. Immutable traversal finds every nested file
+4. Mutable traversal finds every nested file
+5. Every serialized `attach://<id>` has exactly one multipart file part with the same name
+6. No multipart file part is orphaned
+7. Attachment IDs are unique within one request
+8. URL and Telegram `file_id` inputs still serialize without unnecessary file parts
 
-Inspect generated changes. A generator can faithfully generate incorrect code from an incorrect schema.
-
-Never hand-edit generated payload, requester, or adaptor output without also changing the generator or its source schema. A temporary diagnostic edit must not survive into the final commit.
-
-## Telegram Bot API update procedure
-
-For each target API version:
-
-1. Freeze the exact official changelog and documentation snapshot
-2. Build a checklist of methods, method parameters, objects, fields, variants, and semantic changes
-3. Add or update dependent types first
-4. Update `schema.ron`
-5. Update `custom_v2.json`
-6. Regenerate payloads, requester methods, and adaptors
-7. Add serde fixtures for new or changed wire shapes
-8. Audit every new `InputFile` path for multipart handling
-9. Add focused unit tests
-10. Add a wire-level test when behavior crosses serialization or transport boundaries
-11. Run the full checks
-12. State remaining gaps explicitly in the PR description
-
-Do not use the current live API documentation as the sole source when implementing an older target version. Later changes can make the implementation accidentally incompatible with the requested version.
-
-## Types and serde
-
-New public Telegram types should normally implement:
+Nested media traversal must include all applicable fields. Examples:
 
 ```text
-Clone
-Debug
-PartialEq
-Serialize
-Deserialize
-schemars::JsonSchema under cfg(test)
-```
-
-Also derive `Eq` and `Hash` when their semantics are truthful and every field supports them.
-
-Do not derive or manually implement equality that ignores semantically relevant media or file fields merely to satisfy an existing bound.
-
-Use dedicated ID newtypes instead of raw integers or strings where the repository already follows that convention.
-
-For tagged unions:
-
-- match the Telegram discriminator exactly
-- prefer explicit enum variants
-- preserve unknown/future-compatible behavior only when the surrounding API already does so intentionally
-- test every new variant with representative JSON
-- test malformed and ambiguous shapes for custom deserializers
-
-Custom serde code is high risk. Review field precedence, unknown fields, missing discriminators, duplicate fields, and fallback behavior.
-
-## Request payloads and method signatures
-
-For every changed method, verify:
-
-- Rust required arguments match Telegram required arguments
-- optional setters serialize to the exact Telegram field names
-- integer types can represent the documented range
-- `Into` and `collect` conversions are appropriate
-- return type matches the API
-- inline and non-inline sibling methods remain consistent
-- all requester adaptors receive the new method or parameter
-- generated code remains deterministic
-
-Avoid narrowing integer types merely because current examples are small. Use the smallest type that covers the full documented range.
-
-## Multipart and `InputFile`
-
-Any payload containing a local file, bytes, or a nested `InputFile` must use multipart transport.
-
-A correct multipart implementation must preserve this invariant:
-
-```text
-Every serialized attach://<id> has exactly one multipart file part named <id>,
-and every multipart file part is referenced by exactly one intended attach://<id>.
-```
-
-When adding media types, inspect all nested file-bearing fields, including:
-
-- main media
+InputMediaVideo:
+- media
 - thumbnail
 - cover
-- paired live-photo files
-- sticker files
-- files inside arrays or enum variants
-- files inside nested options or rich-message blocks
 
-Tests that only count traversal callbacks are useful but not sufficient for transport-critical code. Add a wire-level integration test when a new request shape reaches `reqwest::multipart::Form`.
+InputMediaLivePhoto:
+- live photo video
+- static photo
 
-For multipart changes, test both immutable and mutable traversal where both APIs exist.
+InputMediaAnimation:
+- media
+- thumbnail
 
-## Renderer and rich content
+InputMediaAudio:
+- media
+- thumbnail
 
-Renderer changes must not silently discard supported Telegram semantics.
+InputMediaDocument:
+- media
+- thumbnail
 
-When adding an entity or rich node:
+InputMediaSticker:
+- media
+```
 
-- implement all supported target formats
-- add tests for optional attributes being present and absent
-- add nested-entity tests when nesting is legal
-- escape text and attribute values correctly
-- document any lossy fallback
+When adding a new nested media type, add:
 
-For structures that cannot be represented in HTML or MarkdownV2, return or record an explicit loss/fallback result rather than pretending the conversion is exact.
+- `files()` coverage
+- `files_mut()` coverage
+- A payload-level traversal test
+- A wire-format test comparing `attach://id` values with actual multipart part names
 
-Keep wire-model work separate from presentation helpers when possible. The API types must remain usable even if a high-level renderer does not support every feature yet.
+A callback-count test alone is not enough for new multipart behavior.
 
-## Testing expectations
+## Renderer rules
 
-### Fast local loop
+The renderer must not silently discard supported semantic entities.
 
-```shell
+For every newly supported entity:
+
+- Define the internal render representation
+- Implement HTML output
+- Implement MarkdownV2 output when Telegram supports it
+- Test optional attributes with both `Some` and `None`
+- Test escaping inside attributes and visible text
+- Test nesting with another entity
+- Define behavior for unsupported or lossy conversions
+
+When a rich structure cannot be represented faithfully in HTML or MarkdownV2, return or record an explicit loss signal. Do not silently flatten complex structures into misleading output.
+
+## Testing strategy
+
+Use the narrowest useful test first, then expand.
+
+Recommended order:
+
+1. Unit test for the changed type or helper
+2. Serde fixture test
+3. Payload serialization test
+4. Multipart traversal test when files are involved
+5. Wire-format multipart test when attachments are involved
+6. Codegen consistency test
+7. Crate-level tests
+8. Full repository checks
+9. GitHub CI matrix
+
+Useful commands:
+
+```bash
+cargo fmt --all -- --check
+
+cargo test -p teloxide-core --features "full nightly" codegen -- --nocapture
+
+cargo test --features "full nightly"
+
+cargo clippy --all-targets --features "full nightly" -- -D warnings
+
+cargo docs
+
+cargo check --examples --features full
+
+cargo check --no-default-features
+```
+
+The repository also provides:
+
+```bash
 just fmt
 just lint
 just test
-```
-
-### Repository local CI approximation
-
-```shell
+just docs
 just ci
 ```
 
-`just ci` is useful but is not the whole GitHub matrix.
+`just ci` is useful locally, but it does not replace the entire GitHub matrix. Do not describe a change as fully validated until the relevant stable, beta, nightly, and MSRV jobs are green.
 
-### Required before a substantial PR
+## Rust toolchains and MSRV
 
-```shell
-cargo fmt --all -- --check
+The pinned development toolchain is defined by `rust-toolchain.toml`:
 
-cargo test -p teloxide-core \
-  --features "full nightly" \
-  codegen \
-  -- --nocapture
-
-cargo test --workspace --features "full nightly"
-
-cargo clippy --workspace \
-  --all-targets \
-  --features "full nightly" \
-  -- -D warnings
-
-cargo check --workspace --examples --features full
-cargo check --workspace --no-default-features
-
-cargo docs
+```text
+nightly-2025-06-12
 ```
 
-The pinned default toolchain is defined in `rust-toolchain.toml`. Do not silently update it as part of an unrelated task.
+Do not casually update it as part of an unrelated API change.
 
-For API, serde, or multipart changes, add focused tests that fail for the original bug. Do not rely only on compilation or broad workspace tests.
+There is currently an existing MSRV inconsistency:
 
-A complete GitHub CI run should cover:
+- Workspace metadata declares Rust 1.82
+- The integration CI has used Rust 1.85
 
-- formatting
-- clippy with warnings denied
-- stable
-- beta
-- pinned nightly
-- MSRV
-- unit tests
-- integration tests
-- documentation tests
-- examples
-- no-default-features
-- rustdoc
+Do not "fix" this incidentally inside a Telegram API PR. Treat MSRV alignment as a separate maintenance task with its own rationale and CI evidence.
 
-## Current integration direction
+## Code style
 
-The integration branch currently targets full Telegram Bot API 10.0 support before moving to 10.2.
+Follow `CODE_STYLE.md`.
 
-At the time this file was introduced, the known method-signature gap was `getBusinessAccountGifts`, whose legacy `exclude_limited` field needed to be replaced by the current split filters:
+Important local conventions include:
+
+- Put trait bounds in `where` clauses
+- Prefer `Self` in implementations
+- Use `.to_owned()` for `&str` to `String`
+- Keep import groups ordered: `std`, external crates, current crate, parent/child modules
+- Use full logging macro paths such as `log::warn!`
+- Write documentation about what public code does, not its internal implementation
+- Keep public docs grammatical and link related types and methods
+- Use `teloxide`, `teloxide-core`, and `teloxide-macros` with their canonical spelling
+
+Avoid broad formatting or unrelated cleanup in an API update. Small diffs are easier to audit against Telegram documentation.
+
+## Agent workflow
+
+Before editing:
+
+1. State the exact target version
+2. Identify the official source used
+3. List affected methods, types, and files
+4. Search for generated consumers and multipart implications
+5. Check whether another agent owns the same files
+
+During editing:
+
+- Work on one coherent concern
+- Keep a short ledger of findings and unresolved questions
+- Add tests with the implementation, not afterward
+- Prefer structural edits over fragile text replacement scripts
+- Do not leave one-shot workflows, generated logs, temporary scripts, or trigger files in the final diff
+- Do not commit diagnostic artifacts
+- Do not rewrite unrelated code
+
+After editing:
+
+1. Run targeted tests
+2. Run codegen twice when generation modifies files; the second run must produce no diff
+3. Review `git diff --stat`
+4. Review the complete diff
+5. Run formatting, clippy, tests, docs, examples, and no-default-features checks
+6. Push a feature branch
+7. Open a PR against `next`
+8. Wait for the full CI matrix
+9. Merge only after all required jobs are green
+
+## Parallel agent coordination
+
+Use separate branches or worktrees for parallel tasks.
+
+Suggested ownership boundaries:
+
+```text
+agent/schema-audit
+    Official changelog/docs diff, method and field inventory
+
+agent/types-serde
+    New objects, enum variants, serde fixtures
+
+agent/methods-codegen
+    schema.ron, custom_v2.json, payload/requester/adaptor generation
+
+agent/multipart
+    InputFile traversal, MultipartPayload, wire-format tests
+
+agent/render
+    HTML, MarkdownV2, rich-message conversion and loss reporting
+```
+
+Do not assign two agents to edit either schema file concurrently.
+
+Every agent handoff must include:
+
+```text
+- Branch and base SHA
+- Exact scope
+- Files changed
+- Tests run
+- Tests not run
+- Known risks
+- Open questions
+- Recommended next action
+```
+
+Review agents must report findings by severity:
+
+```text
+P0 — security, data loss, or repository corruption
+P1 — runtime breakage or invalid Telegram requests
+P2 — incomplete API support, compatibility issue, or missing important test
+P3 — maintainability, documentation, or nonblocking cleanup
+```
+
+Do not inflate stylistic preferences into blockers.
+
+## Current Bot API roadmap
+
+### Bot API 10.0
+
+All methods added specifically in Bot API 10.0 are present.
+
+Known remaining method-surface gap:
+
+```text
+getBusinessAccountGifts
+```
+
+The old parameter:
+
+```text
+exclude_limited
+```
+
+must be replaced or expanded according to the official 10.0 documentation with:
 
 ```text
 exclude_limited_upgradable
@@ -332,109 +457,59 @@ exclude_limited_non_upgradable
 exclude_from_blockchain
 ```
 
-Agents must verify that this TODO is still current before acting on it.
-
-After closing 10.0, perform an independent external audit before changing the coverage claim from a qualified label to complete support.
-
-For the 10.2 update, separate work into reviewable layers:
-
-1. API/object audit
-2. leaf types and IDs
-3. recursive rich-text types
-4. rich block types
-5. rich media and multipart traversal
-6. methods and changed parameters
-7. serde fixtures
-8. renderers and lossy fallback reporting
-9. final external diff
-
-Do not combine the entire 10.2 update and a renderer rewrite into one unreviewable commit.
-
-## Code style
-
-Follow `CODE_STYLE.md`.
-
-Particularly:
-
-- put generic bounds in `where` clauses
-- use `Self` where appropriate
-- prefer `.to_owned()` for `&str` to `String`
-- group imports in repository order
-- use full paths for logging macros
-- write documentation about what code does, not a narration of implementation
-- use the spelling `teloxide`, `teloxide-core`, and `teloxide-macros`
-- use `#[must_use]` for pure result-producing functions
-
-Run rustfmt instead of manually imitating its output.
-
-## Scope discipline
-
-Keep commits focused.
-
-Good separation examples:
-
-- schema and generated method update
-- new API types and serde fixtures
-- multipart traversal fix and transport tests
-- renderer support and renderer tests
-- documentation or agent instructions
-
-Avoid mixing unrelated dependency upgrades, formatting churn, renames, renderer redesigns, and API additions in one commit.
-
-Do not change existing public behavior outside the task scope without calling it out explicitly.
-
-## Commit and PR requirements
-
-Use clear imperative commit subjects, for example:
+Preserve and verify the remaining filters:
 
 ```text
-feat: add Bot API 10.2 rich message types
-fix: preserve video covers in multipart requests
-test: verify sendPoll attachment mapping
-docs: document agent development workflow
+exclude_unsaved
+exclude_saved
+exclude_unlimited
+exclude_unique
+sort_by_price
+offset
+limit
 ```
 
-PR descriptions must include:
+After this change, run an independent external audit of all 10.0 methods, parameters, return types, objects, fields, enum variants, and multipart behavior before changing the coverage label to exhaustive.
 
-- what changed
-- why it changed
-- official API version or source when relevant
-- generated files affected
-- multipart implications
-- tests added
-- commands run
-- known omissions or follow-up work
+### Bot API 10.2
 
-Do not claim a check was run unless it actually completed successfully.
+Do not start implementation by editing generated methods blindly.
 
-Do not merge a PR merely because codegen and compilation are green. For transport and serde changes, require behavior tests.
+Recommended order:
 
-## Agent reporting format
+1. Produce a 10.0 → 10.2 official changelog and schema diff
+2. Add foundational types
+3. Add recursive rich-text and rich-block types
+4. Add media/input-file traversal
+5. Add methods and changed parameters
+6. Regenerate request surfaces
+7. Add serde fixtures
+8. Add multipart wire tests
+9. Add renderer or conversion support
+10. Run the full matrix
 
-When finishing a task, report:
-
-1. Summary of changes
-2. Files or subsystems touched
-3. Tests and commands run with outcomes
-4. Remaining risks or unverified assumptions
-5. Recommended next step
-
-When blocked, provide the exact error, file, and smallest reproducer. Do not hide uncertainty behind a confident summary.
+Rich-message work must treat structured rich content as the primary model. HTML and MarkdownV2 are compatibility outputs, not the canonical internal representation.
 
 ## Definition of done
 
-A task is done only when:
+A Telegram Bot API change is done only when:
 
-- the implementation matches the intended Telegram API version
-- both local schemas are synchronized when methods changed
-- generated output is regenerated and reviewed
-- serde behavior is covered for changed wire shapes
-- multipart invariants are tested for new file-bearing paths
-- focused regression tests exist
-- formatting and clippy pass
-- relevant workspace and feature combinations pass
-- documentation and changelog are updated when user-visible behavior changed
-- the PR targets `next`
-- remaining gaps are stated explicitly
-
-Correctness at the Telegram wire boundary is more important than making local schemas, derives, or generated code look convenient.
+- Official versioned docs were checked
+- All affected types are represented
+- Both method schemas are updated
+- Generated code is synchronized
+- Required request and adaptor surfaces exist
+- Multipart transport is correct
+- Serde behavior is covered
+- Runtime-relevant behavior has tests
+- The second codegen run is clean
+- Formatting is clean
+- Clippy passes with warnings denied
+- Tests pass
+- Docs build
+- Examples build
+- No-default-features builds
+- Full GitHub CI is green
+- The final diff contains no temporary automation or diagnostics
+- The PR targets `next`, not `master`
+- The claimed coverage level matches the evidence

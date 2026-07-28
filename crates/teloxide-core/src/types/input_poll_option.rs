@@ -69,6 +69,11 @@ impl InputPollOption {
     pub fn text_entities(self, text_entities: Vec<MessageEntity>) -> Self {
         Self { formatting: Some(InputPollOptionFormatting::TextEntities(text_entities)), ..self }
     }
+
+    pub fn media(mut self, media: InputPollOptionMedia) -> Self {
+        self.media = Some(media);
+        self
+    }
 }
 
 impl From<String> for InputPollOption {

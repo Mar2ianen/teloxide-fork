@@ -15,58 +15,30 @@ jobs:
         with:
           ref: fix/robustness-panics-and-updates
 
-      - name: Apply compile fixes
-        shell: python
-        run: |
-          from pathlib import Path
-
-          path = Path("crates/teloxide-core/src/types/message.rs")
-          text = path.read_text()
-          old = """            User(_) => return None,
-            // Similarly to user chats, there is no way to create a link to a message in a normal,
-            // private group.
-            //
-            // (public groups are always supergroup which are in turn channels).
-            Group(_) => return None,
-            Channel(id) => id,
-"""
-          new = """            Some(User(_)) => return None,
-            // Similarly to user chats, there is no way to create a link to a message in a normal,
-            // private group.
-            //
-            // (public groups are always supergroup which are in turn channels).
-            Some(Group(_)) | None => return None,
-            Some(Channel(id)) => id,
-"""
-          if text.count(old) != 1:
-              raise SystemExit("Message::url_of match not found")
-          path.write_text(text.replace(old, new, 1))
-
-          path = Path("crates/teloxide-core/src/types/chat_id.rs")
-          text = path.read_text()
-          old = "ChatId(MAX_USER_ID + 1)"
-          new = "ChatId(super::MAX_USER_ID + 1)"
-          if text.count(old) != 1:
-              raise SystemExit("MAX_USER_ID test use not found")
-          path.write_text(text.replace(old, new, 1))
-
-          Path(".github/diagnostic-trigger").unlink(missing_ok=True)
-          Path(".github/robustness-check.log").unlink(missing_ok=True)
-
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2025-06-12
-          components: rustfmt
+          toolchain: beta
 
-      - run: cargo fmt --all
+      - name: Capture concise failure log
+        shell: bash
+        run: |
+          set +e
+          cargo +beta test --tests --features full -- --nocapture > /tmp/test.log 2>&1
+          status=$?
+          {
+            echo "exit_status=$status"
+            echo
+            grep -n -E "^(failures:|test result:|---- .* stdout ----)|panicked at|FAILED|error:" /tmp/test.log || true
+            echo
+            echo "--- tail ---"
+            tail -n 250 /tmp/test.log
+          } > .github/robustness-test-failure.log
+          exit 0
 
-      - name: Commit fixes
+      - name: Commit diagnostics
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add crates/teloxide-core/src/types/message.rs \
-                  crates/teloxide-core/src/types/chat_id.rs \
-                  .github/diagnostic-trigger \
-                  .github/robustness-check.log
-          git commit -m "fix: handle unknown chat IDs in message links"
+          git add .github/robustness-test-failure.log
+          git commit -m "ci: capture robustness test failure"
           git push origin HEAD:fix/robustness-panics-and-updates

@@ -1,9 +1,10 @@
 on:
   push:
-    branches: [ master ]
+    branches: [ master, review/bot-api-10.0 ]
   pull_request:
     branches: [ master ]
   merge_group:
+  workflow_dispatch:
 
 name: Continuous integration
 

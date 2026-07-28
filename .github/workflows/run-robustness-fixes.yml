@@ -1,10 +1,11 @@
-# Trigger after workflow registration.
+# Temporary workflow; removed after the fixer runs.
 name: Run robustness fixer
 
 on:
-  push:
+  pull_request:
     branches: [ master ]
-    paths: [ .github/workflows/run-robustness-fixes.yml ]
+    paths: [ .github/trigger-robustness ]
+  workflow_dispatch:
 
 permissions:
   contents: write

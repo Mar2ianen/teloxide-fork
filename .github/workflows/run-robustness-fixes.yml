@@ -16,33 +16,8 @@ jobs:
         with:
           ref: fix/robustness-panics-and-updates
 
-      - name: Apply embedded fixer
-        shell: python
-        run: |
-          from pathlib import Path
-          import subprocess
-          import traceback
-
-          workflow = Path('.github/workflows/apply-robustness-fixes.yml').read_text()
-          block = workflow.split('      - name: Apply fixes\n', 1)[1]
-          block = block.split('      - uses: dtolnay/rust-toolchain@master\n', 1)[0]
-          script = block.split('        run: |\n', 1)[1]
-          script = script.split(
-              '          replace(\n              "crates/teloxide-core/src/serde_multipart/error.rs"',
-              1,
-          )[0]
-          script = '\n'.join(
-              line[10:] if line.startswith('          ') else line
-              for line in script.splitlines()
-          )
-          Path('.github/robustness-fixer-error.txt').unlink(missing_ok=True)
-
-          try:
-              exec(script, {'__name__': '__main__'})
-          except BaseException:
-              details = traceback.format_exc()
-              subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
-              Path('.github/robustness-fixer-error.txt').write_text(details)
+      - name: Apply fixes
+        run: python .github/scripts/robustness_fixer.py
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -51,7 +26,7 @@ jobs:
 
       - run: cargo fmt --all
 
-      - name: Commit result
+      - name: Commit fixes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -60,6 +35,7 @@ jobs:
                   crates/teloxide-core/src/types/update.rs \
                   crates/teloxide-core/src/serde_multipart/unserializers/input_file.rs \
                   crates/teloxide-core/src/serde_multipart/unserializers.rs \
+                  crates/teloxide-core/src/serde_multipart/error.rs \
                   .github/robustness-fixer-error.txt
           git commit -m "fix: harden malformed Telegram data handling"
           git push origin HEAD:fix/robustness-panics-and-updates

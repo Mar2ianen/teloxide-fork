@@ -72,7 +72,9 @@ impl ChatId {
                 Channel((MAX_MARKED_CHANNEL_ID - id) as _)
             }
             id @ MIN_USER_ID..=MAX_USER_ID => User(UserId(id as _)),
-            id => panic!("malformed chat id: {id}"),
+            // Preserve forward compatibility if Telegram extends the currently known ID ranges.
+            id if id > MAX_USER_ID => User(UserId(id as _)),
+            id => Channel((MAX_MARKED_CHANNEL_ID - id) as _),
         }
     }
 }
@@ -153,6 +155,18 @@ mod tests {
 
         // rust 2021 when :(
         ids.iter().copied().for_each(assert_identity);
+    }
+
+    #[test]
+    fn extended_ranges_are_classified_without_panicking() {
+        let future_user = ChatId(super::MAX_USER_ID + 1);
+        assert!(future_user.is_user());
+        assert_eq!(future_user.as_user(), Some(UserId((super::MAX_USER_ID + 1) as u64)));
+
+        let future_channel = ChatId(i64::MIN);
+        assert!(future_channel.is_channel_or_supergroup());
+        assert!(!future_channel.is_user());
+        assert!(!future_channel.is_group());
     }
 
     #[test]

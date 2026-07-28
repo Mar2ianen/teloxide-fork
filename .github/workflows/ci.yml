@@ -3,7 +3,6 @@ name: Continuous integration
 on:
   pull_request:
     branches: [ master ]
-    paths: [ .github/trigger-robustness ]
 
 permissions:
   contents: write

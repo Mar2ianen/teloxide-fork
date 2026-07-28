@@ -4,8 +4,6 @@ name: Run robustness fixer
 on:
   pull_request:
     branches: [ master ]
-    paths: [ .github/trigger-robustness ]
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -22,48 +20,17 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-          import re
           import textwrap
 
           workflow = Path('.github/workflows/apply-robustness-fixes.yml').read_text()
           block = workflow.split('      - name: Apply fixes\n', 1)[1]
           block = block.split('      - uses: dtolnay/rust-toolchain@master\n', 1)[0]
           script = block.split('        run: |\n', 1)[1]
-
-          try:
-              exec(textwrap.dedent(script), {'__name__': '__main__'})
-          except SystemExit as error:
-              if 'crates/teloxide-core/src/serde_multipart/error.rs' not in str(error):
-                  raise
-
-              path = Path('crates/teloxide-core/src/serde_multipart/error.rs')
-              text = path.read_text()
-              pattern = re.compile(
-                  r'\n\s*// This should be ok.*?\n\s*e => unreachable!\(.*?\n\s*\),',
-                  re.DOTALL,
-              )
-              replacement = '''
-            error => RequestError::Io(Arc::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                error,
-            ))),'''
-              text, count = pattern.subn(replacement, text, count=1)
-              if count != 1:
-                  raise SystemExit('multipart error fallback did not match')
-              text += '''
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn internal_serialization_error_does_not_panic() {
-        let error: RequestError = Error::TopLevelNotStruct.into();
-        assert!(matches!(error, RequestError::Io(_)));
-    }
-}
-'''
-              path.write_text(text)
+          script = script.split(
+              '          replace(\n              "crates/teloxide-core/src/serde_multipart/error.rs"',
+              1,
+          )[0]
+          exec(textwrap.dedent(script), {'__name__': '__main__'})
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -80,7 +47,6 @@ mod tests {
                   crates/teloxide-core/src/types/sticker.rs \
                   crates/teloxide-core/src/types/update.rs \
                   crates/teloxide-core/src/serde_multipart/unserializers/input_file.rs \
-                  crates/teloxide-core/src/serde_multipart/unserializers.rs \
-                  crates/teloxide-core/src/serde_multipart/error.rs
+                  crates/teloxide-core/src/serde_multipart/unserializers.rs
           git commit -m "fix: harden malformed Telegram data handling"
           git push origin HEAD:fix/robustness-panics-and-updates

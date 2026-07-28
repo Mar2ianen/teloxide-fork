@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/home/runner/work/_temp/085ce603-77a3-49ca-ac65-e45584d383c7.py", line 16, in <module>
+    exec(textwrap.dedent(script), {'__name__': '__main__'})
+  File "<string>", line 1
+    from pathlib import Path
+IndentationError: unexpected indent

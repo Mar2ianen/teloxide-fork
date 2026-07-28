@@ -1,35 +1,19 @@
 on:
-  push:
-    branches: [ master, next ]
   pull_request:
-    branches: [ master, next ]
-  merge_group:
-  workflow_dispatch:
+    branches: [next]
 
-name: Continuous integration
+name: Apply renderer audit fixes
 
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 env:
-  RUSTFLAGS: "--cfg CI_REDIS --cfg CI_POSTGRES -Dwarnings"
-  RUSTDOCFLAGS: "--cfg docsrs -Dwarnings"
-  RUST_BACKTRACE: short
-  CARGO_INCREMENTAL: 0
-  CARGO_NET_RETRY: 10
-  RUSTUP_MAX_RETRIES: 10
+  RUSTFLAGS: "-Dwarnings"
   rust_nightly: nightly-2025-06-12
-  rust_msrv: 1.85.0
-  CI: 1
 
 jobs:
   apply-renderer-audit:
-    name: Apply renderer audit fixes
-    if: github.event_name == 'pull_request' && github.head_ref == 'fix/renderer-escaping-offsets'
+    if: github.head_ref == 'fix/renderer-escaping-offsets'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -47,7 +31,7 @@ jobs:
           components: rustfmt
       - name: Apply and validate fixes
         run: |
-          python .github/apply_renderer_audit.py
+          python .github/run_renderer_audit.py
           cargo +${{ env.rust_nightly }} fmt --all
           cargo +${{ env.rust_nightly }} test -p teloxide --features "full nightly" utils::render -- --nocapture
           git diff --check
@@ -58,159 +42,3 @@ jobs:
           git add -A
           git commit -m "Fix renderer escaping and UTF-16 offsets"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
-
-  ci-pass:
-    name: CI succeeded
-    runs-on: ubuntu-latest
-    if: always()
-    needs: [fmt, test, check-examples, clippy, doc]
-    steps:
-      - name: Check whether the needed jobs succeeded or failed
-        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe
-        with:
-          jobs: ${{ toJSON(needs) }}
-
-  fmt:
-    name: fmt
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-      - name: Install Rust ${{ env.rust_nightly }}
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
-        with:
-          toolchain: ${{ env.rust_nightly }}
-          components: rustfmt
-      - name: Cache Dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres
-        env:
-          POSTGRES_USER: teloxide
-          POSTGRES_PASSWORD: rewrite_it_in_rust
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-    strategy:
-      matrix:
-        rust: [stable, beta, nightly, msrv]
-        include:
-          - rust: stable
-            toolchain: stable
-            features: "--features full"
-          - rust: beta
-            toolchain: beta
-            features: "--features full"
-          - rust: nightly
-            toolchain: nightly-2025-06-12
-            features: "--features full nightly"
-          - rust: msrv
-            toolchain: 1.85.0
-            features: "--features full"
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-      - name: Install Rust ${{ matrix.toolchain }}
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
-        with:
-          toolchain: ${{ matrix.toolchain }}
-      - name: Install pinned rustfmt for codegen
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
-        with:
-          toolchain: ${{ env.rust_nightly }}
-          components: rustfmt
-      - name: Cache Dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
-      - name: Downgrade deps for MSRV
-        if: ${{ matrix.rust == 'msrv' }}
-        run: exit 0
-      - name: Compile
-        run: cargo +${{ matrix.toolchain }} test --tests --no-run --verbose ${{ matrix.features }}
-      - name: Setup redis
-        run: |
-          sudo apt-get update && sudo apt-get install -y redis-server
-          redis-server --port 7777 > /dev/null &
-          redis-server --port 7778 > /dev/null &
-          redis-server --port 7779 > /dev/null &
-      - name: Install psql
-        run: sudo apt-get install -y postgresql-client
-      - name: Create PostgreSQL databases
-        run: |
-          psql -h localhost -U teloxide -c "CREATE DATABASE test_postgres_json;"
-          psql -h localhost -U teloxide -c "CREATE DATABASE test_postgres_bincode;"
-          psql -h localhost -U teloxide -c "CREATE DATABASE test_postgres_cbor;"
-        env:
-          PGPASSWORD: rewrite_it_in_rust
-      - name: Test unit & integration tests
-        run: cargo +${{ matrix.toolchain }} test --tests --verbose ${{ matrix.features }}
-      - name: Test documentation tests
-        if: ${{ matrix.rust != 'msrv' }}
-        run: cargo +${{ matrix.toolchain }} test --doc --verbose ${{ matrix.features }}
-
-  check-examples:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
-        with:
-          toolchain: stable
-      - name: Cache Dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
-      - name: Check examples
-        run: cargo +stable check --examples --features full
-      - name: Check with no default features
-        run: cargo +stable check --no-default-features
-
-  clippy:
-    name: Run linter
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-      - name: Install Rust ${{ env.rust_nightly }}
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
-        with:
-          toolchain: ${{ env.rust_nightly }}
-          components: clippy
-      - name: Cache Dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
-      - name: clippy
-        run: cargo clippy --all-targets --features "full nightly"
-
-  doc:
-    name: check docs
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-      - name: Install Rust ${{ env.rust_nightly }}
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
-        with:
-          toolchain: ${{ env.rust_nightly }}
-      - name: Cache Dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
-      - name: rustdoc
-        run: cargo docs

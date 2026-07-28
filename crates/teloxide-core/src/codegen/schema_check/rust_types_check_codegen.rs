@@ -901,7 +901,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "nightly")]
     #[test]
     fn codegen_types_checking() {
         let generator = "codegen_schema_types_check";

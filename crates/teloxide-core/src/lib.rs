@@ -130,5 +130,5 @@ mod bot;
 mod serde_multipart;
 mod util;
 
-#[cfg(all(test, feature = "nightly"))]
+#[cfg(test)]
 mod codegen;

@@ -13,7 +13,6 @@ use crate::codegen::{
     to_uppercase,
 };
 
-#[cfg(feature = "nightly")]
 #[test]
 fn codegen_payloads() {
     let base_path = project_root().join("src/payloads/");

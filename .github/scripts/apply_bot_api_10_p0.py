@@ -272,14 +272,14 @@ render = replace_once(
 )
 render = replace_once(
     render,
-    '''            MEK::CustomEmoji { custom_emoji_id } => Kind::CustomEmoji(custom_emoji_id),
-            _ => continue,''',
-    '''            MEK::CustomEmoji { custom_emoji_id } => Kind::CustomEmoji(custom_emoji_id),
-            MEK::DateTime { unix_time: Some(unix_time), date_time_format } => Kind::DateTime {
-                unix_time: *unix_time,
-                date_time_format: date_time_format.as_deref(),
-            },
-            _ => continue,''',
+    '''                MEK::CustomEmoji { custom_emoji_id } => Kind::CustomEmoji(custom_emoji_id),
+                _ => continue,''',
+    '''                MEK::CustomEmoji { custom_emoji_id } => Kind::CustomEmoji(custom_emoji_id),
+                MEK::DateTime { unix_time: Some(unix_time), date_time_format } => Kind::DateTime {
+                    unix_time: *unix_time,
+                    date_time_format: date_time_format.as_deref(),
+                },
+                _ => continue,''',
     "DateTime renderer mapping",
 )
 date_time_test = '''    #[test]
@@ -325,19 +325,19 @@ tag = replace_once(
 )
 tag = replace_once(
     tag,
-    '''            Kind::CustomEmoji(custom_emoji_id) => match tag.place {
-                Place::Start => self.custom_emoji.start.len() + custom_emoji_id.0.len(),
-                Place::MidNewLine => unreachable!(),
-                Place::End => self.custom_emoji.middle.len() + self.custom_emoji.end.len(),
-            },''',
-    '''            Kind::CustomEmoji(custom_emoji_id) => match tag.place {
-                Place::Start => self.custom_emoji.start.len() + custom_emoji_id.0.len(),
-                Place::MidNewLine => unreachable!(),
-                Place::End => self.custom_emoji.middle.len() + self.custom_emoji.end.len(),
-            },
-            Kind::DateTime { unix_time, date_time_format } => {
-                64 + unix_time.to_string().len() + date_time_format.map_or(0, str::len)
-            }''',
+    '''                Kind::CustomEmoji(custom_emoji_id) => match tag.place {
+                    Place::Start => self.custom_emoji.start.len() + custom_emoji_id.0.len(),
+                    Place::MidNewLine => unreachable!(),
+                    Place::End => self.custom_emoji.middle.len() + self.custom_emoji.end.len(),
+                },''',
+    '''                Kind::CustomEmoji(custom_emoji_id) => match tag.place {
+                    Place::Start => self.custom_emoji.start.len() + custom_emoji_id.0.len(),
+                    Place::MidNewLine => unreachable!(),
+                    Place::End => self.custom_emoji.middle.len() + self.custom_emoji.end.len(),
+                },
+                Kind::DateTime { unix_time, date_time_format } => {
+                    64 + unix_time.to_string().len() + date_time_format.map_or(0, str::len)
+                }''',
     "DateTime tag capacity",
 )
 tag_path.write_text(tag)

@@ -1,7 +1,0 @@
-Traceback (most recent call last):
-  File "/home/runner/work/teloxide-fork/teloxide-fork/.github/scripts/apply_bot_api_10_p0.py", line 273, in <module>
-    render = replace_once(
-             ^^^^^^^^^^^^^
-  File "/home/runner/work/teloxide-fork/teloxide-fork/.github/scripts/apply_bot_api_10_p0.py", line 50, in replace_once
-    raise RuntimeError(f"{description}: expected one match, got {count}")
-RuntimeError: DateTime renderer mapping: expected one match, got 0

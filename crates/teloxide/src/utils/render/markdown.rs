@@ -76,6 +76,17 @@ fn write_tag(tag: &Tag, buf: &mut String) {
             )
             .unwrap(),
         },
+        Kind::DateTime { unix_time, date_time_format } => match tag.place {
+            Place::Start => buf.push_str("!["),
+            Place::MidNewLine => unreachable!(),
+            Place::End => {
+                write!(buf, "](tg://time?unix={unix_time}").unwrap();
+                if let Some(format) = date_time_format {
+                    write!(buf, "&format={format}").unwrap();
+                }
+                buf.push(')');
+            }
+        },
     }
 }
 

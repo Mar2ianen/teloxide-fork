@@ -63,10 +63,7 @@ fn multipart_parts(body: &[u8], boundary: &str) -> BTreeMap<String, Vec<u8>> {
             .expect("multipart part name")
             .to_owned();
 
-        assert!(
-            parts.insert(name, contents.as_bytes().to_vec()).is_none(),
-            "duplicate part"
-        );
+        assert!(parts.insert(name, contents.as_bytes().to_vec()).is_none(), "duplicate part");
     }
 
     parts
@@ -88,22 +85,12 @@ fn collect_attach_ids(value: &Value, into: &mut Vec<String>) {
 #[tokio::test]
 async fn send_poll_attach_ids_match_multipart_file_parts() {
     let form = to_form_ref(&populated_poll()).unwrap().await;
-    let mut request = Client::new()
-        .post("http://localhost.invalid")
-        .multipart(form)
-        .build()
-        .unwrap();
+    let mut request =
+        Client::new().post("http://localhost.invalid").multipart(form).build().unwrap();
 
     let content_type = request.headers()[CONTENT_TYPE].to_str().unwrap();
     let boundary = content_type.split("boundary=").nth(1).expect("multipart boundary");
-    let body = request
-        .body_mut()
-        .take()
-        .unwrap()
-        .collect()
-        .await
-        .unwrap()
-        .to_bytes();
+    let body = request.body_mut().take().unwrap().collect().await.unwrap().to_bytes();
     let parts = multipart_parts(&body, boundary);
 
     let mut attach_ids = Vec::new();

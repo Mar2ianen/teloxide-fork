@@ -30,7 +30,7 @@ impl InputStoryContent {
     }
 }
 
-/// Describes a regular gift owned by a user or a chat.
+/// Describes a photo to post as a story.
 #[derive(Clone, Debug, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputStoryContentPhoto {
@@ -44,7 +44,7 @@ pub struct InputStoryContentPhoto {
     pub photo: InputFile,
 }
 
-/// Describes a unique gift received and owned by a user or a chat.
+/// Describes a video to post as a story.
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]

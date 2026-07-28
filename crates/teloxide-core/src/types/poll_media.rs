@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::types::{
-    Animation, Audio, Document, LivePhoto, Location, PhotoSize, Sticker, Venue, Video,
+    Animation, Audio, Document, InputFile, LivePhoto, Location, PhotoSize, Sticker, Venue, Video,
 };
 
 /// This object describes media attached to a poll description, quiz
@@ -59,4 +59,122 @@ pub enum InputPollOptionMedia {
     Sticker(crate::types::InputMediaSticker),
     Venue(crate::types::InputMediaVenue),
     Video(crate::types::InputMediaVideo),
+}
+
+impl InputPollMedia {
+    pub(crate) fn files(&self) -> impl Iterator<Item = &InputFile> {
+        let mut files = Vec::new();
+
+        match self {
+            Self::Animation(media) => {
+                files.push(&media.media);
+                files.extend(media.thumbnail.iter());
+            }
+            Self::Audio(media) => {
+                files.push(&media.media);
+                files.extend(media.thumbnail.iter());
+            }
+            Self::Document(media) => {
+                files.push(&media.media);
+                files.extend(media.thumbnail.iter());
+            }
+            Self::LivePhoto(media) => {
+                files.push(&media.media);
+                files.push(&media.photo);
+            }
+            Self::Photo(media) => files.push(&media.media),
+            Self::Video(media) => {
+                files.push(&media.media);
+                files.extend(media.thumbnail.iter());
+                files.extend(media.cover.iter());
+            }
+            Self::Location(_) | Self::Venue(_) => {}
+        }
+
+        files.into_iter()
+    }
+
+    pub(crate) fn files_mut(&mut self) -> impl Iterator<Item = &mut InputFile> {
+        let mut files = Vec::new();
+
+        match self {
+            Self::Animation(media) => {
+                files.push(&mut media.media);
+                files.extend(media.thumbnail.iter_mut());
+            }
+            Self::Audio(media) => {
+                files.push(&mut media.media);
+                files.extend(media.thumbnail.iter_mut());
+            }
+            Self::Document(media) => {
+                files.push(&mut media.media);
+                files.extend(media.thumbnail.iter_mut());
+            }
+            Self::LivePhoto(media) => {
+                files.push(&mut media.media);
+                files.push(&mut media.photo);
+            }
+            Self::Photo(media) => files.push(&mut media.media),
+            Self::Video(media) => {
+                files.push(&mut media.media);
+                files.extend(media.thumbnail.iter_mut());
+                files.extend(media.cover.iter_mut());
+            }
+            Self::Location(_) | Self::Venue(_) => {}
+        }
+
+        files.into_iter()
+    }
+}
+
+impl InputPollOptionMedia {
+    pub(crate) fn files(&self) -> impl Iterator<Item = &InputFile> {
+        let mut files = Vec::new();
+
+        match self {
+            Self::Animation(media) => {
+                files.push(&media.media);
+                files.extend(media.thumbnail.iter());
+            }
+            Self::LivePhoto(media) => {
+                files.push(&media.media);
+                files.push(&media.photo);
+            }
+            Self::Photo(media) => files.push(&media.media),
+            Self::Sticker(media) => files.push(&media.media),
+            Self::Video(media) => {
+                files.push(&media.media);
+                files.extend(media.thumbnail.iter());
+                files.extend(media.cover.iter());
+            }
+            Self::Location(_) | Self::Venue(_) => {}
+        }
+
+        files.into_iter()
+    }
+
+    pub(crate) fn files_mut(&mut self) -> impl Iterator<Item = &mut InputFile> {
+        let mut files = Vec::new();
+
+        match self {
+            Self::Animation(media) => {
+                files.push(&mut media.media);
+                files.extend(media.thumbnail.iter_mut());
+            }
+            Self::LivePhoto(media) => {
+                files.push(&mut media.media);
+                files.push(&mut media.photo);
+            }
+            Self::Photo(media) => files.push(&mut media.media),
+            Self::Sticker(media) => files.push(&mut media.media),
+            Self::Video(media) => {
+                files.push(&mut media.media);
+                files.extend(media.thumbnail.iter_mut());
+                files.extend(media.cover.iter_mut());
+            }
+            Self::Location(_) | Self::Venue(_) => {}
+        }
+
+        files.into_iter()
+    }
 }

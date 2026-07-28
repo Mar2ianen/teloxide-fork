@@ -1,0 +1,450 @@
+info: syncing channel updates for nightly-2025-06-12-x86_64-unknown-linux-gnu
+info: latest update on 2025-06-12 for version 1.89.0-nightly (e703dff8f 2025-06-11)
+info: component rustfmt is up to date
+info: downloading component clippy
+[1m[32m    Updating[0m crates.io index
+[1m[32m Downloading[0m crates ...
+[1m[32m  Downloaded[0m bytemuck v1.24.0
+[1m[32m  Downloaded[0m is-terminal v0.4.16
+[1m[32m  Downloaded[0m hex v0.4.3
+[1m[32m  Downloaded[0m ipnet v2.11.0
+[1m[32m  Downloaded[0m ron v0.8.1
+[1m[32m  Downloaded[0m reqwest v0.12.23
+[1m[32m  Downloaded[0m rustls-pki-types v1.14.0
+[1m[32m  Downloaded[0m ref-cast v1.0.25
+[1m[32m  Downloaded[0m ref-cast-impl v1.0.25
+[1m[32m  Downloaded[0m ryu v1.0.20
+[1m[32m  Downloaded[0m try-lock v0.2.5
+[1m[32m  Downloaded[0m tokio-macros v2.5.0
+[1m[32m  Downloaded[0m iana-time-zone v0.1.64
+[1m[32m  Downloaded[0m thiserror v2.0.17
+[1m[32m  Downloaded[0m vecrem v0.1.0
+[1m[32m  Downloaded[0m foreign-types v0.3.2
+[1m[32m  Downloaded[0m time-core v0.1.6
+[1m[32m  Downloaded[0m zerofrom-derive v0.1.6
+[1m[32m  Downloaded[0m unicode-xid v0.2.6
+[1m[32m  Downloaded[0m zerofrom v0.1.6
+[1m[32m  Downloaded[0m want v0.3.1
+[1m[32m  Downloaded[0m powerfmt v0.2.0
+[1m[32m  Downloaded[0m thiserror-impl v2.0.17
+[1m[32m  Downloaded[0m stacker v0.1.22
+[1m[32m  Downloaded[0m tokio-native-tls v0.3.1
+[1m[32m  Downloaded[0m zeroize v1.8.2
+[1m[32m  Downloaded[0m writeable v0.6.1
+[1m[32m  Downloaded[0m zerovec-derive v0.11.1
+[1m[32m  Downloaded[0m zmij v1.0.21
+[1m[32m  Downloaded[0m pin-project-lite v0.2.16
+[1m[32m  Downloaded[0m quote v1.0.41
+[1m[32m  Downloaded[0m schemars_derive v1.0.4
+[1m[32m  Downloaded[0m synstructure v0.13.2
+[1m[32m  Downloaded[0m tinystr v0.8.1
+[1m[32m  Downloaded[0m serde_with_macros v3.15.0
+[1m[32m  Downloaded[0m uuid v1.18.1
+[1m[32m  Downloaded[0m tracing-core v0.1.34
+[1m[32m  Downloaded[0m yansi v1.0.1
+[1m[32m  Downloaded[0m tracing v0.1.41
+[1m[32m  Downloaded[0m zerotrie v0.2.2
+[1m[32m  Downloaded[0m schemars v1.0.4
+[1m[32m  Downloaded[0m tower v0.5.2
+[1m[32m  Downloaded[0m tokio-util v0.7.16
+[1m[32m  Downloaded[0m zerovec v0.11.4
+[1m[32m  Downloaded[0m time v0.3.44
+[1m[32m  Downloaded[0m serde_json v1.0.149
+[1m[32m  Downloaded[0m serde_with v3.15.0
+[1m[32m  Downloaded[0m base64 v0.21.7
+[1m[32m  Downloaded[0m pin-project v1.1.10
+[1m[32m  Downloaded[0m vcpkg v0.2.15
+[1m[32m  Downloaded[0m mio v1.0.4
+[1m[32m  Downloaded[0m memchr v2.7.6
+[1m[32m  Downloaded[0m syn v2.0.106
+[1m[32m  Downloaded[0m hashbrown v0.15.2
+[1m[32m  Downloaded[0m regex-syntax v0.8.7
+[1m[32m  Downloaded[0m idna v1.1.0
+[1m[32m  Downloaded[0m hyper v1.7.0
+[1m[32m  Downloaded[0m futures-util v0.3.31
+[1m[32m  Downloaded[0m icu_properties_data v2.0.1
+[1m[32m  Downloaded[0m itertools v0.14.0
+[1m[32m  Downloaded[0m aho-corasick v1.1.3
+[1m[32m  Downloaded[0m iri-string v0.7.8
+[1m[32m  Downloaded[0m chrono v0.4.42
+[1m[32m  Downloaded[0m openssl v0.10.78
+[1m[32m  Downloaded[0m hyper-util v0.1.17
+[1m[32m  Downloaded[0m icu_normalizer v2.0.0
+[1m[32m  Downloaded[0m icu_collections v2.0.0
+[1m[32m  Downloaded[0m icu_locale_core v2.0.0
+[1m[32m  Downloaded[0m regex-automata v0.4.12
+[1m[32m  Downloaded[0m pretty_assertions v1.4.1
+[1m[32m  Downloaded[0m icu_provider v2.0.0
+[1m[32m  Downloaded[0m darling_core v0.21.3
+[1m[32m  Downloaded[0m proc-macro2 v1.0.101
+[1m[32m  Downloaded[0m futures v0.3.31
+[1m[32m  Downloaded[0m openssl-sys v0.9.114
+[1m[32m  Downloaded[0m http v1.3.1
+[1m[32m  Downloaded[0m hashbrown v0.12.3
+[1m[32m  Downloaded[0m derive_more v2.0.1
+[1m[32m  Downloaded[0m tower-http v0.6.6
+[1m[32m  Downloaded[0m regex v1.12.1
+[1m[32m  Downloaded[0m derive_more-impl v2.0.1
+[1m[32m  Downloaded[0m tokio v1.47.1
+[1m[32m  Downloaded[0m indexmap v1.9.3
+[1m[32m  Downloaded[0m indexmap v2.11.4
+[1m[32m  Downloaded[0m url v2.5.7
+[1m[32m  Downloaded[0m serde v1.0.228
+[1m[32m  Downloaded[0m log v0.4.28
+[1m[32m  Downloaded[0m num-traits v0.2.19
+[1m[32m  Downloaded[0m env_logger v0.10.2
+[1m[32m  Downloaded[0m base64 v0.22.1
+[1m[32m  Downloaded[0m schemars v0.9.0
+[1m[32m  Downloaded[0m libc v0.2.177
+[1m[32m  Downloaded[0m diff v0.1.13
+[1m[32m  Downloaded[0m once_cell v1.21.3
+[1m[32m  Downloaded[0m unicode-ident v1.0.19
+[1m[32m  Downloaded[0m socket2 v0.6.1
+[1m[32m  Downloaded[0m serde_core v1.0.228
+[1m[32m  Downloaded[0m icu_normalizer_data v2.0.0
+[1m[32m  Downloaded[0m cc v1.2.41
+[1m[32m  Downloaded[0m bytes v1.11.1
+[1m[32m  Downloaded[0m smallvec v1.15.1
+[1m[32m  Downloaded[0m serde_derive v1.0.228
+[1m[32m  Downloaded[0m serde_derive_internals v0.29.1
+[1m[32m  Downloaded[0m litemap v0.8.0
+[1m[32m  Downloaded[0m darling v0.21.3
+[1m[32m  Downloaded[0m cool_asserts v2.0.3
+[1m[32m  Downloaded[0m pkg-config v0.3.32
+[1m[32m  Downloaded[0m pin-project-internal v1.1.10
+[1m[32m  Downloaded[0m num-conv v0.1.0
+[1m[32m  Downloaded[0m deranged v0.5.4
+[1m[32m  Downloaded[0m humantime v2.3.0
+[1m[32m  Downloaded[0m either v1.15.0
+[1m[32m  Downloaded[0m native-tls v0.2.14
+[1m[32m  Downloaded[0m yoke-derive v0.8.0
+[1m[32m  Downloaded[0m yoke v0.8.0
+[1m[32m  Downloaded[0m xshell v0.2.7
+[1m[32m  Downloaded[0m unicase v2.8.1
+[1m[32m  Downloaded[0m psm v0.1.27
+[1m[32m  Downloaded[0m slab v0.4.11
+[1m[32m  Downloaded[0m icu_properties v2.0.1
+[1m[32m  Downloaded[0m bitflags v2.9.4
+[1m[32m  Downloaded[0m time-macros v0.2.24
+[1m[32m  Downloaded[0m shlex v1.3.0
+[1m[32m  Downloaded[0m mime_guess v2.0.5
+[1m[32m  Downloaded[0m futures-executor v0.3.31
+[1m[32m  Downloaded[0m futures-channel v0.3.31
+[1m[32m  Downloaded[0m find-msvc-tools v0.1.4
+[1m[32m  Downloaded[0m displaydoc v0.2.5
+[1m[32m  Downloaded[0m termcolor v1.4.1
+[1m[32m  Downloaded[0m sync_wrapper v1.0.2
+[1m[32m  Downloaded[0m mime v0.3.17
+[1m[32m  Downloaded[0m futures-task v0.3.31
+[1m[32m  Downloaded[0m foreign-types-shared v0.1.1
+[1m[32m  Downloaded[0m openssl-macros v0.1.1
+[1m[32m  Downloaded[0m utf8_iter v1.0.4
+[1m[32m  Downloaded[0m tower-service v0.3.3
+[1m[32m  Downloaded[0m rc-box v1.3.0
+[1m[32m  Downloaded[0m openssl-probe v0.1.6
+[1m[32m  Downloaded[0m idna_adapter v1.2.1
+[1m[32m  Downloaded[0m futures-macro v0.3.31
+[1m[32m  Downloaded[0m futures-core v0.3.31
+[1m[32m  Downloaded[0m form_urlencoded v1.2.2
+[1m[32m  Downloaded[0m xshell-macros v0.2.7
+[1m[32m  Downloaded[0m pin-utils v0.1.0
+[1m[32m  Downloaded[0m indent_write v2.2.0
+[1m[32m  Downloaded[0m dyn-clone v1.0.20
+[1m[32m  Downloaded[0m percent-encoding v2.3.2
+[1m[32m  Downloaded[0m takecell v0.1.1
+[1m[32m  Downloaded[0m stable_deref_trait v1.2.1
+[1m[32m  Downloaded[0m potential_utf v0.1.3
+[1m[32m  Downloaded[0m futures-sink v0.3.31
+[1m[32m  Downloaded[0m strsim v0.11.1
+[1m[32m  Downloaded[0m rgb v0.8.52
+[1m[32m  Downloaded[0m httparse v1.10.1
+[1m[32m  Downloaded[0m http-body-util v0.1.3
+[1m[32m  Downloaded[0m autocfg v1.5.0
+[1m[32m  Downloaded[0m futures-io v0.3.31
+[1m[32m  Downloaded[0m take_mut v0.2.2
+[1m[32m  Downloaded[0m scopeguard v1.2.0
+[1m[32m  Downloaded[0m itoa v1.0.15
+[1m[32m  Downloaded[0m ident_case v1.0.1
+[1m[32m  Downloaded[0m fnv v1.0.7
+[1m[32m  Downloaded[0m darling_macro v0.21.3
+[1m[32m  Downloaded[0m cfg-if v1.0.3
+[1m[32m  Downloaded[0m tower-layer v0.3.3
+[1m[32m  Downloaded[0m serde_urlencoded v0.7.1
+[1m[32m  Downloaded[0m pretty_env_logger v0.5.0
+[1m[32m  Downloaded[0m equivalent v1.0.2
+[1m[32m  Downloaded[0m getrandom v0.3.1
+[1m[32m  Downloaded[0m atomic-waker v1.1.2
+[1m[32m  Downloaded[0m erasable v1.3.0
+[1m[32m  Downloaded[0m hyper-tls v0.6.0
+[1m[32m  Downloaded[0m http-body v1.0.1
+[1m[32m   Compiling[0m proc-macro2 v1.0.101
+[1m[32m   Compiling[0m unicode-ident v1.0.19
+[1m[32m   Compiling[0m quote v1.0.41
+[1m[32m   Compiling[0m libc v0.2.177
+[1m[32m   Compiling[0m serde_core v1.0.228
+[1m[32m   Compiling[0m shlex v1.3.0
+[1m[32m   Compiling[0m find-msvc-tools v0.1.4
+[1m[32m   Compiling[0m cc v1.2.41
+[1m[32m   Compiling[0m syn v2.0.106
+[1m[32m   Compiling[0m memchr v2.7.6
+[1m[32m   Compiling[0m stable_deref_trait v1.2.1
+[1m[32m   Compiling[0m pin-project-lite v0.2.16
+[1m[32m   Compiling[0m fnv v1.0.7
+[1m[32m   Compiling[0m serde v1.0.228
+[1m[32m   Compiling[0m futures-core v0.3.31
+[1m[32m   Compiling[0m bytes v1.11.1
+[1m[32m   Compiling[0m itoa v1.0.15
+[1m[32m   Compiling[0m futures-sink v0.3.31
+[1m[32m   Compiling[0m pkg-config v0.3.32
+[1m[32m   Compiling[0m vcpkg v0.2.15
+[1m[32m   Compiling[0m futures-channel v0.3.31
+[1m[32m   Compiling[0m mio v1.0.4
+[1m[32m   Compiling[0m socket2 v0.6.1
+[1m[32m   Compiling[0m litemap v0.8.0
+[1m[32m   Compiling[0m openssl-sys v0.9.114
+[1m[32m   Compiling[0m writeable v0.6.1
+[1m[32m   Compiling[0m smallvec v1.15.1
+[1m[32m   Compiling[0m autocfg v1.5.0
+[1m[32m   Compiling[0m pin-utils v0.1.0
+[1m[32m   Compiling[0m cfg-if v1.0.3
+[1m[32m   Compiling[0m futures-task v0.3.31
+[1m[32m   Compiling[0m icu_properties_data v2.0.1
+[1m[32m   Compiling[0m icu_normalizer_data v2.0.0
+[1m[32m   Compiling[0m slab v0.4.11
+[1m[32m   Compiling[0m once_cell v1.21.3
+[1m[32m   Compiling[0m futures-io v0.3.31
+[1m[32m   Compiling[0m http v1.3.1
+[1m[32m   Compiling[0m percent-encoding v2.3.2
+[1m[32m   Compiling[0m httparse v1.10.1
+[1m[32m   Compiling[0m foreign-types-shared v0.1.1
+[1m[32m   Compiling[0m openssl v0.10.78
+[1m[32m   Compiling[0m log v0.4.28
+[1m[32m   Compiling[0m foreign-types v0.3.2
+[1m[32m   Compiling[0m synstructure v0.13.2
+[1m[32m   Compiling[0m http-body v1.0.1
+[1m[32m   Compiling[0m try-lock v0.2.5
+[1m[32m   Compiling[0m native-tls v0.2.14
+[1m[32m   Compiling[0m zmij v1.0.21
+[1m[32m   Compiling[0m tower-service v0.3.3
+[1m[32m   Compiling[0m strsim v0.11.1
+[1m[32m   Compiling[0m ident_case v1.0.1
+[1m[32m   Compiling[0m want v0.3.1
+[1m[32m   Compiling[0m darling_core v0.21.3
+[1m[32m   Compiling[0m form_urlencoded v1.2.2
+[1m[32m   Compiling[0m tracing-core v0.1.34
+[1m[32m   Compiling[0m num-traits v0.2.19
+[1m[32m   Compiling[0m aho-corasick v1.1.3
+[1m[32m   Compiling[0m atomic-waker v1.1.2
+[1m[32m   Compiling[0m unicase v2.8.1
+[1m[32m   Compiling[0m zerofrom-derive v0.1.6
+[1m[32m   Compiling[0m yoke-derive v0.8.0
+[1m[32m   Compiling[0m zerovec-derive v0.11.1
+[1m[32m   Compiling[0m zerofrom v0.1.6
+[1m[32m   Compiling[0m yoke v0.8.0
+[1m[32m   Compiling[0m displaydoc v0.2.5
+[1m[32m   Compiling[0m serde_derive v1.0.228
+[1m[32m   Compiling[0m tokio-macros v2.5.0
+[1m[32m   Compiling[0m zerotrie v0.2.2
+[1m[32m   Compiling[0m zerovec v0.11.4
+[1m[32m   Compiling[0m futures-macro v0.3.31
+[1m[32m   Compiling[0m tokio v1.47.1
+[1m[32m   Compiling[0m futures-util v0.3.31
+[1m[32m   Compiling[0m tinystr v0.8.1
+[1m[32m   Compiling[0m icu_locale_core v2.0.0
+[1m[32m   Compiling[0m potential_utf v0.1.3
+[1m[32m   Compiling[0m icu_collections v2.0.0
+[1m[32m   Compiling[0m icu_provider v2.0.0
+[1m[32m   Compiling[0m icu_properties v2.0.1
+[1m[32m   Compiling[0m bitflags v2.9.4
+[1m[32m   Compiling[0m icu_normalizer v2.0.0
+[1m[32m   Compiling[0m openssl-macros v0.1.1
+[1m[32m   Compiling[0m idna_adapter v1.2.1
+[1m[32m   Compiling[0m utf8_iter v1.0.4
+[1m[32m   Compiling[0m serde_json v1.0.149
+[1m[32m   Compiling[0m regex-syntax v0.8.7
+[1m[32m   Compiling[0m openssl-probe v0.1.6
+[1m[32m   Compiling[0m hyper v1.7.0
+[1m[32m   Compiling[0m regex-automata v0.4.12
+[1m[32m   Compiling[0m idna v1.1.0
+[1m[32m   Compiling[0m darling_macro v0.21.3
+[1m[32m   Compiling[0m mime_guess v2.0.5
+[1m[32m   Compiling[0m tracing v0.1.41
+[1m[32m   Compiling[0m erasable v1.3.0
+[1m[32m   Compiling[0m sync_wrapper v1.0.2
+[1m[32m   Compiling[0m psm v0.1.27
+[1m[32m   Compiling[0m base64 v0.22.1
+[1m[32m   Compiling[0m getrandom v0.3.1
+[1m[32m   Compiling[0m ipnet v2.11.0
+[1m[32m   Compiling[0m tower-layer v0.3.3
+[1m[32m   Compiling[0m ref-cast v1.0.25
+[1m[32m   Compiling[0m tower v0.5.2
+[1m[32m   Compiling[0m hyper-util v0.1.17
+[1m[32m   Compiling[0m regex v1.12.1
+[1m[32m   Compiling[0m tokio-native-tls v0.3.1
+[1m[32m   Compiling[0m darling v0.21.3
+[1m[32m   Compiling[0m url v2.5.7
+[1m[32m   Compiling[0m ref-cast-impl v1.0.25
+[1m[32m   Compiling[0m http-body-util v0.1.3
+[1m[32m   Compiling[0m serde_derive_internals v0.29.1
+[1m[32m   Compiling[0m stacker v0.1.22
+[1m[32m   Compiling[0m is-terminal v0.4.16
+[1m[32m   Compiling[0m unicode-xid v0.2.6
+[1m[32m   Compiling[0m ryu v1.0.20
+[1m[32m   Compiling[0m zeroize v1.8.2
+[1m[32m   Compiling[0m humantime v2.3.0
+[1m[32m   Compiling[0m thiserror v2.0.17
+[1m[32m   Compiling[0m termcolor v1.4.1
+[1m[32m   Compiling[0m iri-string v0.7.8
+[1m[32m   Compiling[0m mime v0.3.17
+[1m[32m   Compiling[0m scopeguard v1.2.0
+[1m[32m   Compiling[0m schemars_derive v1.0.4
+[1m[32m   Compiling[0m env_logger v0.10.2
+[1m[32m   Compiling[0m rustls-pki-types v1.14.0
+[1m[32m   Compiling[0m tower-http v0.6.6
+[1m[32m   Compiling[0m serde_urlencoded v0.7.1
+[1m[32m   Compiling[0m derive_more-impl v2.0.1
+[1m[32m   Compiling[0m hyper-tls v0.6.0
+[1m[32m   Compiling[0m chrono v0.4.42
+[1m[32m   Compiling[0m serde_with_macros v3.15.0
+[1m[32m   Compiling[0m tokio-util v0.7.16
+[1m[32m   Compiling[0m futures-executor v0.3.31
+[1m[32m   Compiling[0m thiserror-impl v2.0.17
+[1m[32m   Compiling[0m pin-project-internal v1.1.10
+[1m[32m   Compiling[0m bytemuck v1.24.0
+[1m[32m   Compiling[0m either v1.15.0
+[1m[32m   Compiling[0m yansi v1.0.1
+[1m[32m   Compiling[0m equivalent v1.0.2
+[1m[32m   Compiling[0m xshell-macros v0.2.7
+[1m[32m   Compiling[0m base64 v0.21.7
+[1m[32m   Compiling[0m hashbrown v0.15.2
+[1m[32m   Compiling[0m diff v0.1.13
+[1m[32m   Compiling[0m dyn-clone v1.0.20
+[1m[32m   Compiling[0m indent_write v2.2.0
+[1m[32m   Compiling[0m cool_asserts v2.0.3
+[1m[32m   Compiling[0m pretty_assertions v1.4.1
+[1m[32m   Compiling[0m indexmap v2.11.4
+[1m[32m   Compiling[0m schemars v1.0.4
+[1m[32m   Compiling[0m xshell v0.2.7
+[1m[32m   Compiling[0m ron v0.8.1
+[1m[32m   Compiling[0m pin-project v1.1.10
+[1m[32m   Compiling[0m itertools v0.14.0
+[1m[32m   Compiling[0m rgb v0.8.52
+[1m[32m   Compiling[0m derive_more v2.0.1
+[1m[32m   Compiling[0m reqwest v0.12.23
+[1m[32m   Compiling[0m futures v0.3.31
+[1m[32m   Compiling[0m uuid v1.18.1
+[1m[32m   Compiling[0m serde_with v3.15.0
+[1m[32m   Compiling[0m pretty_env_logger v0.5.0
+[1m[32m   Compiling[0m rc-box v1.3.0
+[1m[32m   Compiling[0m vecrem v0.1.0
+[1m[32m   Compiling[0m take_mut v0.2.2
+[1m[32m   Compiling[0m takecell v0.1.1
+[1m[32m   Compiling[0m teloxide-core v0.13.0 (/home/runner/work/teloxide-fork/teloxide-fork/crates/teloxide-core)
+[1m[32m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 52.41s
+[1m[32m     Running[0m unittests src/lib.rs (target/debug/deps/teloxide_core-d4f41b425abe0e3b)
+
+running 9 tests
+test codegen::schema_check::rust_types_check_codegen::tests::test_rust_object_types ... ok
+
+thread 'codegen::schema_check::ron_check::tests::check_ron_schema' panicked at crates/teloxide-core/src/codegen/schema_check/ron_check.rs:552:13:
+schema.ron does not match the check schema. The errors are:
+
+
+
+1. Method `sendPoll` does not have `correct_option_id` parameter
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test codegen::schema_check::ron_check::tests::check_ron_schema ... FAILED
+test codegen::schema_check::rust_types_check_codegen::tests::codegen_types_checking ... ok
+test local_macros::codegen_requester_forward ... ok
+test payloads::codegen_payload_mods_and_reexports ... ok
+test payloads::codegen_setters_reexports ... ok
+test requests::requester::codegen_requester_methods ... ok
+test codegen::schema_check::rust_types_check_tests::test_rust_objects ... ok
+
+[31;1merror[0m: src/payloads/forward_message.rs was not up-to-date, updating
+
+
+[31;1merror[0m: src/payloads/copy_message.rs was not up-to-date, updating
+
+
+[31;1merror[0m: src/payloads/send_poll.rs was not up-to-date, updating
+
+
+[31;1merror[0m: src/payloads/promote_chat_member.rs was not up-to-date, updating
+
+
+[31;1merror[0m: src/payloads/get_chat_administrators.rs was not up-to-date, updating
+
+    NOTE: run `cargo test` locally and commit the updated files
+
+
+thread 'payloads::codegen::codegen_payloads' panicked at crates/teloxide-core/src/codegen.rs:117:5:
+some files were not up to date and has been updated, simply re-run the tests
+test payloads::codegen::codegen_payloads ... FAILED
+
+failures:
+
+failures:
+    codegen::schema_check::ron_check::tests::check_ron_schema
+    payloads::codegen::codegen_payloads
+
+test result: FAILED. 7 passed; 2 failed; 0 ignored; 0 measured; 253 filtered out; finished in 5.60s
+
+[1m[31merror[0m[1m:[0m test failed, to rerun pass `-p teloxide-core --lib`
+[1m[32m   Compiling[0m teloxide-core v0.13.0 (/home/runner/work/teloxide-fork/teloxide-fork/crates/teloxide-core)
+[0m[1m[38;5;9merror[E0369][0m[0m[1m: binary operation `==` cannot be applied to type `std::option::Option<poll_media::InputPollMedia>`[0m
+[0m   [0m[0m[1m[38;5;12m--> [0m[0mcrates/teloxide-core/src/local_macros.rs:149:21[0m
+[0m    [0m[0m[1m[38;5;12m|[0m
+[0m[1m[38;5;12m149[0m[0m [0m[0m[1m[38;5;12m|[0m[0m [0m[0m                    $opt_v $opt_fields : core::option::Option<$OptFTy>,[0m
+[0m    [0m[0m[1m[38;5;12m|[0m[0m                     [0m[0m[1m[38;5;9m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+[0m    [0m[0m[1m[38;5;12m|[0m
+[0m   [0m[0m[1m[38;5;12m::: [0m[0mcrates/teloxide-core/src/payloads/send_poll.rs:15:21[0m
+[0m    [0m[0m[1m[38;5;12m|[0m
+[0m[1m[38;5;12m15[0m[0m  [0m[0m[1m[38;5;12m|[0m[0m [0m[0m    #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize)][0m
+[0m    [0m[0m[1m[38;5;12m|[0m[0m                     [0m[0m[1m[38;5;12m---------[0m[0m [0m[0m[1m[38;5;12min this derive macro expansion[0m
+[0m    [0m[0m[1m[38;5;12m|[0m
+[0m[1m[38;5;10mnote[0m[0m: an implementation of `PartialEq` might be missing for `poll_media::InputPollMedia`[0m
+[0m   [0m[0m[1m[38;5;12m--> [0m[0mcrates/teloxide-core/src/types/poll_media.rs:34:1[0m
+[0m    [0m[0m[1m[38;5;12m|[0m
+[0m[1m[38;5;12m34[0m[0m  [0m[0m[1m[38;5;12m|[0m[0m [0m[0mpub enum InputPollMedia {[0m
+[0m    [0m[0m[1m[38;5;12m|[0m[0m [0m[0m[1m[38;5;10m^^^^^^^^^^^^^^^^^^^^^^^[0m[0m [0m[0m[1m[38;5;10mmust implement `PartialEq`[0m
+[0m[1m[38;5;14mhelp[0m[0m: consider annotating `poll_media::InputPollMedia` with `#[derive(PartialEq)]`[0m
+[0m   [0m[0m[1m[38;5;12m--> [0m[0mcrates/teloxide-core/src/types/poll_media.rs:34:1[0m
+[0m    [0m[0m[1m[38;5;12m|[0m
+[0m[1m[38;5;12m34[0m[0m  [0m[0m[38;5;10m+ #[derive(PartialEq)][0m
+[0m[1m[38;5;12m35[0m[0m  [0m[0m[1m[38;5;12m| [0m[0mpub enum InputPollMedia {[0m
+[0m    [0m[0m[1m[38;5;12m|[0m
+
+[0m[1m[38;5;9merror[E0277][0m[0m[1m: the trait bound `poll_media::InputPollMedia: std::cmp::Eq` is not satisfied[0m
+[0m   [0m[0m[1m[38;5;12m--> [0m[0mcrates/teloxide-core/src/local_macros.rs:149:21[0m
+[0m    [0m[0m[1m[38;5;12m|[0m
+[0m[1m[38;5;12m149[0m[0m [0m[0m[1m[38;5;12m|[0m[0m [0m[0m                    $opt_v $opt_fields : core::option::Option<$OptFTy>,[0m
+[0m    [0m[0m[1m[38;5;12m|[0m[0m                     [0m[0m[1m[38;5;9m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m[0m [0m[0m[1m[38;5;9mthe trait `std::cmp::Eq` is not implemented for `poll_media::InputPollMedia`[0m
+[0m    [0m[0m[1m[38;5;12m|[0m
+[0m   [0m[0m[1m[38;5;12m::: [0m[0mcrates/teloxide-core/src/payloads/send_poll.rs:15:32[0m
+[0m    [0m[0m[1m[38;5;12m|[0m
+[0m[1m[38;5;12m15[0m[0m  [0m[0m[1m[38;5;12m|[0m[0m [0m[0m    #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize)][0m
+[0m    [0m[0m[1m[38;5;12m|[0m[0m                                [0m[0m[1m[38;5;12m--[0m[0m [0m[0m[1m[38;5;12min this derive macro expansion[0m
+[0m    [0m[0m[1m[38;5;12m|[0m
+[0m    [0m[0m[1m[38;5;12m= [0m[0m[1mhelp[0m[0m: the trait `std::cmp::Eq` [0m[0m[1m[35mis[0m[0m implemented for `[0m[0m[1m[35mstd::option::Option<T>[0m[0m`[0m
+[0m    [0m[0m[1m[38;5;12m= [0m[0m[1mnote[0m[0m: required for `std::option::Option<poll_media::InputPollMedia>` to implement `std::cmp::Eq`[0m
+[0m[1m[38;5;10mnote[0m[0m: required by a bound in `AssertParamIsEq`[0m
+[0m   [0m[0m[1m[38;5;12m--> [0m[0m/rustc/e703dff8fe220b78195c53478e83fb2f68d8499c/library/core/src/cmp.rs:364:1[0m
+
+[0m[1m[38;5;9merror[E0277][0m[0m[1m: the trait bound `poll_media::InputPollMedia: Hash` is not satisfied[0m
+[0m   [0m[0m[1m[38;5;12m--> [0m[0mcrates/teloxide-core/src/local_macros.rs:149:21[0m
+[0m    [0m[0m[1m[38;5;12m|[0m
+[0m[1m[38;5;12m149[0m[0m [0m[0m[1m[38;5;12m|[0m[0m [0m[0m                    $opt_v $opt_fields : core::option::Option<$OptFTy>,[0m
+[0m    [0m[0m[1m[38;5;12m|[0m[0m                     [0m[0m[1m[38;5;9m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m[0m [0m[0m[1m[38;5;9mthe trait `Hash` is not implemented for `poll_media::InputPollMedia`[0m
+[0m    [0m[0m[1m[38;5;12m|[0m
+[0m   [0m[0m[1m[38;5;12m::: [0m[0mcrates/teloxide-core/src/payloads/send_poll.rs:15:36[0m
+[0m    [0m[0m[1m[38;5;12m|[0m
+[0m[1m[38;5;12m15[0m[0m  [0m[0m[1m[38;5;12m|[0m[0m [0m[0m    #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize)][0m
+[0m    [0m[0m[1m[38;5;12m|[0m[0m                                    [0m[0m[1m[38;5;12m----[0m[0m [0m[0m[1m[38;5;12min this derive macro expansion[0m
+[0m    [0m[0m[1m[38;5;12m|[0m
+[0m    [0m[0m[1m[38;5;12m= [0m[0m[1mhelp[0m[0m: the trait `Hash` [0m[0m[1m[35mis[0m[0m implemented for `[0m[0m[1m[35mstd::option::Option<T>[0m[0m`[0m
+[0m    [0m[0m[1m[38;5;12m= [0m[0m[1mnote[0m[0m: required for `std::option::Option<poll_media::InputPollMedia>` to implement `Hash`[0m
+
+[0m[1mSome errors have detailed explanations: E0277, E0369.[0m
+[0m[1mFor more information about an error, try `rustc --explain E0277`.[0m
+[1m[31merror[0m[1m:[0m could not compile `teloxide-core` (lib test) due to 3 previous errors

@@ -293,13 +293,25 @@ impl StickerType {
 }
 
 impl StickerFormatFlags {
-    pub fn format(&self) -> StickerFormat {
+    /// Returns the sticker format when the two Telegram flags are consistent.
+    #[must_use]
+    pub fn try_format(&self) -> Option<StickerFormat> {
         match (self.is_animated, self.is_video) {
-            (false, false) => StickerFormat::Static,
-            (true, false) => StickerFormat::Animated,
-            (false, true) => StickerFormat::Video,
-            (true, true) => panic!("`is_animated` and `is_video` flags present at the same time"),
+            (false, false) => Some(StickerFormat::Static),
+            (true, false) => Some(StickerFormat::Animated),
+            (false, true) => Some(StickerFormat::Video),
+            (true, true) => None,
         }
+    }
+
+    /// Returns the sticker format without panicking on malformed Telegram data.
+    ///
+    /// If both flags are present, video takes precedence. Use
+    /// [`Self::try_format`] when the distinction between valid and
+    /// malformed flags matters.
+    #[must_use]
+    pub fn format(&self) -> StickerFormat {
+        self.try_format().unwrap_or(StickerFormat::Video)
     }
 }
 
@@ -504,12 +516,11 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn wrong_sticker_format_flags_serde() {
-        {
-            let json = r#"{"is_animated":true,"is_video":true}"#;
-            let fmt_flags: StickerFormatFlags = serde_json::from_str(json).unwrap();
-            fmt_flags.format();
-        }
+    fn inconsistent_sticker_format_flags_do_not_panic() {
+        let json = r#"{"is_animated":true,"is_video":true}"#;
+        let fmt_flags: StickerFormatFlags = serde_json::from_str(json).unwrap();
+
+        assert_eq!(fmt_flags.try_format(), None);
+        assert_eq!(fmt_flags.format(), StickerFormat::Video);
     }
 }

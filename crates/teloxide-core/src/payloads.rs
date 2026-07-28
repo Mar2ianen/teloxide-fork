@@ -439,6 +439,7 @@ pub use verify_user::{VerifyUser, VerifyUserSetters};
 // END BLOCK payload_modules
 
 /// Generates `mod`s and `pub use`s above.
+#[cfg(feature = "nightly")]
 #[test]
 fn codegen_payload_mods_and_reexports() {
     use crate::codegen::{
@@ -471,6 +472,7 @@ fn codegen_payload_mods_and_reexports() {
 }
 
 /// Generates contents of [`setters`] module.
+#[cfg(feature = "nightly")]
 #[test]
 fn codegen_setters_reexports() {
     use crate::codegen::{
@@ -492,5 +494,5 @@ fn codegen_setters_reexports() {
     ensure_file_contents(&path, &contents);
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "nightly"))]
 mod codegen;

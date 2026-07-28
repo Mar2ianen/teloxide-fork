@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## unreleased
 
+### Changed
+
+- Raise MSRV from Rust 1.82 to 1.85.
+
 ### Fixed
 
 - Don't ignore argument separator in CommandEnum and both separators in Command ([#1462](https://github.com/teloxide/teloxide/pull/1462))

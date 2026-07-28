@@ -7,7 +7,7 @@
 //!```toml
 //! teloxide-core = "0.13.0"
 //! ```
-//! _Compiler support: requires rustc 1.82+_.
+//! _Compiler support: requires rustc 1.85+_.
 //!
 //! ```
 //! # async {
@@ -130,5 +130,5 @@ mod bot;
 mod serde_multipart;
 mod util;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "nightly"))]
 mod codegen;

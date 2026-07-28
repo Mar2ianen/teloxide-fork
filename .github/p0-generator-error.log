@@ -1,4 +1,12 @@
 Traceback (most recent call last):
-  File "/home/runner/work/teloxide-fork/teloxide-fork/.github/scripts/fix_p0_script_anchors.py", line 72, in <module>
-    raise RuntimeError(f"{label}: expected one script match, got {count}")
-RuntimeError: render mapping: expected one script match, got 0
+  File "/home/runner/work/teloxide-fork/teloxide-fork/.github/scripts/apply_bot_api_10_p0.py", line 178, in <module>
+    update_method("sendPoll", update_send_poll)
+  File "/home/runner/work/teloxide-fork/teloxide-fork/.github/scripts/apply_bot_api_10_p0.py", line 62, in update_method
+    new = transform(old)
+          ^^^^^^^^^^^^^^
+  File "/home/runner/work/teloxide-fork/teloxide-fork/.github/scripts/apply_bot_api_10_p0.py", line 69, in update_send_poll
+    block = replace_once(
+            ^^^^^^^^^^^^^
+  File "/home/runner/work/teloxide-fork/teloxide-fork/.github/scripts/apply_bot_api_10_p0.py", line 50, in replace_once
+    raise RuntimeError(f"{description}: expected one match, got {count}")
+RuntimeError: sendPoll options range: expected one match, got 0

@@ -1,0 +1,37 @@
+name: Diagnose robustness PR
+
+on:
+  pull_request:
+    branches: [ ci/diagnose-robustness ]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/robustness-panics-and-updates
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-06-12
+          components: clippy
+
+      - name: Capture diagnostics
+        shell: bash
+        run: |
+          set +e
+          cargo check --examples --features full > .github/robustness-check.log 2>&1
+          cargo clippy --all-targets --features "full nightly" -- -D warnings >> .github/robustness-check.log 2>&1
+          exit 0
+
+      - name: Commit diagnostics
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/robustness-check.log
+          git commit -m "ci: capture robustness diagnostics"
+          git push origin HEAD:fix/robustness-panics-and-updates

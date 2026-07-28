@@ -96,14 +96,36 @@ impl MultipartPayload for payloads::SendPoll {
     }
 }
 
+impl MultipartPayload for payloads::PostStory {
+    fn copy_files(&self, into: &mut dyn FnMut(InputFile)) {
+        self.content.files().for_each(|file| file.copy_into(into));
+    }
+
+    fn move_files(&mut self, into: &mut dyn FnMut(InputFile)) {
+        self.content.files_mut().for_each(|file| file.move_into(into));
+    }
+}
+
+impl MultipartPayload for payloads::EditStory {
+    fn copy_files(&self, into: &mut dyn FnMut(InputFile)) {
+        self.content.files().for_each(|file| file.copy_into(into));
+    }
+
+    fn move_files(&mut self, into: &mut dyn FnMut(InputFile)) {
+        self.content.files_mut().for_each(|file| file.move_into(into));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
-        payloads::SendPoll,
+        payloads::{EditStory, PostStory, SendPoll},
         requests::{MultipartPayload, MultipartRequest, Requester},
         types::{
-            ChatId, InputFile, InputMediaAnimation, InputMediaLivePhoto, InputMediaSticker,
-            InputMediaVideo, InputPollMedia, InputPollOption, InputPollOptionMedia,
+            BusinessConnectionId, ChatId, InputFile, InputMediaAnimation, InputMediaLivePhoto,
+            InputMediaSticker, InputMediaVideo, InputPollMedia, InputPollOption,
+            InputPollOptionMedia, InputStoryContent, InputStoryContentPhoto,
+            InputStoryContentVideo, Seconds, StoryId,
         },
         Bot,
     };
@@ -154,5 +176,60 @@ mod tests {
         );
 
         assert_multipart(request);
+    }
+
+    #[test]
+    fn story_payloads_collect_their_nested_attachment() {
+        let mut post = PostStory::new(
+            BusinessConnectionId("business".to_owned()),
+            InputStoryContent::Photo(InputStoryContentPhoto { photo: file() }),
+            Seconds::from_seconds(6 * 3600),
+        );
+        let mut copied = 0;
+        post.copy_files(&mut |_| copied += 1);
+        assert_eq!(copied, 1);
+        let mut moved = 0;
+        post.move_files(&mut |_| moved += 1);
+        assert_eq!(moved, 1);
+
+        let mut edit = EditStory::new(
+            BusinessConnectionId("business".to_owned()),
+            StoryId(1),
+            InputStoryContent::Video(InputStoryContentVideo {
+                video: file(),
+                duration: None,
+                cover_frame_timestamp: None,
+                is_animation: None,
+            }),
+        );
+        let mut copied = 0;
+        edit.copy_files(&mut |_| copied += 1);
+        assert_eq!(copied, 1);
+        let mut moved = 0;
+        edit.move_files(&mut |_| moved += 1);
+        assert_eq!(moved, 1);
+    }
+
+    #[test]
+    fn story_methods_use_multipart_requests() {
+        fn assert_post(_: MultipartRequest<PostStory>) {}
+        fn assert_edit(_: MultipartRequest<EditStory>) {}
+
+        let bot = Bot::new("token");
+        assert_post(bot.post_story(
+            BusinessConnectionId("business".to_owned()),
+            InputStoryContent::Photo(InputStoryContentPhoto { photo: file() }),
+            Seconds::from_seconds(6 * 3600),
+        ));
+        assert_edit(bot.edit_story(
+            BusinessConnectionId("business".to_owned()),
+            StoryId(1),
+            InputStoryContent::Video(InputStoryContentVideo {
+                video: file(),
+                duration: None,
+                cover_frame_timestamp: None,
+                is_animation: None,
+            }),
+        ));
     }
 }

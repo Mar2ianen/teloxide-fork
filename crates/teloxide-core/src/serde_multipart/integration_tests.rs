@@ -6,11 +6,12 @@ use serde_json::Value;
 
 use super::to_form_ref;
 use crate::{
-    payloads::{SendPaidMedia, SendPoll},
+    payloads::{EditStory, PostStory, SendPaidMedia, SendPoll},
     types::{
-        ChatId, InputFile, InputMediaAnimation, InputMediaLivePhoto, InputMediaSticker,
-        InputMediaVideo, InputPaidMedia, InputPaidMediaVideo, InputPollMedia, InputPollOption,
-        InputPollOptionMedia,
+        BusinessConnectionId, ChatId, InputFile, InputMediaAnimation, InputMediaLivePhoto,
+        InputMediaSticker, InputMediaVideo, InputPaidMedia, InputPaidMediaVideo, InputPollMedia,
+        InputPollOption, InputPollOptionMedia, InputStoryContent, InputStoryContentPhoto,
+        InputStoryContentVideo, Seconds, StoryId,
     },
 };
 
@@ -166,4 +167,79 @@ async fn send_paid_media_video_attach_ids_match_multipart_file_parts() {
     assert_eq!(attach_ids.len(), attach_id_set.len(), "duplicate attach:// id");
     assert_eq!(attach_ids.len(), 3);
     assert_eq!(attach_id_set, file_part_ids);
+}
+
+#[tokio::test]
+async fn post_story_attach_id_matches_multipart_file_part() {
+    let payload = PostStory::new(
+        BusinessConnectionId("business".to_owned()),
+        InputStoryContent::Photo(InputStoryContentPhoto {
+            photo: file(b"story-photo", "story-photo.bin"),
+        }),
+        Seconds::from_seconds(6 * 3600),
+    );
+    let form = to_form_ref(&payload).unwrap().await;
+    let mut request =
+        Client::new().post("http://localhost.invalid").multipart(form).build().unwrap();
+    let boundary = request.headers()[CONTENT_TYPE]
+        .to_str()
+        .unwrap()
+        .split("boundary=")
+        .nth(1)
+        .expect("multipart boundary")
+        .to_owned();
+    let body = request.body_mut().take().unwrap().collect().await.unwrap().to_bytes();
+    let parts = multipart_parts(&body, &boundary);
+    let mut attach_ids = Vec::new();
+    collect_attach_ids(
+        &serde_json::from_slice(parts.get("content").expect("missing content part")).unwrap(),
+        &mut attach_ids,
+    );
+    let files: BTreeSet<_> = parts
+        .keys()
+        .filter(|name| {
+            !matches!(name.as_str(), "business_connection_id" | "content" | "active_period")
+        })
+        .cloned()
+        .collect();
+    assert_eq!(attach_ids.len(), 1);
+    assert_eq!(attach_ids.into_iter().collect::<BTreeSet<_>>(), files);
+}
+
+#[tokio::test]
+async fn edit_story_attach_id_matches_multipart_file_part() {
+    let payload = EditStory::new(
+        BusinessConnectionId("business".to_owned()),
+        StoryId(1),
+        InputStoryContent::Video(InputStoryContentVideo {
+            video: file(b"story-video", "story-video.bin"),
+            duration: None,
+            cover_frame_timestamp: None,
+            is_animation: None,
+        }),
+    );
+    let form = to_form_ref(&payload).unwrap().await;
+    let mut request =
+        Client::new().post("http://localhost.invalid").multipart(form).build().unwrap();
+    let boundary = request.headers()[CONTENT_TYPE]
+        .to_str()
+        .unwrap()
+        .split("boundary=")
+        .nth(1)
+        .expect("multipart boundary")
+        .to_owned();
+    let body = request.body_mut().take().unwrap().collect().await.unwrap().to_bytes();
+    let parts = multipart_parts(&body, &boundary);
+    let mut attach_ids = Vec::new();
+    collect_attach_ids(
+        &serde_json::from_slice(parts.get("content").expect("missing content part")).unwrap(),
+        &mut attach_ids,
+    );
+    let files: BTreeSet<_> = parts
+        .keys()
+        .filter(|name| !matches!(name.as_str(), "business_connection_id" | "story_id" | "content"))
+        .cloned()
+        .collect();
+    assert_eq!(attach_ids.len(), 1);
+    assert_eq!(attach_ids.into_iter().collect::<BTreeSet<_>>(), files);
 }

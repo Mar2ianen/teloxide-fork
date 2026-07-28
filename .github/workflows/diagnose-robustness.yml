@@ -1,4 +1,4 @@
-name: Diagnose robustness PR
+name: Apply MSRV and codegen fixes
 
 on:
   pull_request:
@@ -8,37 +8,28 @@ permissions:
   contents: write
 
 jobs:
-  diagnose:
+  apply:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: fix/robustness-panics-and-updates
+          ref: fix/msrv-codegen-tooling
+
+      - name: Apply fixes
+        run: python .github/scripts/msrv_codegen_fixer.py
 
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: beta
+          toolchain: nightly-2025-06-12
+          components: rustfmt
 
-      - name: Capture concise failure log
-        shell: bash
-        run: |
-          set +e
-          cargo +beta test --tests --features full -- --nocapture > /tmp/test.log 2>&1
-          status=$?
-          {
-            echo "exit_status=$status"
-            echo
-            grep -n -E "^(failures:|test result:|---- .* stdout ----)|panicked at|FAILED|error:" /tmp/test.log || true
-            echo
-            echo "--- tail ---"
-            tail -n 250 /tmp/test.log
-          } > .github/robustness-test-failure.log
-          exit 0
+      - run: cargo fmt --all
 
-      - name: Commit diagnostics
+      - name: Commit fixes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github/robustness-test-failure.log
-          git commit -m "ci: capture robustness test failure"
-          git push origin HEAD:fix/robustness-panics-and-updates
+          git add Cargo.toml README.md Justfile .github/workflows/ci.yml \
+                  crates/teloxide-core crates/teloxide crates/teloxide-macros
+          git commit -m "ci: align MSRV and isolate codegen checks"
+          git push origin HEAD:fix/msrv-codegen-tooling

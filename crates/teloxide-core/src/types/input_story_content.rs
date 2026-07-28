@@ -12,6 +12,24 @@ pub enum InputStoryContent {
     Video(InputStoryContentVideo),
 }
 
+impl InputStoryContent {
+    /// Returns the file contained in this story content.
+    pub(crate) fn files(&self) -> impl Iterator<Item = &InputFile> {
+        std::iter::once(match self {
+            Self::Photo(content) => &content.photo,
+            Self::Video(content) => &content.video,
+        })
+    }
+
+    /// Returns the mutable file contained in this story content.
+    pub(crate) fn files_mut(&mut self) -> impl Iterator<Item = &mut InputFile> {
+        std::iter::once(match self {
+            Self::Photo(content) => &mut content.photo,
+            Self::Video(content) => &mut content.video,
+        })
+    }
+}
+
 /// Describes a regular gift owned by a user or a chat.
 #[derive(Clone, Debug, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]

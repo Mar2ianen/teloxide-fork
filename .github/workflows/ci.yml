@@ -40,40 +40,6 @@ env:
   CI: 1
 
 jobs:
-  apply-audit-runtime:
-    name: Apply runtime audit fixes
-    if: github.event_name == 'pull_request' && github.head_ref == 'fix/audit-runtime'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout feature branch
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
-          persist-credentials: true
-      - name: Install pinned nightly
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
-        with:
-          toolchain: ${{ env.rust_nightly }}
-          components: rustfmt
-      - name: Apply and validate fixes
-        run: |
-          python .github/apply_audit_runtime.py
-          cargo +${{ env.rust_nightly }} fmt --all
-          cargo +${{ env.rust_nightly }} test -p teloxide-core --features "full nightly" story -- --nocapture
-          cargo +${{ env.rust_nightly }} test -p teloxide-core --features "full nightly" poll_answer -- --nocapture
-          cargo +${{ env.rust_nightly }} test -p teloxide-core --features "full nightly" codegen -- --nocapture
-          git diff --check
-      - name: Commit generated fix
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          git commit -m "Fix story uploads and malformed poll answers"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
-
   # Depends on all action that are required for a "successful" CI run.
   ci-pass:
     name: CI succeeded

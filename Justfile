@@ -9,7 +9,7 @@ fmt:
 # Check formatting and run clippy
 lint:
     cargo fmt --all --check || (echo "Run 'just fmt' to fix formatting!" && exit 1)
-    cargo clippy --all-targets --features "full nightly"
+    cargo clippy --all-targets --features "full nightly" -- -D warnings
 
 # Run tests
 test:

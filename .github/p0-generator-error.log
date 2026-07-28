@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/home/runner/work/teloxide-fork/teloxide-fork/.github/scripts/fix_p0_script_anchors.py", line 72, in <module>
+    raise RuntimeError(f"{label}: expected one script match, got {count}")
+RuntimeError: render mapping: expected one script match, got 0

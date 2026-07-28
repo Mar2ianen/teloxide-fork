@@ -1,5 +1,3 @@
-use std::hash::{Hash, Hasher};
-
 use serde::{Deserialize, Serialize};
 
 use crate::types::{InputPollOptionMedia, MessageEntity, ParseMode};
@@ -20,21 +18,6 @@ pub struct InputPollOption {
     /// Media added to the poll option.
     #[serde(skip_deserializing, skip_serializing_if = "Option::is_none")]
     pub media: Option<InputPollOptionMedia>,
-}
-
-impl PartialEq for InputPollOption {
-    fn eq(&self, other: &Self) -> bool {
-        self.text == other.text && self.formatting == other.formatting
-    }
-}
-
-impl Eq for InputPollOption {}
-
-impl Hash for InputPollOption {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.text.hash(state);
-        self.formatting.hash(state);
-    }
 }
 
 #[derive(Clone, Debug)]

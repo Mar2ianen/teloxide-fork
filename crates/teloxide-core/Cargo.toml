@@ -93,6 +93,7 @@ tokio = { version = "1.39.0", features = [
     "rt-multi-thread",
 ] }
 cool_asserts = "2.0.3"
+# Used to collect the actual reqwest multipart body in wire-format tests.
 http-body-util = "0.1"
 
 xshell = "0.2.7"

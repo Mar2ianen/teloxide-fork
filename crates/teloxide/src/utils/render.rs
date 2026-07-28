@@ -47,6 +47,7 @@ impl<'a> Renderer<'a> {
                         | MEK::TextLink { .. }
                         | MEK::TextMention { .. }
                         | MEK::CustomEmoji { .. }
+                        | MEK::DateTime { unix_time: Some(_), .. }
                 )
             })
             .count()
@@ -68,6 +69,10 @@ impl<'a> Renderer<'a> {
                 MEK::TextLink { url } => Kind::TextLink(url.as_str()),
                 MEK::TextMention { user } => Kind::TextMention(user.id.0),
                 MEK::CustomEmoji { custom_emoji_id } => Kind::CustomEmoji(custom_emoji_id),
+                MEK::DateTime { unix_time: Some(unix_time), date_time_format } => Kind::DateTime {
+                    unix_time: *unix_time,
+                    date_time_format: date_time_format.as_deref(),
+                },
                 _ => continue,
             };
 
@@ -212,6 +217,27 @@ mod test {
             render.as_markdown(),
             "Some ```\npre```\n, `normal` and ```rust\nrusty```\n code",
         );
+    }
+
+    #[test]
+    fn test_render_date_time() {
+        let text = "tomorrow";
+        let entities = vec![MessageEntity {
+            kind: MEK::DateTime {
+                unix_time: Some(1_647_531_900),
+                date_time_format: Some("wDT".to_owned()),
+            },
+            offset: 0,
+            length: 8,
+        }];
+
+        let render = Renderer::new(text, &entities);
+
+        assert_eq!(
+            render.as_html(),
+            "<tg-time unix=\"1647531900\" format=\"wDT\">tomorrow</tg-time>"
+        );
+        assert_eq!(render.as_markdown(), "![tomorrow](tg://time?unix=1647531900&format=wDT)");
     }
 
     #[test]

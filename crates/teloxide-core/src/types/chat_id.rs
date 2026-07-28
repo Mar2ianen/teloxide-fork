@@ -34,7 +34,7 @@ impl ChatId {
     /// Returns `true` if this is an id of a user.
     #[must_use]
     pub fn is_user(self) -> bool {
-        matches!(self.to_bare(), Some(BareChatId::User(_)))
+        matches!(self.to_bare(), BareChatId::User(_))
     }
 
     /// Returns `true` if this is an id of a group.
@@ -42,37 +42,39 @@ impl ChatId {
     /// Note: supergroup is **not** considered a group.
     #[must_use]
     pub fn is_group(self) -> bool {
-        matches!(self.to_bare(), Some(BareChatId::Group(_)))
+        matches!(self.to_bare(), BareChatId::Group(_))
     }
 
     /// Returns `true` if this is an id of a channel.
     #[must_use]
     pub fn is_channel_or_supergroup(self) -> bool {
-        matches!(self.to_bare(), Some(BareChatId::Channel(_)))
+        matches!(self.to_bare(), BareChatId::Channel(_))
     }
 
     /// Returns user id, if this is an id of a user.
     #[must_use]
     pub fn as_user(self) -> Option<UserId> {
         match self.to_bare() {
-            Some(BareChatId::User(u)) => Some(u),
-            Some(BareChatId::Group(_) | BareChatId::Channel(_)) | None => None,
+            BareChatId::User(u) => Some(u),
+            BareChatId::Group(_) | BareChatId::Channel(_) => None,
         }
     }
 
     /// Converts this id to "bare" MTProto peer id.
     ///
     /// See [`BareChatId`] for more.
-    pub(crate) fn to_bare(self) -> Option<BareChatId> {
+    pub(crate) fn to_bare(self) -> BareChatId {
         use BareChatId::*;
 
         match self.0 {
-            id @ MIN_MARKED_CHAT_ID..=MAX_MARKED_CHAT_ID => Some(Group(-id as _)),
+            id @ MIN_MARKED_CHAT_ID..=MAX_MARKED_CHAT_ID => Group(-id as _),
             id @ MIN_MARKED_CHANNEL_ID..=MAX_MARKED_CHANNEL_ID => {
-                Some(Channel((MAX_MARKED_CHANNEL_ID - id) as _))
+                Channel((MAX_MARKED_CHANNEL_ID - id) as _)
             }
-            id @ MIN_USER_ID..=MAX_USER_ID => Some(User(UserId(id as _))),
-            _ => None,
+            id @ MIN_USER_ID..=MAX_USER_ID => User(UserId(id as _)),
+            // Preserve forward compatibility if Telegram extends the currently known ID ranges.
+            id if id > MAX_USER_ID => User(UserId(id as _)),
+            id => Channel((MAX_MARKED_CHANNEL_ID - id) as _),
         }
     }
 }
@@ -134,7 +136,7 @@ mod tests {
 
     #[test]
     fn chonky_user_id_to_bare() {
-        assert!(matches!(ChatId(5298363099).to_bare(), Some(BareChatId::User(UserId(5298363099)))));
+        assert!(matches!(ChatId(5298363099).to_bare(), BareChatId::User(UserId(5298363099))));
     }
 
     #[test]
@@ -142,9 +144,9 @@ mod tests {
         fn assert_identity(x: u64) {
             use BareChatId::*;
 
-            assert_eq!(Some(User(UserId(x))), User(UserId(x)).to_bot_api().to_bare());
-            assert_eq!(Some(Group(x)), Group(x).to_bot_api().to_bare());
-            assert_eq!(Some(Channel(x)), Channel(x).to_bot_api().to_bare());
+            assert_eq!(User(UserId(x)), User(UserId(x)).to_bot_api().to_bare());
+            assert_eq!(Group(x), Group(x).to_bot_api().to_bare());
+            assert_eq!(Channel(x), Channel(x).to_bot_api().to_bare());
         }
 
         // Somewhat random numbers
@@ -156,14 +158,15 @@ mod tests {
     }
 
     #[test]
-    fn unknown_ranges_are_not_classified() {
-        for chat_id in [ChatId(i64::MIN), ChatId(MAX_USER_ID + 1)] {
-            assert_eq!(chat_id.to_bare(), None);
-            assert!(!chat_id.is_user());
-            assert!(!chat_id.is_group());
-            assert!(!chat_id.is_channel_or_supergroup());
-            assert_eq!(chat_id.as_user(), None);
-        }
+    fn extended_ranges_are_classified_without_panicking() {
+        let future_user = ChatId(super::MAX_USER_ID + 1);
+        assert!(future_user.is_user());
+        assert_eq!(future_user.as_user(), Some(UserId((super::MAX_USER_ID + 1) as u64)));
+
+        let future_channel = ChatId(i64::MIN);
+        assert!(future_channel.is_channel_or_supergroup());
+        assert!(!future_channel.is_user());
+        assert!(!future_channel.is_group());
     }
 
     #[test]

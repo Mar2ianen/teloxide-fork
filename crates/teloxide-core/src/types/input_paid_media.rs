@@ -261,8 +261,7 @@ mod tests {
 
     #[test]
     fn test_mutability() {
-        let expected_json =
-            r#"{"type":"video","media":"7890","thumbnail":"7890","cover":"7890"}"#;
+        let expected_json = r#"{"type":"video","media":"7890","thumbnail":"7890","cover":"7890"}"#;
 
         let mut video = InputPaidMedia::Video(Box::new(InputPaidMediaVideo {
             media: InputFile::file_id("123456".into()),

@@ -6,10 +6,11 @@ use serde_json::Value;
 
 use super::to_form_ref;
 use crate::{
-    payloads::SendPoll,
+    payloads::{SendPaidMedia, SendPoll},
     types::{
         ChatId, InputFile, InputMediaAnimation, InputMediaLivePhoto, InputMediaSticker,
-        InputMediaVideo, InputPollMedia, InputPollOption, InputPollOptionMedia,
+        InputMediaVideo, InputPaidMedia, InputPaidMediaVideo, InputPollMedia, InputPollOption,
+        InputPollOptionMedia,
     },
 };
 
@@ -42,6 +43,16 @@ fn populated_poll() -> SendPoll {
             .thumbnail(file(b"animation-thumbnail", "animation-thumbnail.bin")),
     ));
     payload
+}
+
+fn populated_paid_media() -> SendPaidMedia {
+    let video = InputPaidMedia::Video(Box::new(
+        InputPaidMediaVideo::new(file(b"video", "paid-video.bin"))
+            .thumbnail(file(b"thumbnail", "paid-thumbnail.bin"))
+            .cover(file(b"cover", "paid-cover.bin")),
+    ));
+
+    SendPaidMedia::new(ChatId(1), 1, vec![video])
 }
 
 fn multipart_parts(body: &[u8], boundary: &str) -> BTreeMap<String, Vec<u8>> {
@@ -120,5 +131,39 @@ async fn send_poll_attach_ids_match_multipart_file_parts() {
 
     assert_eq!(attach_ids.len(), attach_id_set.len(), "duplicate attach:// id");
     assert_eq!(attach_ids.len(), 8);
+    assert_eq!(attach_id_set, file_part_ids);
+}
+
+// This protects the complete paid-video path: nested InputFile values, JSON
+// attach references, and the corresponding multipart file parts.
+#[tokio::test]
+async fn send_paid_media_video_attach_ids_match_multipart_file_parts() {
+    let form = to_form_ref(&populated_paid_media()).unwrap().await;
+    let mut request =
+        Client::new().post("http://localhost.invalid").multipart(form).build().unwrap();
+
+    let boundary = request.headers()[CONTENT_TYPE]
+        .to_str()
+        .unwrap()
+        .split("boundary=")
+        .nth(1)
+        .expect("multipart boundary")
+        .to_owned();
+    let body = request.body_mut().take().unwrap().collect().await.unwrap().to_bytes();
+    let parts = multipart_parts(&body, &boundary);
+
+    let media = parts.get("media").expect("missing media part");
+    let mut attach_ids = Vec::new();
+    collect_attach_ids(&serde_json::from_slice(media).unwrap(), &mut attach_ids);
+
+    let file_part_ids: BTreeSet<_> = parts
+        .keys()
+        .filter(|name| !matches!(name.as_str(), "chat_id" | "star_count" | "media"))
+        .cloned()
+        .collect();
+    let attach_id_set: BTreeSet<_> = attach_ids.iter().cloned().collect();
+
+    assert_eq!(attach_ids.len(), attach_id_set.len(), "duplicate attach:// id");
+    assert_eq!(attach_ids.len(), 3);
     assert_eq!(attach_id_set, file_part_ids);
 }

@@ -32,30 +32,34 @@ impl InputPaidMedia {
     pub(crate) fn files(&self) -> impl Iterator<Item = &InputFile> {
         use InputPaidMedia::*;
 
-        let (media, thumbnail) = match self {
-            Photo(InputPaidMediaPhoto { media, .. }) => (media, None),
-            LivePhoto(InputPaidMediaLivePhoto { media, photo }) => (media, Some(photo)),
-            Video(input_paid_media_video) => {
-                (&input_paid_media_video.media, input_paid_media_video.thumbnail.as_ref())
-            }
+        let (media, thumbnail, cover) = match self {
+            Photo(InputPaidMediaPhoto { media, .. }) => (media, None, None),
+            LivePhoto(InputPaidMediaLivePhoto { media, photo }) => (media, Some(photo), None),
+            Video(input_paid_media_video) => (
+                &input_paid_media_video.media,
+                input_paid_media_video.thumbnail.as_ref(),
+                input_paid_media_video.cover.as_ref(),
+            ),
         };
 
-        iter::once(media).chain(thumbnail)
+        iter::once(media).chain(thumbnail).chain(cover)
     }
 
     /// Returns an iterator of all files in this input media
     pub(crate) fn files_mut(&mut self) -> impl Iterator<Item = &mut InputFile> {
         use InputPaidMedia::*;
 
-        let (media, thumbnail) = match self {
-            Photo(InputPaidMediaPhoto { media, .. }) => (media, None),
-            LivePhoto(InputPaidMediaLivePhoto { media, photo }) => (media, Some(photo)),
-            Video(input_paid_media_video) => {
-                (&mut input_paid_media_video.media, input_paid_media_video.thumbnail.as_mut())
-            }
+        let (media, thumbnail, cover) = match self {
+            Photo(InputPaidMediaPhoto { media, .. }) => (media, None, None),
+            LivePhoto(InputPaidMediaLivePhoto { media, photo }) => (media, Some(photo), None),
+            Video(input_paid_media_video) => (
+                &mut input_paid_media_video.media,
+                input_paid_media_video.thumbnail.as_mut(),
+                input_paid_media_video.cover.as_mut(),
+            ),
         };
 
-        iter::once(media).chain(thumbnail)
+        iter::once(media).chain(thumbnail).chain(cover)
     }
 }
 
@@ -245,13 +249,24 @@ mod tests {
     }
 
     #[test]
+    fn video_files_include_cover() {
+        let video = InputPaidMedia::Video(Box::new(
+            InputPaidMediaVideo::new(InputFile::memory(vec![1_u8]))
+                .thumbnail(InputFile::memory(vec![2_u8]))
+                .cover(InputFile::memory(vec![3_u8])),
+        ));
+
+        assert_eq!(video.files().count(), 3);
+    }
+
+    #[test]
     fn test_mutability() {
-        let expected_json = r#"{"type":"video","media":"7890","thumbnail":"7890"}"#;
+        let expected_json = r#"{"type":"video","media":"7890","thumbnail":"7890","cover":"7890"}"#;
 
         let mut video = InputPaidMedia::Video(Box::new(InputPaidMediaVideo {
             media: InputFile::file_id("123456".into()),
             thumbnail: Some(InputFile::file_id("123456".into())),
-            cover: None,
+            cover: Some(InputFile::file_id("123456".into())),
             start_timestamp: None,
             width: None,
             height: None,

@@ -1,5 +1,3 @@
-#![allow(clippy::from_over_into)]
-
 use serde::{Deserialize, Serialize};
 
 use crate::types::Seconds;
@@ -31,7 +29,7 @@ impl LivePeriod {
     }
 
     pub fn from_u32(seconds: u32) -> Self {
-        LivePeriod::Timeframe(Seconds::from_seconds(seconds))
+        seconds.into()
     }
 
     pub fn from_seconds(seconds: Seconds) -> Self {
@@ -39,37 +37,37 @@ impl LivePeriod {
     }
 }
 
-impl TryInto<Seconds> for LivePeriod {
+impl TryFrom<LivePeriod> for Seconds {
     type Error = &'static str;
 
-    fn try_into(self) -> Result<Seconds, Self::Error> {
-        match self {
-            LivePeriod::Timeframe(v) => Ok(v),
+    fn try_from(value: LivePeriod) -> Result<Self, Self::Error> {
+        match value {
+            LivePeriod::Timeframe(seconds) => Ok(seconds),
             LivePeriod::Indefinite => Err("indefinite live period"),
         }
     }
 }
 
-impl TryInto<Seconds> for &LivePeriod {
+impl TryFrom<&LivePeriod> for Seconds {
     type Error = &'static str;
 
-    fn try_into(self) -> Result<Seconds, Self::Error> {
-        match self {
-            LivePeriod::Timeframe(v) => Ok(*v),
+    fn try_from(value: &LivePeriod) -> Result<Self, Self::Error> {
+        match value {
+            LivePeriod::Timeframe(seconds) => Ok(*seconds),
             LivePeriod::Indefinite => Err("indefinite live period"),
         }
     }
 }
 
-impl Into<LivePeriod> for Seconds {
-    fn into(self) -> LivePeriod {
-        LivePeriod::from_seconds(self)
+impl From<Seconds> for LivePeriod {
+    fn from(seconds: Seconds) -> Self {
+        Self::Timeframe(seconds)
     }
 }
 
-impl Into<LivePeriod> for u32 {
-    fn into(self) -> LivePeriod {
-        LivePeriod::from_u32(self)
+impl From<u32> for LivePeriod {
+    fn from(seconds: u32) -> Self {
+        Self::Timeframe(Seconds::from_seconds(seconds))
     }
 }
 
@@ -111,5 +109,32 @@ mod tests {
         let expected = LivePeriod::from_u32(900);
         let Struct { live_period } = serde_json::from_str(json).unwrap();
         assert_eq!(live_period, Some(expected));
+    }
+
+    #[test]
+    fn from_seconds_creates_timeframe() {
+        let seconds = Seconds::from_seconds(900);
+
+        assert_eq!(LivePeriod::from_seconds(seconds), LivePeriod::Timeframe(seconds));
+    }
+
+    #[test]
+    fn seconds_into_live_period_creates_timeframe() {
+        let seconds = Seconds::from_seconds(900);
+        let period: LivePeriod = seconds.into();
+
+        assert_eq!(period, LivePeriod::Timeframe(seconds));
+    }
+
+    #[test]
+    fn u32_into_live_period_creates_timeframe() {
+        let period: LivePeriod = 900_u32.into();
+
+        assert_eq!(period, LivePeriod::Timeframe(Seconds::from_seconds(900)));
+    }
+
+    #[test]
+    fn indefinite_cannot_be_converted_to_seconds() {
+        assert_eq!(Seconds::try_from(LivePeriod::Indefinite), Err("indefinite live period"));
     }
 }

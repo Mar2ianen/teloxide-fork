@@ -82,6 +82,7 @@ fn collect_attach_ids(value: &Value, into: &mut Vec<String>) {
     }
 }
 
+// This crosses the serializer/reqwest boundary and validates the final wire representation.
 #[tokio::test]
 async fn send_poll_attach_ids_match_multipart_file_parts() {
     let form = to_form_ref(&populated_poll()).unwrap().await;

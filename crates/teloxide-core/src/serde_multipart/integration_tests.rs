@@ -90,10 +90,15 @@ async fn send_poll_attach_ids_match_multipart_file_parts() {
     let mut request =
         Client::new().post("http://localhost.invalid").multipart(form).build().unwrap();
 
-    let content_type = request.headers()[CONTENT_TYPE].to_str().unwrap();
-    let boundary = content_type.split("boundary=").nth(1).expect("multipart boundary");
+    let boundary = request.headers()[CONTENT_TYPE]
+        .to_str()
+        .unwrap()
+        .split("boundary=")
+        .nth(1)
+        .expect("multipart boundary")
+        .to_owned();
     let body = request.body_mut().take().unwrap().collect().await.unwrap().to_bytes();
-    let parts = multipart_parts(&body, boundary);
+    let parts = multipart_parts(&body, &boundary);
 
     let mut attach_ids = Vec::new();
     for field in ["media", "explanation_media", "options"] {

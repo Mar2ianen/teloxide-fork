@@ -471,6 +471,15 @@
           }
         },
         {
+          "name": "message_effect_id",
+          "description": "Unique identifier of the message effect to add to the forwarded message; for private chats only",
+          "required": false,
+          "type_info": {
+            "type": "string",
+            "enumeration": []
+          }
+        },
+        {
           "name": "suggested_post_parameters",
           "description": "A JSON-serialized object containing the parameters of the suggested post to send; for direct messages chats only",
           "required": false,
@@ -731,6 +740,15 @@
           "required": false,
           "type_info": {
             "type": "bool"
+          }
+        },
+        {
+          "name": "message_effect_id",
+          "description": "Unique identifier of the message effect to add to the copied message; for private chats only",
+          "required": false,
+          "type_info": {
+            "type": "string",
+            "enumeration": []
           }
         },
         {
@@ -3394,7 +3412,7 @@
         },
         {
           "name": "options",
-          "description": "A JSON-serialized list of 2-12 answer options",
+          "description": "A JSON-serialized list of 1-12 answer options",
           "required": true,
           "type_info": {
             "type": "array",
@@ -3426,19 +3444,74 @@
         },
         {
           "name": "allows_multiple_answers",
-          "description": "*True*, if the poll allows multiple answers, ignored for polls in quiz mode, defaults to *False*",
+          "description": "Pass True if the poll allows multiple answers, defaults to False",
           "required": false,
           "type_info": {
             "type": "bool"
           }
         },
         {
-          "name": "correct_option_id",
-          "description": "0-based identifier of the correct answer option, required for polls in quiz mode",
+          "name": "allows_revoting",
+          "description": "Pass True if the poll allows changing chosen answer options; defaults to False for quizzes and True for regular polls",
           "required": false,
           "type_info": {
-            "type": "integer",
-            "enumeration": []
+            "type": "bool"
+          }
+        },
+        {
+          "name": "shuffle_options",
+          "description": "Pass True if the poll options must be shown in random order",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "allow_adding_options",
+          "description": "Pass True if answer options can be added after creation; not supported for anonymous polls and quizzes",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "hide_results_until_closes",
+          "description": "Pass True if poll results must be shown only after the poll closes",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "members_only",
+          "description": "Pass True if voting is limited to users who have been members of the target chat for more than 24 hours; for channel chats only",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "country_codes",
+          "description": "A JSON-serialized list of 0-12 two-letter ISO 3166-1 alpha-2 country codes allowed to vote; use FT for anonymous numbers",
+          "required": false,
+          "type_info": {
+            "type": "array",
+            "array": {
+              "type": "string",
+              "enumeration": []
+            }
+          }
+        },
+        {
+          "name": "correct_option_ids",
+          "description": "A JSON-serialized list of monotonically increasing 0-based identifiers of correct answers, required for quiz polls",
+          "required": false,
+          "type_info": {
+            "type": "array",
+            "array": {
+              "type": "integer",
+              "enumeration": []
+            }
           }
         },
         {
@@ -3474,8 +3547,17 @@
           }
         },
         {
+          "name": "explanation_media",
+          "description": "Media added to the quiz explanation",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "InputPollMedia"
+          }
+        },
+        {
           "name": "open_period",
-          "description": "Amount of time in seconds the poll will be active after creation, 5-600. Can't be used together with *close\\_date*.",
+          "description": "Amount of time in seconds the poll will be active after creation, 5-2628000. Can't be used together with close_date.",
           "required": false,
           "type_info": {
             "type": "integer",
@@ -3484,7 +3566,7 @@
         },
         {
           "name": "close_date",
-          "description": "Point in time (Unix timestamp) when the poll will be automatically closed. Must be at least 5 and no more than 600 seconds in the future. Can't be used together with *open\\_period*.",
+          "description": "Point in time when the poll will automatically close. Must be at least 5 and no more than 2628000 seconds in the future. Can't be used together with open_period.",
           "required": false,
           "type_info": {
             "type": "integer",
@@ -3497,6 +3579,45 @@
           "required": false,
           "type_info": {
             "type": "bool"
+          }
+        },
+        {
+          "name": "description",
+          "description": "Description of the poll to be sent, 0-1024 characters after entities parsing",
+          "required": false,
+          "type_info": {
+            "type": "string",
+            "enumeration": []
+          }
+        },
+        {
+          "name": "description_parse_mode",
+          "description": "Mode for parsing entities in the poll description",
+          "required": false,
+          "type_info": {
+            "type": "string",
+            "enumeration": []
+          }
+        },
+        {
+          "name": "description_entities",
+          "description": "A JSON-serialized list of special entities in the poll description, specified instead of description_parse_mode",
+          "required": false,
+          "type_info": {
+            "type": "array",
+            "array": {
+              "type": "reference",
+              "reference": "MessageEntity"
+            }
+          }
+        },
+        {
+          "name": "media",
+          "description": "Media added to the poll description",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "InputPollMedia"
           }
         },
         {
@@ -4360,6 +4481,14 @@
         {
           "name": "can_manage_direct_messages",
           "description": "Pass *True* if the administrator can manage direct messages within the channel and decline suggested posts; for channels only",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "can_manage_tags",
+          "description": "Pass True if the administrator can edit tags of regular members; for groups and supergroups only",
           "required": false,
           "type_info": {
             "type": "bool"
@@ -5312,6 +5441,14 @@
                 "enumeration": []
               }
             ]
+          }
+        },
+        {
+          "name": "return_bots",
+          "description": "Pass True to additionally receive all bots that are administrators of the chat; other bots are omitted by default",
+          "required": false,
+          "type_info": {
+            "type": "bool"
           }
         }
       ],

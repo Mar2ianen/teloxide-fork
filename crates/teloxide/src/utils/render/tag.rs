@@ -81,6 +81,7 @@ pub enum Kind<'a> {
     TextLink(&'a str),
     TextMention(u64),
     CustomEmoji(&'a CustomEmojiId),
+    DateTime { unix_time: i64, date_time_format: Option<&'a str> },
 }
 
 pub struct SimpleTag {
@@ -190,6 +191,9 @@ impl TagWriter {
                     Place::MidNewLine => unreachable!(),
                     Place::End => self.custom_emoji.middle.len() + self.custom_emoji.end.len(),
                 },
+                Kind::DateTime { unix_time, date_time_format } => {
+                    64 + unix_time.to_string().len() + date_time_format.map_or(0, str::len)
+                }
             })
             .sum()
     }

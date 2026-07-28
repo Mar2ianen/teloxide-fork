@@ -71,6 +71,17 @@ fn write_tag(tag: &Tag, buf: &mut String) {
             Place::MidNewLine => unreachable!(),
             Place::End => buf.push_str(HTML.custom_emoji.end),
         },
+        Kind::DateTime { unix_time, date_time_format } => match tag.place {
+            Place::Start => {
+                write!(buf, "<tg-time unix=\"{unix_time}\"").unwrap();
+                if let Some(format) = date_time_format {
+                    write!(buf, " format=\"{format}\"").unwrap();
+                }
+                buf.push('>');
+            }
+            Place::MidNewLine => unreachable!(),
+            Place::End => buf.push_str("</tg-time>"),
+        },
     }
 }
 

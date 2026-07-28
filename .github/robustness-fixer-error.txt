@@ -1,6 +1,6 @@
 Traceback (most recent call last):
-  File "/home/runner/work/_temp/085ce603-77a3-49ca-ac65-e45584d383c7.py", line 16, in <module>
-    exec(textwrap.dedent(script), {'__name__': '__main__'})
-  File "<string>", line 1
-    from pathlib import Path
-IndentationError: unexpected indent
+  File "/home/runner/work/_temp/65309449-0ab7-4451-8690-c5b965dd8e88.py", line 20, in <module>
+    exec(script, {'__name__': '__main__'})
+  File "<string>", line 87, in <module>
+  File "<string>", line 7, in replace
+SystemExit: pattern not found in crates/teloxide-core/src/types/sticker.rs: 'impl StickerFormatFlags {\n    pub fn format(&self) -> StickerFormat {\n        ma'

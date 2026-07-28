@@ -1,0 +1,49 @@
+name: Run robustness fixer
+
+on:
+  push:
+    branches: [ master ]
+    paths: [ .github/workflows/run-robustness-fixes.yml ]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/robustness-panics-and-updates
+
+      - name: Apply embedded fixer
+        shell: python
+        run: |
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/apply-robustness-fixes.yml').read_text()
+          block = workflow.split('      - name: Apply fixes\n', 1)[1]
+          block = block.split('      - uses: dtolnay/rust-toolchain@master\n', 1)[0]
+          script = block.split('        run: |\n', 1)[1]
+          exec(textwrap.dedent(script), {'__name__': '__main__'})
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-06-12
+          components: rustfmt
+
+      - run: cargo fmt --all
+
+      - name: Commit fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/teloxide-core/src/types/chat_id.rs \
+                  crates/teloxide-core/src/types/sticker.rs \
+                  crates/teloxide-core/src/types/update.rs \
+                  crates/teloxide-core/src/serde_multipart/unserializers/input_file.rs \
+                  crates/teloxide-core/src/serde_multipart/unserializers.rs \
+                  crates/teloxide-core/src/serde_multipart/error.rs
+          git commit -m "fix: harden malformed Telegram data handling"
+          git push origin HEAD:fix/robustness-panics-and-updates

@@ -62,9 +62,12 @@ impl Serializer for InputFileUnserializer {
         // TODO
         match variant {
             "File" => Ok(InputFile::File(value.serialize(StringUnserializer)?.into())),
-            "Url" => Ok(InputFile::Url(
-                reqwest::Url::parse(&value.serialize(StringUnserializer)?).unwrap(),
-            )),
+            "Url" => {
+                let value = value.serialize(StringUnserializer)?;
+                reqwest::Url::parse(&value)
+                    .map(InputFile::Url)
+                    .map_err(|error| UnserializerError::Custom(error.to_string()))
+            }
             "FileId" => Ok(InputFile::FileId(value.serialize(StringUnserializer)?)),
             name => Err(UnserializerError::UnexpectedVariant {
                 name,

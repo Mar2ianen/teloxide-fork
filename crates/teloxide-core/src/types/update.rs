@@ -165,8 +165,8 @@ pub enum UpdateKind {
     /// This allows `teloxide` to continue working even if telegram adds a new
     /// kinds of updates.
     ///
-    /// **Note that deserialize implementation always returns an empty value**,
-    /// teloxide fills in the data when doing deserialization.
+    /// The raw value is preserved for genuinely unknown update kinds and for
+    /// malformed payloads of known update kinds.
     Error(Value),
 }
 
@@ -376,104 +376,72 @@ impl<'de> Deserialize<'de> for UpdateKind {
             where
                 A: MapAccess<'de>,
             {
-                let mut tmp = None;
+                let Some(key) = map.next_key::<String>()? else { return Ok(empty_error()) };
+                let value = map.next_value::<Value>()?;
 
-                // Try to deserialize a borrowed-str key, or else try deserializing an owned
-                // string key
-                let key = map.next_key::<&str>().or_else(|_| {
-                    map.next_key::<String>().map(|k| {
-                        tmp = k;
-                        tmp.as_deref()
-                    })
-                });
+                let mut raw = serde_json::Map::new();
+                raw.insert(key.clone(), value.clone());
+                while let Some((key, value)) = map.next_entry::<String, Value>()? {
+                    raw.insert(key, value);
+                }
 
-                let this = key
-                    .ok()
-                    .flatten()
-                    .and_then(|key| match key {
-                        "message" => map.next_value::<Message>().ok().map(UpdateKind::Message),
-                        "edited_message" => {
-                            map.next_value::<Message>().ok().map(UpdateKind::EditedMessage)
+                macro_rules! decode {
+                    ($ty:ty, $variant:path) => {
+                        match serde_json::from_value::<$ty>(value.clone()) {
+                            Ok(value) => $variant(value),
+                            Err(_) => UpdateKind::Error(Value::Object(raw.clone())),
                         }
-                        "channel_post" => {
-                            map.next_value::<Message>().ok().map(UpdateKind::ChannelPost)
-                        }
-                        "edited_channel_post" => {
-                            map.next_value::<Message>().ok().map(UpdateKind::EditedChannelPost)
-                        }
-                        "guest_message" => {
-                            map.next_value::<Message>().ok().map(UpdateKind::GuestMessage)
-                        }
-                        "business_connection" => map
-                            .next_value::<BusinessConnection>()
-                            .ok()
-                            .map(UpdateKind::BusinessConnection),
-                        "business_message" => {
-                            map.next_value::<Message>().ok().map(UpdateKind::BusinessMessage)
-                        }
-                        "edited_business_message" => {
-                            map.next_value::<Message>().ok().map(UpdateKind::EditedBusinessMessage)
-                        }
-                        "deleted_business_messages" => map
-                            .next_value::<BusinessMessagesDeleted>()
-                            .ok()
-                            .map(UpdateKind::DeletedBusinessMessages),
-                        "managed_bot" => {
-                            map.next_value::<ManagedBotUpdated>().ok().map(UpdateKind::ManagedBot)
-                        }
-                        "message_reaction" => map
-                            .next_value::<MessageReactionUpdated>()
-                            .ok()
-                            .map(UpdateKind::MessageReaction),
-                        "message_reaction_count" => map
-                            .next_value::<MessageReactionCountUpdated>()
-                            .ok()
-                            .map(UpdateKind::MessageReactionCount),
-                        "inline_query" => {
-                            map.next_value::<InlineQuery>().ok().map(UpdateKind::InlineQuery)
-                        }
-                        "chosen_inline_result" => map
-                            .next_value::<ChosenInlineResult>()
-                            .ok()
-                            .map(UpdateKind::ChosenInlineResult),
-                        "callback_query" => {
-                            map.next_value::<CallbackQuery>().ok().map(UpdateKind::CallbackQuery)
-                        }
-                        "shipping_query" => {
-                            map.next_value::<ShippingQuery>().ok().map(UpdateKind::ShippingQuery)
-                        }
-                        "pre_checkout_query" => map
-                            .next_value::<PreCheckoutQuery>()
-                            .ok()
-                            .map(UpdateKind::PreCheckoutQuery),
-                        "purchased_paid_media" => map
-                            .next_value::<PaidMediaPurchased>()
-                            .ok()
-                            .map(UpdateKind::PurchasedPaidMedia),
-                        "poll" => map.next_value::<Poll>().ok().map(UpdateKind::Poll),
-                        "poll_answer" => {
-                            map.next_value::<PollAnswer>().ok().map(UpdateKind::PollAnswer)
-                        }
-                        "my_chat_member" => {
-                            map.next_value::<ChatMemberUpdated>().ok().map(UpdateKind::MyChatMember)
-                        }
-                        "chat_member" => {
-                            map.next_value::<ChatMemberUpdated>().ok().map(UpdateKind::ChatMember)
-                        }
-                        "chat_join_request" => map
-                            .next_value::<ChatJoinRequest>()
-                            .ok()
-                            .map(UpdateKind::ChatJoinRequest),
-                        "chat_boost" => {
-                            map.next_value::<ChatBoostUpdated>().ok().map(UpdateKind::ChatBoost)
-                        }
-                        "removed_chat_boost" => map
-                            .next_value::<ChatBoostRemoved>()
-                            .ok()
-                            .map(UpdateKind::RemovedChatBoost),
-                        _ => Some(empty_error()),
-                    })
-                    .unwrap_or_else(empty_error);
+                    };
+                }
+
+                let this = match key.as_str() {
+                    "message" => decode!(Message, UpdateKind::Message),
+                    "edited_message" => decode!(Message, UpdateKind::EditedMessage),
+                    "channel_post" => decode!(Message, UpdateKind::ChannelPost),
+                    "edited_channel_post" => decode!(Message, UpdateKind::EditedChannelPost),
+                    "guest_message" => decode!(Message, UpdateKind::GuestMessage),
+                    "business_connection" => {
+                        decode!(BusinessConnection, UpdateKind::BusinessConnection)
+                    }
+                    "business_message" => decode!(Message, UpdateKind::BusinessMessage),
+                    "edited_business_message" => {
+                        decode!(Message, UpdateKind::EditedBusinessMessage)
+                    }
+                    "deleted_business_messages" => {
+                        decode!(BusinessMessagesDeleted, UpdateKind::DeletedBusinessMessages)
+                    }
+                    "managed_bot" => decode!(ManagedBotUpdated, UpdateKind::ManagedBot),
+                    "message_reaction" => {
+                        decode!(MessageReactionUpdated, UpdateKind::MessageReaction)
+                    }
+                    "message_reaction_count" => {
+                        decode!(MessageReactionCountUpdated, UpdateKind::MessageReactionCount)
+                    }
+                    "inline_query" => decode!(InlineQuery, UpdateKind::InlineQuery),
+                    "chosen_inline_result" => {
+                        decode!(ChosenInlineResult, UpdateKind::ChosenInlineResult)
+                    }
+                    "callback_query" => decode!(CallbackQuery, UpdateKind::CallbackQuery),
+                    "shipping_query" => decode!(ShippingQuery, UpdateKind::ShippingQuery),
+                    "pre_checkout_query" => {
+                        decode!(PreCheckoutQuery, UpdateKind::PreCheckoutQuery)
+                    }
+                    "purchased_paid_media" => {
+                        decode!(PaidMediaPurchased, UpdateKind::PurchasedPaidMedia)
+                    }
+                    "poll" => decode!(Poll, UpdateKind::Poll),
+                    "poll_answer" => decode!(PollAnswer, UpdateKind::PollAnswer),
+                    "my_chat_member" => decode!(ChatMemberUpdated, UpdateKind::MyChatMember),
+                    "chat_member" => decode!(ChatMemberUpdated, UpdateKind::ChatMember),
+                    "chat_join_request" => {
+                        decode!(ChatJoinRequest, UpdateKind::ChatJoinRequest)
+                    }
+                    "chat_boost" => decode!(ChatBoostUpdated, UpdateKind::ChatBoost),
+                    "removed_chat_boost" => {
+                        decode!(ChatBoostRemoved, UpdateKind::RemovedChatBoost)
+                    }
+                    _ => UpdateKind::Error(Value::Object(raw)),
+                };
 
                 Ok(this)
             }
@@ -1271,5 +1239,23 @@ mod test {
             }
             _ => panic!("Expected `PurchasedPaidMedia`"),
         }
+    }
+    #[test]
+    fn malformed_known_update_preserves_raw_value() {
+        let update = r#"{"update_id":1,"message":null}"#;
+        let update: Update = serde_json::from_str(update).unwrap();
+
+        assert_eq!(update.kind, UpdateKind::Error(serde_json::json!({"message": null})));
+    }
+
+    #[test]
+    fn unknown_update_preserves_raw_value() {
+        let update = r#"{"update_id":1,"future_update":{"answer":42}}"#;
+        let update: Update = serde_json::from_str(update).unwrap();
+
+        assert_eq!(
+            update.kind,
+            UpdateKind::Error(serde_json::json!({"future_update": {"answer": 42}}))
+        );
     }
 }

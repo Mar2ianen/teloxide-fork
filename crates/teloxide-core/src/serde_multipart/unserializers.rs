@@ -80,7 +80,7 @@ fn test() {
         types::InputFile,
     };
 
-    use serde::Serialize;
+    use serde::{Serialize, Serializer as _};
 
     use std::{borrow::Cow, path::Path};
 
@@ -92,6 +92,11 @@ fn test() {
     assert!(
         matches!(value.serialize(InputFileUnserializer::NotMem), Ok(InputFile::Url(v)) if v == url)
     );
+
+    let invalid_url = InputFileUnserializer::NotMem
+        .serialize_newtype_variant("InputFile", 0, "Url", &"not a valid URL")
+        .unwrap_err();
+    assert!(matches!(invalid_url, UnserializerError::Custom(_)));
 
     let value = InputFile::FileId("file_id".into());
     assert!(

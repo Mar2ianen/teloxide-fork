@@ -41,13 +41,24 @@ impl From<Error> for RequestError {
         match err {
             Error::Io(ioerr) => RequestError::Io(Arc::new(ioerr)),
 
-            // This should be ok since we (hopefuly) don't write request those may trigger errors
-            // and `Error` is internal.
-            e => unreachable!(
-                "we don't create requests those fail to serialize (if you see this, open an issue \
-                 :|): {}",
-                e
-            ),
+            error => RequestError::Io(Arc::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                error,
+            ))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn internal_serialization_error_does_not_panic() {
+        let error: RequestError = Error::TopLevelNotStruct.into();
+        assert!(
+            matches!(error, RequestError::Io(_)),
+            "internal serializer failures must remain recoverable"
+        );
     }
 }

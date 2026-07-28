@@ -56,6 +56,9 @@ mod tests {
     #[test]
     fn internal_serialization_error_does_not_panic() {
         let error: RequestError = Error::TopLevelNotStruct.into();
-        assert!(matches!(error, RequestError::Io(_)));
+        assert!(
+            matches!(error, RequestError::Io(_)),
+            "internal serializer failures must remain recoverable"
+        );
     }
 }

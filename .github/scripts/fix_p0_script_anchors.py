@@ -67,9 +67,15 @@ for old, new, label in [
     (old_render, new_render, "render mapping"),
     (old_tag, new_tag, "tag capacity"),
 ]:
-    count = text.count(old)
-    if count != 1:
-        raise RuntimeError(f"{label}: expected one script match, got {count}")
-    text = text.replace(old, new, 1)
+    old_count = text.count(old)
+    new_count = text.count(new)
+    if old_count == 1 and new_count == 0:
+        text = text.replace(old, new, 1)
+    elif old_count == 0 and new_count == 1:
+        continue
+    else:
+        raise RuntimeError(
+            f"{label}: expected exactly old or new form, got old={old_count}, new={new_count}"
+        )
 
 path.write_text(text)

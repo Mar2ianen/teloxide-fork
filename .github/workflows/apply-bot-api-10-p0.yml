@@ -1,0 +1,55 @@
+name: Apply Bot API 10.0 P0
+
+on:
+  push:
+    branches: [ bot-api-10-p0 ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: bot-api-10-p0
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-06-12
+          components: rustfmt
+
+      - name: Apply schema patch
+        run: python3 maintainer/apply_bot_api_10_p0.py
+
+      - name: Regenerate payloads and requester fan-out
+        shell: bash
+        run: |
+          set +e
+          cargo test -p teloxide-core --features "full nightly" codegen
+          first=$?
+          set -e
+          cargo test -p teloxide-core --features "full nightly" codegen
+          echo "First codegen exit status: $first (expected to be non-zero when files were updated)"
+
+      - name: Format
+        run: cargo fmt --all
+
+      - name: Commit generated changes
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No generated changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/teloxide-core/schema.ron \
+                  crates/teloxide-core/src \
+                  crates/teloxide/src \
+                  maintainer/apply_bot_api_10_p0.py
+          git commit -m "feat: complete Bot API 10.0 core method coverage"
+          git push origin HEAD:bot-api-10-p0

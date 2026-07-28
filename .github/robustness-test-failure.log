@@ -1,0 +1,285 @@
+exit_status=101
+
+590:test result: ok. 48 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+625:test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+634:test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+643:test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+652:test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+658:error: toolchain 'nightly-2025-06-12-x86_64-unknown-linux-gnu' is not installed
+661:thread 'codegen::schema_check::rust_types_check_codegen::tests::codegen_types_checking' (6658) panicked at crates/teloxide-core/src/codegen.rs:32:9:
+664:test codegen::schema_check::rust_types_check_codegen::tests::codegen_types_checking ... FAILED
+676:thread 'net::request::tests::update_err' (6678) panicked at crates/teloxide-core/src/net/request.rs:284:61:
+678:test net::request::tests::update_err ... FAILED
+687:error: toolchain 'nightly-2025-06-12-x86_64-unknown-linux-gnu' is not installed
+690:thread 'local_macros::codegen_requester_forward' (6667) panicked at crates/teloxide-core/src/codegen.rs:32:9:
+692:test local_macros::codegen_requester_forward ... FAILED
+693:error: toolchain 'nightly-2025-06-12-x86_64-unknown-linux-gnu' is not installed
+696:thread 'payloads::codegen::codegen_payloads' (6686) panicked at crates/teloxide-core/src/codegen.rs:32:9:
+698:test payloads::codegen::codegen_payloads ... FAILED
+700:error: toolchain 'nightly-2025-06-12-x86_64-unknown-linux-gnu' is not installed
+703:thread 'payloads::codegen_payload_mods_and_reexports' (6687) panicked at crates/teloxide-core/src/codegen.rs:32:9:
+705:test payloads::codegen_payload_mods_and_reexports ... FAILED
+706:error: toolchain 'nightly-2025-06-12-x86_64-unknown-linux-gnu' is not installed
+709:thread 'payloads::codegen_setters_reexports' (6693) panicked at crates/teloxide-core/src/codegen.rs:32:9:
+711:test payloads::codegen_setters_reexports ... FAILED
+712:test serde_multipart::error::tests::internal_serialization_error_does_not_panic ... ok
+713:error: toolchain 'nightly-2025-06-12-x86_64-unknown-linux-gnu' is not installed
+717:thread 'requests::requester::codegen_requester_methods' (6707) panicked at crates/teloxide-core/src/codegen.rs:32:9:
+719:test requests::requester::codegen_requester_methods ... FAILED
+902:test types::passport_element_error::tests::serialize_data_field ... ok
+904:thread 'types::percentage::tests::above_limit' (6907) panicked at crates/teloxide-core/src/types/percentage.rs:22:9:
+973:failures:
+975:failures:
+984:test result: FAILED. 270 passed; 7 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.74s
+
+--- tail ---
+test types::chat_boost_removed::tests::deserialize ... ok
+test types::chat_boost_source::tests::deserialize_gift_code ... ok
+test types::chat_boost_source::tests::deserialize_giveaway ... ok
+test types::chat_boost_source::tests::deserialize_premium ... ok
+test types::chat_boost_updated::tests::deserialize ... ok
+test types::chat_full_info::tests::channel_de ... ok
+{"id":0,"type":"private","username":"username","first_name":"Anon","accepted_gift_types":{"unlimited_gifts":true,"limited_gifts":true,"unique_gifts":true,"premium_subscription":true,"gifts_from_channels":false},"accent_color_id":0,"emoji_status_expiration_date":1720708004,"max_reaction_count":0}
+test types::chat_full_info::tests::private_chat_de ... ok
+test types::chat_full_info::tests::private_chat_de_wrong_type_field ... ok
+test types::chat_full_info::tests::private_roundtrip ... ok
+test types::chat_id::tests::chonky_user_id_to_bare ... ok
+test types::chat_id::tests::deser ... ok
+test types::chat_id::tests::display ... ok
+test types::chat_id::tests::extended_ranges_are_classified_without_panicking ... ok
+test types::chat_id::tests::to_bare_to_bot_api_identity ... ok
+test types::chat_id::tests::user_id_eq ... ok
+test types::chat_member::tests::deserialize_administrator ... ok
+test types::chat_member::tests::deserialize_restricted ... ok
+test types::chat_permissions::tests::deserialization ... ok
+test types::chat_permissions::tests::modfiy_permission ... ok
+test types::chat_permissions::tests::serialization ... ok
+test types::encrypted_credentials::tests::must_serialize_encrypted_credentials_to_json ... ok
+test types::encrypted_passport_element::tests::deserialize_encrypted_passport_element_email ... ok
+test types::file::tests::full_file ... ok
+test types::file::tests::no_file_path ... ok
+test types::file::tests::no_file_size ... ok
+test types::force_reply::tests::deserialize ... ok
+test types::forum_topic_created::tests::deserialization ... ok
+test types::gift::tests::deser ... ok
+test types::gift_info::tests::deserialize ... ok
+test types::giveaway::tests::deserialize ... ok
+test types::giveaway_completed::tests::deserialize ... ok
+test types::giveaway_created::tests::deserialize ... ok
+test types::giveaway_winners::tests::deserialize ... ok
+test types::inline_keyboard_markup::tests::append_row ... ok
+test types::inline_keyboard_markup::tests::append_to_row_existent_row ... ok
+test types::inline_keyboard_markup::tests::append_to_row_nonexistent_row ... ok
+test types::inline_query_result::tests::article_full ... ok
+test types::inline_query_result::tests::article_min ... ok
+test types::inline_query_result::tests::audio_full ... ok
+test types::inline_query_result::tests::audio_min ... ok
+test types::inline_query_result::tests::cached_audio_full ... ok
+test types::inline_query_result::tests::cached_audio_min ... ok
+test types::inline_query_result::tests::cached_document_full ... ok
+test types::inline_query_result::tests::cached_document_min ... ok
+test types::inline_query_result::tests::cached_gif_full ... ok
+test types::inline_query_result::tests::cached_gif_min ... ok
+test types::inline_query_result::tests::cached_mpeg4_gif_full ... ok
+test types::inline_query_result::tests::cached_mpeg4_gif_min ... ok
+test types::inline_query_result::tests::cached_photo_full ... ok
+test types::inline_query_result::tests::cached_photo_min ... ok
+test types::inline_query_result::tests::cached_sticker_full ... ok
+test types::inline_query_result::tests::cached_sticker_min ... ok
+test types::inline_query_result::tests::cached_video_full ... ok
+test types::inline_query_result::tests::cached_video_min ... ok
+test types::inline_query_result::tests::cached_voice_full ... ok
+test types::inline_query_result::tests::cached_voice_min ... ok
+test types::inline_query_result::tests::contact_full ... ok
+test types::inline_query_result::tests::contact_min ... ok
+test types::inline_query_result::tests::document_full ... ok
+test types::inline_query_result::tests::document_min ... ok
+test types::inline_query_result::tests::game_full ... ok
+test types::inline_query_result::tests::game_min ... ok
+test types::inline_query_result::tests::gif_full ... ok
+test types::inline_query_result::tests::gif_min ... ok
+test types::inline_query_result::tests::location_full ... ok
+test types::inline_query_result::tests::location_min ... ok
+test types::inline_query_result::tests::mpeg4_gif_full ... ok
+test types::inline_query_result::tests::mpeg4_gif_min ... ok
+test types::inline_query_result::tests::photo_full ... ok
+test types::inline_query_result::tests::photo_min ... ok
+test types::inline_query_result::tests::venue_full ... ok
+test types::inline_query_result::tests::venue_min ... ok
+test types::inline_query_result::tests::video_full ... ok
+test types::inline_query_result::tests::video_min ... ok
+test types::inline_query_result::tests::voice_full ... ok
+test types::inline_query_result::tests::voice_min ... ok
+test types::inline_query_results_button::tests::inline_query_results_button ... ok
+test types::input_media::tests::animation_serialize ... ok
+test types::input_media::tests::audio_serialize ... ok
+test types::input_media::tests::document_serialize ... ok
+test types::input_media::tests::live_photo_files_include_video_and_photo ... ok
+test types::input_media::tests::photo_serialize ... ok
+test types::input_media::tests::video_files_include_media_thumbnail_and_cover ... ok
+test types::input_media::tests::video_serialize ... ok
+test types::input_message_content::tests::contact_serialize ... ok
+test types::input_message_content::tests::location_serialize ... ok
+test types::input_message_content::tests::text_serialize ... ok
+test types::input_message_content::tests::venue_serialize ... ok
+test types::input_paid_media::tests::photo_serialize ... ok
+test types::input_paid_media::tests::test_mutability ... ok
+test types::input_paid_media::tests::video_files_include_cover ... ok
+test types::input_paid_media::tests::video_serialize ... ok
+test types::input_poll_option::tests::serialize_text_entities ... ok
+test types::input_poll_option::tests::serialize_text_parse_mode ... ok
+test types::keyboard_button::tests::deserialize_no_request ... ok
+test types::keyboard_button::tests::deserialize_request_contact ... ok
+test types::keyboard_button::tests::serialize_chat_request ... ok
+test types::keyboard_button::tests::serialize_no_request ... ok
+test types::keyboard_button::tests::serialize_request_contact ... ok
+test types::label_price::tests::serialize ... ok
+test types::link_preview_options::tests::deserialize ... ok
+test types::live_period::tests::deserialize_900 ... ok
+test types::live_period::tests::deserialize_indefinite ... ok
+test types::live_period::tests::from_seconds_creates_timeframe ... ok
+test types::live_period::tests::indefinite_cannot_be_converted_to_seconds ... ok
+test types::live_period::tests::seconds_into_live_period_creates_timeframe ... ok
+test types::live_period::tests::u32_into_live_period_creates_timeframe ... ok
+test types::maybe_anonymous_user::tests::chat_de ... ok
+test types::maybe_anonymous_user::tests::user_de ... ok
+test types::maybe_inaccessible_message::tests::test_inaccessible_message ... ok
+test types::maybe_inaccessible_message::tests::test_regular_message ... ok
+test types::me::tests::convenience_methods_work ... ok
+test types::message::tests::chat_boost_added ... ok
+test types::message::tests::de_image ... ok
+test types::message::tests::de_media_forwarded ... ok
+test types::message::tests::de_media_group_forwarded ... ok
+test types::message::tests::de_shared_chat ... ok
+test types::message::tests::de_sticker ... ok
+test types::message::tests::de_text ... ok
+test types::message::tests::effect_id ... ok
+test types::message::tests::empty_message ... ok
+test types::message::tests::gift_info ... ok
+test types::message::tests::giveaway ... ok
+test serde_multipart::integration_tests::send_paid_media_video_attach_ids_match_multipart_file_parts ... ok
+test types::message::tests::giveaway_completed ... ok
+test types::message::tests::giveaway_created ... ok
+test types::message::tests::giveaway_winners ... ok
+test types::message::tests::issue_419 ... ok
+test types::message::tests::issue_427 ... ok
+test types::message::tests::issue_475 ... ok
+test types::message::tests::issue_481 ... ok
+test types::message::tests::issue_874 ... ok
+test types::message::tests::paid_message_price_changed ... ok
+test types::message::tests::parse_caption_entities ... ok
+test types::message::tests::show_caption_above_media ... ok
+test types::message::tests::suggested_post_approval_failed ... ok
+test types::message::tests::suggested_post_approved ... ok
+test types::message::tests::suggested_post_declined ... ok
+test types::message::tests::suggested_post_paid ... ok
+test types::message::tests::suggested_post_refunded ... ok
+test types::message::tests::topic_created ... ok
+test types::message::tests::topic_message ... ok
+test types::message::tests::unique_gift_info ... ok
+test types::message_entity::tests::blockquote ... ok
+test types::message_entity::tests::expandable_blockquote ... ok
+test types::message_entity::tests::parse_empty ... ok
+test types::message_entity::tests::parse_enclosed ... ok
+test types::message_entity::tests::parse_nothing ... ok
+test types::message_entity::tests::parse_symbol_24bit ... ok
+test types::message_entity::tests::parse_быба ... ok
+test types::message_entity::tests::pre ... ok
+test types::message_entity::tests::pre_with_none_language ... ok
+test types::message_entity::tests::recursive_kind ... ok
+test types::message_id::tests::smoke_ser ... ok
+test types::message_id::tests::smoke_deser ... ok
+test types::message_reaction_count_updated::tests::deserialize ... ok
+test types::message_reaction_updated::tests::deserialize_chat ... ok
+test types::message_reaction_updated::tests::deserialize_user ... ok
+test types::msg_id_as_int::test ... ok
+test types::option_msg_id_as_int::test ... ok
+test types::option_url_from_string::test ... ok
+test types::paid_message_price_changed::tests::deserialize ... ok
+test types::parse_mode::tests::html_serialization ... ok
+test types::parse_mode::tests::markdown_serialization ... ok
+test types::passport_element_error::tests::serialize_data_field ... ok
+
+thread 'types::percentage::tests::above_limit' (6907) panicked at crates/teloxide-core/src/types/percentage.rs:22:9:
+assertion failed: percentage <= 100
+test types::percentage::tests::deserialization ... ok
+test types::percentage::tests::above_limit - should panic ... ok
+test types::percentage::tests::serialization ... ok
+test types::photo_size::tests::deserialize ... ok
+test types::poll_answer::tests::poll_answer_with_both_user_and_voter_chat_de ... ok
+test types::poll::tests::deserialize ... ok
+test types::poll_answer::tests::poll_answer_with_user_de ... ok
+test types::recipient::tests::chat_id_channel_username_serialization ... ok
+test types::poll_answer::tests::poll_answer_with_voter_chat_de ... ok
+test types::recipient::tests::chat_id_id_serialization ... ok
+test types::reply_keyboard_markup::tests::deserialize ... ok
+test types::reply_keyboard_markup::tests::serialize ... ok
+test types::reply_keyboard_remove::tests::deserialize ... ok
+test types::reply_markup::tests::inline_keyboard_markup ... ok
+test types::request_id::tests::test_request_id_de ... ok
+test types::response_parameters::tests::migrate_to_chat_id_deserialization ... ok
+test types::response_parameters::tests::retry_after_deserialization ... ok
+test types::rgb::tests::argb ... ok
+test types::rgb::tests::rgb ... ok
+test types::seconds::tests::deserialization ... ok
+test types::seconds::tests::serialization ... ok
+test types::serde_opt_date_from_unix_timestamp::test ... ok
+test types::shipping_option::tests::serialize ... ok
+test types::sticker::tests::inconsistent_sticker_format_flags_do_not_panic ... ok
+test types::sticker::tests::mask_serde ... ok
+test types::sticker::tests::regular_serde_with_options ... ok
+test types::sticker::tests::regular_serde ... ok
+test types::sticker::tests::sticker_format_flags_serde ... ok
+test types::sticker::tests::sticker_format_serde ... ok
+test types::sticker_set::tests::smoke_serde ... ok
+test types::story::tests::url_works ... ok
+test types::sticker_set::tests::test ... ok
+test types::successful_payment::tests::deser ... ok
+test types::story_id::tests::deser ... ok
+test types::thread_id::tests::smoke_deser ... ok
+test types::thread_id::tests::smoke_ser ... ok
+test types::transaction_partner::tests::test_transaction_partner_user ... ok
+test types::unique_gift::tests::deserialize ... ok
+test types::unique_gift_info::tests::deserialize ... ok
+test types::unit_false::tests::unit_false_de ... ok
+test types::unit_true::tests::unit_true_de ... ok
+test types::unit_false::tests::unit_false_se ... ok
+test types::unit_true::tests::unit_true_se ... ok
+test types::update::test::chat_boost_removed ... ok
+test types::update::test::chat_boost_updated ... ok
+test types::update::test::de_private_chat_text_message ... ok
+test types::update::test::dice_works ... ok
+test types::update::test::issue_523 ... ok
+test types::update::test::malformed_known_update_is_an_error ... ok
+test types::update::test::issue_1107 ... ok
+test types::update::test::message ... ok
+test types::update::test::message_reaction_count_updated ... ok
+test types::update::test::message_reaction_updated ... ok
+test types::update::test::new_update_kind_error ... ok
+test types::update::test::paid_media_purchased_de ... ok
+test types::update::test::unknown_update_preserves_raw_value ... ok
+test types::user::tests::convenience_methods_work ... ok
+test types::user::tests::deserialize ... ok
+test types::user_chat_boosts::tests::deserialize ... ok
+test types::user_id::tests::deser ... ok
+test types::user_id::tests::url_works ... ok
+test types::vec_msg_id_as_vec_int::test ... ok
+test types::update::test::pinned_message_works ... ok
+test types::webhook_info::empty_url ... ok
+test serde_multipart::integration_tests::send_poll_attach_ids_match_multipart_file_parts ... ok
+test codegen::schema_check::rust_types_check_tests::test_rust_objects ... ok
+
+failures:
+
+failures:
+    codegen::schema_check::rust_types_check_codegen::tests::codegen_types_checking
+    local_macros::codegen_requester_forward
+    net::request::tests::update_err
+    payloads::codegen::codegen_payloads
+    payloads::codegen_payload_mods_and_reexports
+    payloads::codegen_setters_reexports
+    requests::requester::codegen_requester_methods
+
+test result: FAILED. 270 passed; 7 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.74s
+
+[1m[91merror[0m: test failed, to rerun pass `-p teloxide-core --lib`

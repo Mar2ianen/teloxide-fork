@@ -88,6 +88,35 @@ jobs:
           cp /tmp/bot-api-patched.rs crates/teloxide-core/src/bot/api.rs
           base64 -d scripts/patch_bot_api_10_2_adaptors.py.gz.b64 | gzip -d > /tmp/patch_bot_api_10_2_adaptors.py
           python /tmp/patch_bot_api_10_2_adaptors.py
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("crates/teloxide-core/src/requests/requester.rs")
+          text = path.read_text()
+          start = text.index("macro_rules! forward_all")
+          end = text.index("impl<B> Requester for &B", start)
+          block = text[start:end]
+          methods = [
+              "answer_chat_join_request_query",
+              "send_chat_join_request_web_app",
+              "edit_ephemeral_message_text",
+              "edit_ephemeral_message_media",
+              "edit_ephemeral_message_caption",
+              "edit_ephemeral_message_reply_markup",
+              "delete_ephemeral_message",
+              "send_rich_message",
+              "send_rich_message_draft",
+          ]
+          missing = [method for method in methods if f"            {method}," not in block]
+          if missing:
+              anchor = "            approve_chat_join_request,\n            decline_chat_join_request\n            => $body, $ty"
+              insertion = "".join(f"            {method},\n" for method in missing)
+              if anchor not in block:
+                  raise RuntimeError("blanket Requester forwarding anchor not found")
+              block = block.replace(anchor, insertion + anchor, 1)
+              text = text[:start] + block + text[end:]
+              path.write_text(text)
+          PY
 
       - name: Regenerate code
         shell: bash

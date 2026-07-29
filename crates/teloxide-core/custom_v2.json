@@ -10395,6 +10395,15 @@
           }
         },
         {
+          "description": "New period in seconds during which the location can be updated, starting from the message send date. If 0x7FFFFFFF is specified, then the location can be updated forever. Otherwise, the new value must not exceed the current live_period by more than a day, and the live location expiration date must remain within the next 90 days. If not specified, then live_period remains unchanged",
+          "name": "live_period",
+          "required": false,
+          "type_info": {
+            "reference": "LivePeriod",
+            "type": "reference"
+          }
+        },
+        {
           "description": "The radius of uncertainty for the location, measured in meters; 0-1500",
           "name": "horizontal_accuracy",
           "required": false,
@@ -10597,11 +10606,12 @@
           }
         },
         {
-          "description": "Disables link previews for links in this message",
-          "name": "disable_web_page_preview",
+          "description": "Link preview generation options for the message",
+          "name": "link_preview_options",
           "required": false,
           "type_info": {
-            "type": "bool"
+            "reference": "LinkPreviewOptions",
+            "type": "reference"
           }
         },
         {
@@ -10671,6 +10681,14 @@
               "type": "reference"
             },
             "type": "array"
+          }
+        },
+        {
+          "description": "Pass True, if the caption must be shown above the message media. Supported only for animation, photo and video messages",
+          "name": "show_caption_above_media",
+          "required": false,
+          "type_info": {
+            "type": "bool"
           }
         },
         {

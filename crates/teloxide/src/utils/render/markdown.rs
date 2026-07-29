@@ -1,5 +1,3 @@
-use std::fmt::Write;
-
 use crate::utils::markdown::ESCAPE_CHARS;
 
 use super::{ComplexTag, Kind, NewLineRepeatedTag, Place, SimpleTag, Tag, TagWriter};
@@ -43,7 +41,9 @@ fn write_tag(tag: &Tag, buf: &mut String) {
         Kind::Pre(lang) => match tag.place {
             Place::Start => match lang {
                 Some(lang) => {
-                    write!(buf, "{}{}{}", MARKDOWN.pre.start, lang, MARKDOWN.pre.middle).unwrap()
+                    buf.push_str(MARKDOWN.pre.start);
+                    buf.push_str(lang);
+                    buf.push_str(MARKDOWN.pre.middle);
                 }
                 None => buf.push_str(MARKDOWN.pre_no_lang.start),
             },
@@ -54,39 +54,51 @@ fn write_tag(tag: &Tag, buf: &mut String) {
             Place::Start => buf.push_str(MARKDOWN.text_link.start),
             Place::MidNewLine => unreachable!(),
             Place::End => {
-                write!(buf, "{}{}{}", MARKDOWN.text_link.middle, url, MARKDOWN.text_link.end)
-                    .unwrap()
+                buf.push_str(MARKDOWN.text_link.middle);
+                write_link_destination(url, buf);
+                buf.push_str(MARKDOWN.text_link.end);
             }
         },
         Kind::TextMention(id) => match tag.place {
             Place::Start => buf.push_str(MARKDOWN.text_mention.start),
             Place::MidNewLine => unreachable!(),
             Place::End => {
-                write!(buf, "{}{}{}", MARKDOWN.text_mention.middle, id, MARKDOWN.text_mention.end)
-                    .unwrap()
+                buf.push_str(MARKDOWN.text_mention.middle);
+                buf.push_str(&id.to_string());
+                buf.push_str(MARKDOWN.text_mention.end);
             }
         },
         Kind::CustomEmoji(custom_emoji_id) => match tag.place {
             Place::Start => buf.push_str(MARKDOWN.custom_emoji.start),
             Place::MidNewLine => unreachable!(),
-            Place::End => write!(
-                buf,
-                "{}{}{}",
-                MARKDOWN.custom_emoji.middle, custom_emoji_id, MARKDOWN.custom_emoji.end
-            )
-            .unwrap(),
+            Place::End => {
+                buf.push_str(MARKDOWN.custom_emoji.middle);
+                buf.push_str(&custom_emoji_id.0);
+                buf.push_str(MARKDOWN.custom_emoji.end);
+            }
         },
         Kind::DateTime { unix_time, date_time_format } => match tag.place {
             Place::Start => buf.push_str("!["),
             Place::MidNewLine => unreachable!(),
             Place::End => {
-                write!(buf, "](tg://time?unix={unix_time}").unwrap();
+                buf.push_str("](tg://time?unix=");
+                buf.push_str(&unix_time.to_string());
                 if let Some(format) = date_time_format {
-                    write!(buf, "&format={format}").unwrap();
+                    buf.push_str("&format=");
+                    write_link_destination(format, buf);
                 }
                 buf.push(')');
             }
         },
+    }
+}
+
+fn write_link_destination(value: &str, buf: &mut String) {
+    for ch in value.chars() {
+        if matches!(ch, '\\' | ')') {
+            buf.push('\\');
+        }
+        buf.push(ch);
     }
 }
 
@@ -95,4 +107,16 @@ fn write_char(ch: char, buf: &mut String) {
         buf.push('\\');
     }
     buf.push(ch);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write_link_destination;
+
+    #[test]
+    fn link_destinations_are_escaped() {
+        let mut output = String::new();
+        write_link_destination(r"a)\b", &mut output);
+        assert_eq!(output, r"a\)\\b");
+    }
 }

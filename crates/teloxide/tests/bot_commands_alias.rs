@@ -17,3 +17,8 @@ fn alias_for_another_bot_is_rejected() {
         other => panic!("expected WrongBotName, got {other:?}"),
     }
 }
+
+#[test]
+fn alias_for_this_bot_is_accepted() {
+    assert_eq!(Command::parse("/h@this_bot", "this_bot").unwrap(), Command::Help);
+}

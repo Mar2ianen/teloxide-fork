@@ -42,7 +42,10 @@ pub enum RequestError {
         raw: Box<str>,
     },
 
-    /// Occurs when trying to send a file to Telegram.
+    /// Occurs while handling a file or serializing a multipart request.
+    ///
+    /// Use [`Self::is_multipart_serialization_error`] to distinguish internal
+    /// multipart serialization failures from file I/O errors.
     #[error("An I/O error: {0}")]
     Io(#[from] Arc<io::Error>),
 }

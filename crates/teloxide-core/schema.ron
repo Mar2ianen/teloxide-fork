@@ -1848,6 +1848,11 @@ Schema(
                     descr: Doc(md: "Unique identifier of the business connection on behalf of which the message to be edited was sent"),
                 ),
                 Param(
+                    name: "live_period",
+                    ty: Option(RawTy("LivePeriod")),
+                    descr: Doc(md: "New period in seconds during which the location can be updated, starting from the message send date. If 0x7FFFFFFF is specified, then the location can be updated forever. Otherwise, the new value must not exceed the current live_period by more than a day, and the live location expiration date must remain within the next 90 days. If not specified, then live_period remains unchanged"),
+                ),
+                Param(
                     name: "horizontal_accuracy",
                     ty: Option(f64),
                     descr: Doc(md: "The radius of uncertainty for the location, measured in meters; 0-1500"),
@@ -4260,9 +4265,9 @@ Schema(
                     descr: Doc(md: "List of special entities that appear in message text, which can be specified instead of _parse\\_mode_"),
                 ),
                 Param(
-                    name: "disable_web_page_preview",
-                    ty: Option(bool),
-                    descr: Doc(md: "Disables link previews for links in this message")
+                    name: "link_preview_options",
+                    ty: Option(RawTy("LinkPreviewOptions")),
+                    descr: Doc(md: "Link preview generation options for the message"),
                 ),
                 Param(
                     name: "reply_markup",
@@ -4366,7 +4371,11 @@ Schema(
                     ty: Option(ArrayOf(RawTy("MessageEntity"))),
                     descr: Doc(md: "List of special entities that appear in the caption, which can be specified instead of _parse\\_mode_"),
                 ),
-
+                Param(
+                    name: "show_caption_above_media",
+                    ty: Option(bool),
+                    descr: Doc(md: "Pass True, if the caption must be shown above the message media. Supported only for animation, photo and video messages"),
+                ),
                 Param(
                     name: "reply_markup",
                     ty: Option(RawTy("InlineKeyboardMarkup")),

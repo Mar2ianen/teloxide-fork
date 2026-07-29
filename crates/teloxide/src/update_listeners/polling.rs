@@ -299,8 +299,8 @@ pub struct PollingStream<'a, B: Requester> {
     timeout: Option<u32>,
     /// Allowed updates parameter for the first `get_updates()` call.
     allowed_updates: Option<Vec<AllowedUpdate>>,
-    /// Offset parameter  for normal `get_updates()` calls.
-    offset: i32,
+    /// Offset parameter for normal `get_updates()` calls.
+    offset: i64,
 
     /// If this is set, return `None` from `poll_next` immediately.
     force_stop: bool,

@@ -349,12 +349,11 @@ impl Update {
 impl UpdateId {
     /// Returns the offset for the **next** update that can be used for polling.
     ///
-    /// I.e. `self.0 + 1`.
+    /// I.e. `self.0 + 1`, widened to [`i64`] so every valid [`UpdateId`] can be
+    /// advanced without integer overflow.
     #[must_use]
-    pub fn as_offset(self) -> i32 {
-        debug_assert!(self.0 < i32::MAX as u32);
-
-        self.0 as i32 + 1
+    pub fn as_offset(self) -> i64 {
+        i64::from(self.0) + 1
     }
 }
 
@@ -1257,5 +1256,12 @@ mod test {
             update.kind,
             UpdateKind::Error(serde_json::json!({"future_update": {"answer": 42}}))
         );
+    }
+
+    #[test]
+    fn update_offset_does_not_overflow() {
+        assert_eq!(UpdateId(0).as_offset(), 1);
+        assert_eq!(UpdateId(i32::MAX as u32).as_offset(), i64::from(i32::MAX) + 1);
+        assert_eq!(UpdateId(u32::MAX).as_offset(), i64::from(u32::MAX) + 1);
     }
 }

@@ -16,6 +16,7 @@ mod tag;
 pub struct Renderer<'a> {
     text: &'a str,
     tags: Vec<Tag<'a>>,
+    passthrough_entities: Vec<&'a MEK>,
 }
 
 impl<'a> Renderer<'a> {
@@ -54,6 +55,7 @@ impl<'a> Renderer<'a> {
             * 2; // 2 because we insert two tags for each entity
 
         let mut tags = Vec::with_capacity(needed_size);
+        let mut passthrough_entities = Vec::new();
 
         for (index, entity) in entities.iter().enumerate() {
             let kind = match &entity.kind {
@@ -73,7 +75,10 @@ impl<'a> Renderer<'a> {
                     unix_time: *unix_time,
                     date_time_format: date_time_format.as_deref(),
                 },
-                _ => continue,
+                _ => {
+                    passthrough_entities.push(&entity.kind);
+                    continue;
+                }
             };
 
             // FIXME: maybe instead of clone store all the `kind`s in a seperate
@@ -81,20 +86,15 @@ impl<'a> Renderer<'a> {
             tags.push(Tag::start(kind.clone(), entity.offset, index));
 
             if matches!(kind, Kind::Blockquote | Kind::ExpandableBlockquote) {
-                let new_lines_indexes: Vec<usize> = text
-                    .chars()
+                let new_line_offsets = text
+                    .encode_utf16()
+                    .enumerate()
                     .skip(entity.offset)
                     .take(entity.length)
-                    .enumerate()
-                    .filter_map(|(idx, c)| (c == '\n').then_some(idx))
-                    .collect();
+                    .filter_map(|(offset, unit)| (unit == u16::from(b'\n')).then_some(offset + 1));
 
-                for new_line_index in new_lines_indexes.iter() {
-                    tags.push(Tag::mid_new_line(
-                        kind.clone(),
-                        entity.offset + new_line_index + 1,
-                        index,
-                    ));
+                for new_line_offset in new_line_offsets {
+                    tags.push(Tag::mid_new_line(kind.clone(), new_line_offset, index));
                 }
             }
 
@@ -103,7 +103,23 @@ impl<'a> Renderer<'a> {
 
         tags.sort_unstable();
 
-        Self { text, tags }
+        Self { text, tags, passthrough_entities }
+    }
+
+    /// Returns entities whose semantic kind is preserved only as visible text.
+    ///
+    /// Telegram doesn't provide explicit HTML or MarkdownV2 markup for these
+    /// entity kinds. The renderer keeps their text, while callers can inspect
+    /// this iterator when a lossless semantic round-trip is required.
+    pub fn passthrough_entities(&self) -> impl ExactSizeIterator<Item = &'a MEK> + '_ {
+        self.passthrough_entities.iter().copied()
+    }
+
+    /// Returns `true` when at least one entity couldn't be represented as
+    /// markup.
+    #[must_use]
+    pub fn has_passthrough_entities(&self) -> bool {
+        !self.passthrough_entities.is_empty()
     }
 
     /// Renders text with a given [`TagWriter`].
@@ -304,6 +320,72 @@ mod test {
              Blockquote\\!\n>\n>Im in a multiline Blockquote\\!\n**>Im in an expandable \
              Blockquote\\!||\n**>Im in an expandable multiline Blockquote\\!\n>\n>Im in an \
              expandable multiline Blockquote\\!||"
+        );
+    }
+
+    #[test]
+    fn blockquote_newline_offsets_use_utf16_units() {
+        let text = "😀a\nb";
+        let entities = vec![MessageEntity { kind: MEK::Blockquote, offset: 0, length: 5 }];
+        let render = Renderer::new(text, &entities);
+
+        assert_eq!(render.as_html(), "<blockquote>😀a\nb</blockquote>");
+        assert_eq!(render.as_markdown(), "**>😀a\n>b");
+    }
+
+    #[test]
+    fn passthrough_entities_are_reported() {
+        let text = "@name #tag https://example.com";
+        let entities = vec![
+            MessageEntity { kind: MEK::Mention, offset: 0, length: 5 },
+            MessageEntity { kind: MEK::Hashtag, offset: 6, length: 4 },
+            MessageEntity { kind: MEK::Url, offset: 11, length: 19 },
+        ];
+        let render = Renderer::new(text, &entities);
+
+        assert!(render.has_passthrough_entities());
+        assert_eq!(render.passthrough_entities().count(), 3);
+        assert_eq!(render.as_html(), text);
+        assert_eq!(render.as_markdown(), text);
+    }
+
+    #[test]
+    fn renderer_escapes_dynamic_attribute_and_link_values() {
+        let text = "link time code";
+        let entities = vec![
+            MessageEntity {
+                kind: MEK::TextLink {
+                    url: reqwest::Url::parse("https://example.com/a)?x=1&y=2").unwrap(),
+                },
+                offset: 0,
+                length: 4,
+            },
+            MessageEntity {
+                kind: MEK::DateTime {
+                    unix_time: Some(1),
+                    date_time_format: Some("x&\")\\".to_owned()),
+                },
+                offset: 5,
+                length: 4,
+            },
+            MessageEntity {
+                kind: MEK::Pre { language: Some("ru&\"".to_owned()) },
+                offset: 10,
+                length: 4,
+            },
+        ];
+        let render = Renderer::new(text, &entities);
+
+        assert_eq!(
+            render.as_html(),
+            "<a href=\"https://example.com/a)?x=1&amp;y=2\">link</a> <tg-time unix=\"1\" \
+             format=\"x&amp;&quot;)\\\">time</tg-time> <pre><code \
+             class=\"language-ru&amp;&quot;\">code</code></pre>"
+        );
+        assert_eq!(
+            render.as_markdown(),
+            "[link](https://example.com/a\\)?x=1&y=2) \
+             ![time](tg://time?unix=1&format=x&\"\\)\\\\) ```ru&\"\ncode```\n"
         );
     }
 }

@@ -30,6 +30,11 @@ If you construct these structs manually, add the new fields explicitly:
 For optional fields, use `None`; for new boolean flags, use `false` unless you
 need a different value.
 
+`EditMessageTextInline::disable_web_page_preview` was replaced by
+`EditMessageTextInline::link_preview_options`. To disable previews, pass
+`LinkPreviewOptions` with `is_disabled: true`; the new setter also supports the
+full link-preview configuration.
+
 ## 0.16 -> 0.17
 
 ### teloxide

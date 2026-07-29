@@ -31,7 +31,7 @@ jobs:
           components: rustfmt
       - name: Apply and validate fixes
         run: |
-          python .github/run_renderer_audit.py
+          python .github/run_renderer_audit_raw.py
           cargo +${{ env.rust_nightly }} fmt --all
           cargo +${{ env.rust_nightly }} test -p teloxide --features "full nightly" utils::render -- --nocapture
           git diff --check

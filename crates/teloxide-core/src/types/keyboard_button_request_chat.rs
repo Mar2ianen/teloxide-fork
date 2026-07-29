@@ -72,6 +72,7 @@ pub struct KeyboardButtonRequestChat {
 
 impl KeyboardButtonRequestChat {
     /// Creates a new [`KeyboardButtonRequestChat`].
+    #[must_use]
     pub fn new(request_id: RequestId, chat_is_channel: bool) -> Self {
         Self {
             request_id,

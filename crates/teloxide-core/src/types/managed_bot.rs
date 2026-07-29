@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::types::{User, UserId};
+use crate::types::{RequestId, User, UserId};
 
 /// This object contains information about the bot that was created to be
 /// managed by the current bot.
@@ -41,7 +41,7 @@ pub struct BotAccessSettings {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct KeyboardButtonRequestManagedBot {
-    pub request_id: i32,
+    pub request_id: RequestId,
     pub suggested_name: Option<String>,
     pub suggested_username: Option<String>,
 }
@@ -107,3 +107,19 @@ pub struct ChatOwnerChanged {
 }
 
 pub type AddedUserId = UserId;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn managed_bot_request_id_uses_newtype_without_changing_json() {
+        let request = KeyboardButtonRequestManagedBot {
+            request_id: RequestId(42),
+            suggested_name: None,
+            suggested_username: None,
+        };
+        let json = serde_json::to_value(request).unwrap();
+        assert_eq!(json["request_id"], 42);
+    }
+}

@@ -35,6 +35,7 @@ pub struct KeyboardButton {
 }
 
 impl KeyboardButton {
+    #[must_use]
     pub fn new<T>(text: T) -> Self
     where
         T: Into<String>,
@@ -42,6 +43,7 @@ impl KeyboardButton {
         Self { text: text.into(), request: None, icon_custom_emoji_id: None, style: None }
     }
 
+    #[must_use]
     pub fn request<T>(mut self, val: T) -> Self
     where
         T: Into<ButtonRequest>,
@@ -171,7 +173,7 @@ impl<'de> Deserialize<'de> for ButtonRequest {
                     + web_app.is_some() as u8) =>
             {
                 Err(D::Error::custom(
-                    "`request_contact`, `request_location`, `request_chat`, `request_user`, \
+                    "`request_contact`, `request_location`, `request_chat`, `request_users`, \
                      `request_managed_bot`, `request_poll` and `web_app` fields are mutually \
                      exclusive",
                 ))

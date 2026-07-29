@@ -21,6 +21,19 @@ env:
 jobs:
   apply:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_USER: teloxide
+          POSTGRES_PASSWORD: rewrite_it_in_rust
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
     steps:
       - name: Checkout work branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -138,6 +151,19 @@ jobs:
         run: |
           cargo fmt --all
           cargo test -p teloxide-core --features "full nightly" codegen
+
+      - name: Setup integration services
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-server postgresql-client
+          redis-server --port 7777 > /dev/null &
+          redis-server --port 7778 > /dev/null &
+          redis-server --port 7779 > /dev/null &
+          psql -h localhost -U teloxide -c "CREATE DATABASE test_postgres_json;"
+          psql -h localhost -U teloxide -c "CREATE DATABASE test_postgres_bincode;"
+          psql -h localhost -U teloxide -c "CREATE DATABASE test_postgres_cbor;"
+        env:
+          PGPASSWORD: rewrite_it_in_rust
 
       - name: Run focused tests
         run: |

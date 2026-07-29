@@ -223,7 +223,7 @@ impl Update {
     /// Also note that this function can return duplicate users.
     pub fn mentioned_users(&self) -> impl Iterator<Item = &User> {
         use either::Either::{Left as L, Right as R};
-        use std::iter::{empty, once};
+        use std::iter::once;
 
         //          [root]
         //         /      \
@@ -248,6 +248,10 @@ impl Update {
         let i2 = |x| L(R(R(x)));
         let i3 = |x| R(L(L(x)));
         let i4 = |x| R(L(R(x)));
+        fn direct_users(users: [Option<&User>; 2]) -> impl Iterator<Item = &User> {
+            users.into_iter().flatten()
+        }
+
         let i5 = |x| R(R(x));
 
         match &self.kind {
@@ -263,7 +267,7 @@ impl Update {
                 if let Some(user) = answer.user() {
                     return i1(once(user));
                 }
-                i5(empty())
+                i5(direct_users([None, None]))
             }
 
             UpdateKind::InlineQuery(query) => i1(once(&query.from)),
@@ -278,7 +282,7 @@ impl Update {
                 if let Some(user) = answer.voter.user() {
                     return i1(once(user));
                 }
-                i5(empty())
+                i5(direct_users([None, None]))
             }
 
             UpdateKind::MyChatMember(member) | UpdateKind::ChatMember(member) => {
@@ -289,21 +293,24 @@ impl Update {
                 if let Some(user) = b.boost.source.user() {
                     return i1(once(user));
                 }
-                i5(empty())
+                i5(direct_users([None, None]))
             }
             UpdateKind::RemovedChatBoost(b) => {
                 if let Some(user) = b.source.user() {
                     return i1(once(user));
                 }
-                i5(empty())
+                i5(direct_users([None, None]))
             }
 
-            UpdateKind::ChatJoinRequest(_)
-            | UpdateKind::MessageReactionCount(_)
-            | UpdateKind::BusinessConnection(_)
-            | UpdateKind::ManagedBot(_)
+            UpdateKind::ChatJoinRequest(request) => i1(once(&request.from)),
+            UpdateKind::BusinessConnection(connection) => i1(once(&connection.user)),
+            UpdateKind::ManagedBot(update) => {
+                i5(direct_users([Some(&update.user), Some(&update.bot)]))
+            }
+
+            UpdateKind::MessageReactionCount(_)
             | UpdateKind::DeletedBusinessMessages(_)
-            | UpdateKind::Error(_) => i5(empty()),
+            | UpdateKind::Error(_) => i5(direct_users([None, None])),
         }
     }
 
@@ -1257,5 +1264,47 @@ mod test {
             update.kind,
             UpdateKind::Error(serde_json::json!({"future_update": {"answer": 42}}))
         );
+    }
+
+    #[test]
+    fn mentioned_users_includes_direct_update_users() {
+        let business = r#"{
+            "update_id": 1,
+            "business_connection": {
+                "id": "business",
+                "user": {"id": 10, "is_bot": false, "first_name": "owner"},
+                "user_chat_id": 10,
+                "date": 1,
+                "is_enabled": true
+            }
+        }"#;
+        let managed = r#"{
+            "update_id": 2,
+            "managed_bot": {
+                "user": {"id": 20, "is_bot": false, "first_name": "owner"},
+                "bot": {"id": 21, "is_bot": true, "first_name": "bot"}
+            }
+        }"#;
+        let join = r#"{
+            "update_id": 3,
+            "chat_join_request": {
+                "chat": {"id": -100, "title": "group", "type": "supergroup"},
+                "from": {"id": 30, "is_bot": false, "first_name": "joiner"},
+                "user_chat_id": 30,
+                "date": 1
+            }
+        }"#;
+
+        let ids = |json: &str| {
+            serde_json::from_str::<Update>(json)
+                .unwrap()
+                .mentioned_users()
+                .map(|user| user.id)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(ids(business), [UserId(10)]);
+        assert_eq!(ids(managed), [UserId(20), UserId(21)]);
+        assert_eq!(ids(join), [UserId(30)]);
     }
 }

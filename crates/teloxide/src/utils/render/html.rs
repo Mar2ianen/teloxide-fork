@@ -1,5 +1,3 @@
-use std::fmt::Write;
-
 use super::{ComplexTag, Kind, NewLineRepeatedTag, Place, SimpleTag, Tag, TagWriter};
 
 pub static HTML: TagWriter = TagWriter {
@@ -40,7 +38,11 @@ fn write_tag(tag: &Tag, buf: &mut String) {
         Kind::Code => buf.push_str(HTML.code.get_tag(tag.place)),
         Kind::Pre(lang) => match tag.place {
             Place::Start => match lang {
-                Some(lang) => write!(buf, "{}{}{}", HTML.pre.start, lang, HTML.pre.middle).unwrap(),
+                Some(lang) => {
+                    buf.push_str(HTML.pre.start);
+                    write_attribute(lang, buf);
+                    buf.push_str(HTML.pre.middle);
+                }
                 None => buf.push_str(HTML.pre_no_lang.start),
             },
             Place::MidNewLine => unreachable!(),
@@ -48,34 +50,40 @@ fn write_tag(tag: &Tag, buf: &mut String) {
         },
         Kind::TextLink(url) => match tag.place {
             Place::Start => {
-                write!(buf, "{}{}{}", HTML.text_link.start, url, HTML.text_link.middle).unwrap()
+                buf.push_str(HTML.text_link.start);
+                write_attribute(url, buf);
+                buf.push_str(HTML.text_link.middle);
             }
             Place::MidNewLine => unreachable!(),
             Place::End => buf.push_str(HTML.text_link.end),
         },
         Kind::TextMention(id) => match tag.place {
             Place::Start => {
-                write!(buf, "{}{}{}", HTML.text_mention.start, id, HTML.text_mention.middle)
-                    .unwrap()
+                buf.push_str(HTML.text_mention.start);
+                buf.push_str(&id.to_string());
+                buf.push_str(HTML.text_mention.middle);
             }
             Place::MidNewLine => unreachable!(),
             Place::End => buf.push_str(HTML.text_mention.end),
         },
         Kind::CustomEmoji(custom_emoji_id) => match tag.place {
-            Place::Start => write!(
-                buf,
-                "{}{}{}",
-                HTML.custom_emoji.start, custom_emoji_id, HTML.custom_emoji.middle
-            )
-            .unwrap(),
+            Place::Start => {
+                buf.push_str(HTML.custom_emoji.start);
+                write_attribute(&custom_emoji_id.0, buf);
+                buf.push_str(HTML.custom_emoji.middle);
+            }
             Place::MidNewLine => unreachable!(),
             Place::End => buf.push_str(HTML.custom_emoji.end),
         },
         Kind::DateTime { unix_time, date_time_format } => match tag.place {
             Place::Start => {
-                write!(buf, "<tg-time unix=\"{unix_time}\"").unwrap();
+                buf.push_str("<tg-time unix=\"");
+                buf.push_str(&unix_time.to_string());
+                buf.push('"');
                 if let Some(format) = date_time_format {
-                    write!(buf, " format=\"{format}\"").unwrap();
+                    buf.push_str(" format=\"");
+                    write_attribute(format, buf);
+                    buf.push('"');
                 }
                 buf.push('>');
             }
@@ -85,11 +93,35 @@ fn write_tag(tag: &Tag, buf: &mut String) {
     }
 }
 
+fn write_attribute(value: &str, buf: &mut String) {
+    for ch in value.chars() {
+        match ch {
+            '&' => buf.push_str("&amp;"),
+            '<' => buf.push_str("&lt;"),
+            '>' => buf.push_str("&gt;"),
+            '"' => buf.push_str("&quot;"),
+            ch => buf.push(ch),
+        }
+    }
+}
+
 fn write_char(ch: char, buf: &mut String) {
     match ch {
         '&' => buf.push_str("&amp;"),
         '<' => buf.push_str("&lt;"),
         '>' => buf.push_str("&gt;"),
         c => buf.push(c),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write_attribute;
+
+    #[test]
+    fn attributes_are_escaped() {
+        let mut output = String::new();
+        write_attribute("a&<b>\"", &mut output);
+        assert_eq!(output, "a&amp;&lt;b&gt;&quot;");
     }
 }

@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use teloxide_core::{
     payloads::{GetBusinessAccountGifts, GetBusinessAccountGiftsSetters},
     types::BusinessConnectionId,
@@ -15,5 +17,13 @@ fn business_account_gift_filters_use_current_wire_names() {
     assert_eq!(object["exclude_limited_upgradable"], true);
     assert_eq!(object["exclude_limited_non_upgradable"], true);
     assert_eq!(object["exclude_from_blockchain"], true);
-    assert!(!object.contains_key("exclude_limited"));
+    assert_eq!(
+        object.keys().map(String::as_str).collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            "business_connection_id",
+            "exclude_from_blockchain",
+            "exclude_limited_non_upgradable",
+            "exclude_limited_upgradable",
+        ]),
+    );
 }

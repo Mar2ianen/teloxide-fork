@@ -3,8 +3,8 @@
 use serde::Serialize;
 
 use crate::types::{
-    BusinessConnectionId, InlineKeyboardMarkup, LinkPreviewOptions, Message, MessageEntity,
-    MessageId, ParseMode, Recipient,
+    BusinessConnectionId, InlineKeyboardMarkup, InputRichMessage, LinkPreviewOptions, Message,
+    MessageEntity, MessageId, ParseMode, Recipient,
 };
 
 impl_payload! {
@@ -13,7 +13,7 @@ impl_payload! {
     /// See also: [`EditMessageTextInline`](crate::payloads::EditMessageTextInline)
     ///
     /// [games]: https://core.telegram.org/bots/api#games
-    #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize)]
+    #[derive(Debug, Clone, Serialize)]
     pub EditMessageText (EditMessageTextSetters) => Message {
         required {
             /// Unique identifier for the target chat or username of the target channel (in the format `@channelusername`).
@@ -25,6 +25,8 @@ impl_payload! {
             pub text: String [into],
         }
         optional {
+            /// A new rich message to replace the current message content
+            pub rich_message: InputRichMessage,
             /// Unique identifier of the business connection on behalf of which the message to be edited was sent
             pub business_connection_id: BusinessConnectionId,
             /// Mode for parsing entities in the message text. See [formatting options] for more details.

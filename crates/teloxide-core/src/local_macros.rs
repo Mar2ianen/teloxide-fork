@@ -1944,6 +1944,79 @@ macro_rules! requester_forward {
             let this = self;
             $body!(get_game_high_scores this (user_id: UserId, target: T))
         }
+    };
+    (@method answer_chat_join_request_query $body:ident $ty:ident) => {
+        type AnswerChatJoinRequestQuery = $ty![AnswerChatJoinRequestQuery];
+
+        fn answer_chat_join_request_query<C>(&self, chat_join_request_query_id: C, result: ChatJoinRequestQueryResult) -> Self::AnswerChatJoinRequestQuery where C: Into<String> {
+            let this = self;
+            $body!(answer_chat_join_request_query this (chat_join_request_query_id: C, result: ChatJoinRequestQueryResult))
+        }
+    };
+    (@method send_chat_join_request_web_app $body:ident $ty:ident) => {
+        type SendChatJoinRequestWebApp = $ty![SendChatJoinRequestWebApp];
+
+        fn send_chat_join_request_web_app<C>(&self, chat_join_request_query_id: C, web_app_url: Url) -> Self::SendChatJoinRequestWebApp where C: Into<String> {
+            let this = self;
+            $body!(send_chat_join_request_web_app this (chat_join_request_query_id: C, web_app_url: Url))
+        }
+    };
+    (@method edit_ephemeral_message_text $body:ident $ty:ident) => {
+        type EditEphemeralMessageText = $ty![EditEphemeralMessageText];
+
+        fn edit_ephemeral_message_text<C, T>(&self, chat_id: C, receiver_user_id: UserId, ephemeral_message_id: i32, text: T) -> Self::EditEphemeralMessageText where C: Into<Recipient>,
+        T: Into<String> {
+            let this = self;
+            $body!(edit_ephemeral_message_text this (chat_id: C, receiver_user_id: UserId, ephemeral_message_id: i32, text: T))
+        }
+    };
+    (@method edit_ephemeral_message_media $body:ident $ty:ident) => {
+        type EditEphemeralMessageMedia = $ty![EditEphemeralMessageMedia];
+
+        fn edit_ephemeral_message_media<C>(&self, chat_id: C, receiver_user_id: UserId, ephemeral_message_id: i32, media: InputMedia) -> Self::EditEphemeralMessageMedia where C: Into<Recipient> {
+            let this = self;
+            $body!(edit_ephemeral_message_media this (chat_id: C, receiver_user_id: UserId, ephemeral_message_id: i32, media: InputMedia))
+        }
+    };
+    (@method edit_ephemeral_message_caption $body:ident $ty:ident) => {
+        type EditEphemeralMessageCaption = $ty![EditEphemeralMessageCaption];
+
+        fn edit_ephemeral_message_caption<C>(&self, chat_id: C, receiver_user_id: UserId, ephemeral_message_id: i32) -> Self::EditEphemeralMessageCaption where C: Into<Recipient> {
+            let this = self;
+            $body!(edit_ephemeral_message_caption this (chat_id: C, receiver_user_id: UserId, ephemeral_message_id: i32))
+        }
+    };
+    (@method edit_ephemeral_message_reply_markup $body:ident $ty:ident) => {
+        type EditEphemeralMessageReplyMarkup = $ty![EditEphemeralMessageReplyMarkup];
+
+        fn edit_ephemeral_message_reply_markup<C>(&self, chat_id: C, receiver_user_id: UserId, ephemeral_message_id: i32) -> Self::EditEphemeralMessageReplyMarkup where C: Into<Recipient> {
+            let this = self;
+            $body!(edit_ephemeral_message_reply_markup this (chat_id: C, receiver_user_id: UserId, ephemeral_message_id: i32))
+        }
+    };
+    (@method delete_ephemeral_message $body:ident $ty:ident) => {
+        type DeleteEphemeralMessage = $ty![DeleteEphemeralMessage];
+
+        fn delete_ephemeral_message<C>(&self, chat_id: C, receiver_user_id: UserId, ephemeral_message_id: i32) -> Self::DeleteEphemeralMessage where C: Into<Recipient> {
+            let this = self;
+            $body!(delete_ephemeral_message this (chat_id: C, receiver_user_id: UserId, ephemeral_message_id: i32))
+        }
+    };
+    (@method send_rich_message $body:ident $ty:ident) => {
+        type SendRichMessage = $ty![SendRichMessage];
+
+        fn send_rich_message<C>(&self, chat_id: C, rich_message: InputRichMessage) -> Self::SendRichMessage where C: Into<Recipient> {
+            let this = self;
+            $body!(send_rich_message this (chat_id: C, rich_message: InputRichMessage))
+        }
+    };
+    (@method send_rich_message_draft $body:ident $ty:ident) => {
+        type SendRichMessageDraft = $ty![SendRichMessageDraft];
+
+        fn send_rich_message_draft(&self, chat_id: UserId, draft_id: i32, rich_message: InputRichMessage) -> Self::SendRichMessageDraft {
+            let this = self;
+            $body!(send_rich_message_draft this (chat_id: UserId, draft_id: i32, rich_message: InputRichMessage))
+        }
     };// END BLOCK requester_forward_at_method
 }
 

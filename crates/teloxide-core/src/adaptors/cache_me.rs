@@ -270,6 +270,15 @@ where
         set_game_score,
         set_game_score_inline,
         get_game_high_scores,
+        answer_chat_join_request_query,
+        send_chat_join_request_web_app,
+        edit_ephemeral_message_text,
+        edit_ephemeral_message_media,
+        edit_ephemeral_message_caption,
+        edit_ephemeral_message_reply_markup,
+        delete_ephemeral_message,
+        send_rich_message,
+        send_rich_message_draft,
         approve_chat_join_request,
         decline_chat_join_request
         => f, fty

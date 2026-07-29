@@ -1,11 +1,15 @@
 name: Apply Bot API 10.2 methods
 
 on:
-  push:
-    branches: [ bot-api-10.2-methods ]
+  pull_request:
+    branches: [ next ]
 
 permissions:
   contents: write
+
+concurrency:
+  group: apply-bot-api-10-2
+  cancel-in-progress: true
 
 env:
   RUST_BACKTRACE: short

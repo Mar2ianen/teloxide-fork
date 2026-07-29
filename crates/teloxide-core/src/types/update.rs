@@ -383,14 +383,19 @@ impl<'de> Deserialize<'de> for UpdateKind {
             where
                 A: MapAccess<'de>,
             {
-                let Some(key) = map.next_key::<String>()? else { return Ok(empty_error()) };
-                let value = map.next_value::<Value>()?;
-
                 let mut raw = serde_json::Map::new();
-                raw.insert(key.clone(), value.clone());
                 while let Some((key, value)) = map.next_entry::<String, Value>()? {
                     raw.insert(key, value);
                 }
+
+                if raw.keys().filter(|key| is_update_kind_key(key)).count() != 1 {
+                    return Ok(UpdateKind::Error(Value::Object(raw)));
+                }
+
+                let (key, value) = raw
+                    .iter()
+                    .find(|(key, _)| is_update_kind_key(key))
+                    .expect("exactly one known update kind key");
 
                 macro_rules! decode {
                     ($ty:ty, $variant:path) => {
@@ -529,8 +534,35 @@ impl Serialize for UpdateKind {
     }
 }
 
-fn empty_error() -> UpdateKind {
-    UpdateKind::Error(Value::Object(<_>::default()))
+fn is_update_kind_key(key: &str) -> bool {
+    matches!(
+        key,
+        "message"
+            | "edited_message"
+            | "channel_post"
+            | "edited_channel_post"
+            | "guest_message"
+            | "business_connection"
+            | "business_message"
+            | "edited_business_message"
+            | "deleted_business_messages"
+            | "managed_bot"
+            | "message_reaction"
+            | "message_reaction_count"
+            | "inline_query"
+            | "chosen_inline_result"
+            | "callback_query"
+            | "shipping_query"
+            | "pre_checkout_query"
+            | "purchased_paid_media"
+            | "poll"
+            | "poll_answer"
+            | "my_chat_member"
+            | "chat_member"
+            | "chat_join_request"
+            | "chat_boost"
+            | "removed_chat_boost"
+    )
 }
 
 #[cfg(test)]
@@ -879,6 +911,58 @@ mod test {
             // Deserialization failed successfully
             UpdateKind::Error(_) => {}
             _ => panic!("Expected error"),
+        }
+    }
+
+    #[test]
+    fn multiple_known_update_kind_fields_are_errors_regardless_of_order() {
+        let updates = [
+            r#"{
+                "update_id": 1,
+                "message": {
+                    "message_id": 1,
+                    "date": 0,
+                    "chat": {"id": 1, "type": "private", "first_name": "Test"},
+                    "text": "message"
+                },
+                "poll": {
+                    "id": "poll",
+                    "question": "question",
+                    "options": [],
+                    "is_closed": false,
+                    "total_voter_count": 0,
+                    "is_anonymous": true,
+                    "type": "regular",
+                    "allows_multiple_answers": false
+                }
+            }"#,
+            r#"{
+                "update_id": 1,
+                "poll": {
+                    "id": "poll",
+                    "question": "question",
+                    "options": [],
+                    "is_closed": false,
+                    "total_voter_count": 0,
+                    "is_anonymous": true,
+                    "type": "regular",
+                    "allows_multiple_answers": false
+                },
+                "message": {
+                    "message_id": 1,
+                    "date": 0,
+                    "chat": {"id": 1, "type": "private", "first_name": "Test"},
+                    "text": "message"
+                }
+            }"#,
+        ];
+
+        for update in updates {
+            let mut expected = serde_json::from_str::<serde_json::Value>(update).unwrap();
+            expected.as_object_mut().unwrap().remove("update_id");
+
+            let Update { kind, .. } = serde_json::from_str::<Update>(update).unwrap();
+            assert_eq!(kind, UpdateKind::Error(expected));
         }
     }
 

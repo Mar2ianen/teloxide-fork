@@ -1,10 +1,14 @@
+use std::collections::HashSet;
+
 use crate::codegen::{patch::escape_kw, schema, schema_check::api_schema::*};
 use derive_more::derive::Display;
 
 #[derive(Debug, Display)]
 enum ApiCheckError {
-    #[display("Method `{method}` does not exist")]
+    #[display("Method `{method}` does not exist in schema.ron")]
     MethodDoesNotExist { method: String },
+    #[display("Method `{method}` exists in schema.ron but is absent from custom_v2.json")]
+    MethodIsNotChecked { method: String },
     #[display("Method `{method}` does not have `{param}` parameter")]
     ParamDoesNotExist { method: String, param: String },
     #[display(
@@ -437,6 +441,11 @@ mod tests {
         // Here you can set exceptions for fields that don't exist in our schema for
         // some reason
         let mut exceptions = Exceptions::new(vec![
+            // Legacy combined checking schema field, replaced by link_preview_options.
+            Exception::MethodField {
+                method: "editMessageText".to_owned(),
+                param: "disable_web_page_preview".to_owned(),
+            },
             // The Inline methods can't set these values
             Exception::MethodField {
                 method: "editMessageTextInline".to_owned(),
@@ -501,6 +510,14 @@ mod tests {
                 "schema.ron is of api version {ron_version}, while the checking schema is \
                  {api_version}. Please update the checking schema."
             );
+        }
+
+        let checked_methods: HashSet<_> =
+            api_schema.methods.iter().map(|method| method.name.as_str()).collect();
+        for method in &ron_schema.methods {
+            if !checked_methods.contains(method.names.0.as_str()) {
+                errors.push(ApiCheckError::MethodIsNotChecked { method: method.names.0.clone() });
+            }
         }
 
         for method in api_schema.methods {

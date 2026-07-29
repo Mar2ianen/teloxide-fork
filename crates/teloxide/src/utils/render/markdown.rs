@@ -42,7 +42,7 @@ fn write_tag(tag: &Tag, buf: &mut String) {
             Place::Start => match lang {
                 Some(lang) => {
                     buf.push_str(MARKDOWN.pre.start);
-                    buf.push_str(lang);
+                    write_pre_language(lang, buf);
                     buf.push_str(MARKDOWN.pre.middle);
                 }
                 None => buf.push_str(MARKDOWN.pre_no_lang.start),
@@ -102,6 +102,18 @@ fn write_link_destination(value: &str, buf: &mut String) {
     }
 }
 
+fn write_pre_language(language: &str, buf: &mut String) {
+    for ch in language.chars() {
+        if matches!(ch, '\r' | '\n') {
+            continue;
+        }
+        if matches!(ch, '`' | '\\') {
+            buf.push('\\');
+        }
+        buf.push(ch);
+    }
+}
+
 fn write_char(ch: char, buf: &mut String) {
     if ESCAPE_CHARS.contains(&ch) {
         buf.push('\\');
@@ -111,12 +123,27 @@ fn write_char(ch: char, buf: &mut String) {
 
 #[cfg(test)]
 mod tests {
-    use super::write_link_destination;
+    use super::{write_link_destination, write_tag};
+    use crate::utils::render::{Kind, Tag};
 
     #[test]
     fn link_destinations_are_escaped() {
         let mut output = String::new();
         write_link_destination(r"a)\b", &mut output);
         assert_eq!(output, r"a\)\\b");
+    }
+
+    #[test]
+    fn pre_languages_are_escaped() {
+        for (language, expected) in [
+            ("rust", "```rust\n"),
+            ("ru`st", "```ru\\`st\n"),
+            (r"ru\st", "```ru\\\\st\n"),
+            ("ru\nst\r", "```rust\n"),
+        ] {
+            let mut output = String::new();
+            write_tag(&Tag::start(Kind::Pre(Some(language)), 0, 0), &mut output);
+            assert_eq!(output, expected);
+        }
     }
 }

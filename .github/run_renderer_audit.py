@@ -12,7 +12,6 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
-# Renderer state and UTF-16 newline positions.
 path = ROOT / "crates/teloxide/src/utils/render.rs"
 text = path.read_text()
 text = replace_once(
@@ -48,7 +47,7 @@ replacement = """                let new_line_offsets = text
                     tags.push(Tag::mid_new_line(kind.clone(), new_line_offset, index));
                 }
 """
-text, count = pattern.subn(replacement, text, count=1)
+text, count = pattern.subn(lambda _: replacement, text, count=1)
 if count != 1:
     raise RuntimeError(f"blockquote newline block: replaced {count}")
 text = replace_once(
@@ -143,7 +142,6 @@ tests = r'''
 head, tail = text.rsplit("\n}", 1)
 path.write_text(head + tests + "\n}" + tail)
 
-# HTML writer: escape every dynamic attribute and avoid infallible write! unwraps.
 path = ROOT / "crates/teloxide/src/utils/render/html.rs"
 text = path.read_text()
 text = text.replace("use std::fmt::Write;\n\n", "", 1)
@@ -199,14 +197,14 @@ text = replace_once(
 )
 text = replace_once(
     text,
-    '''            Place::Start => {
+    r'''            Place::Start => {
                 write!(buf, "<tg-time unix=\"{unix_time}\"").unwrap();
                 if let Some(format) = date_time_format {
                     write!(buf, " format=\"{format}\"").unwrap();
                 }
                 buf.push('>');
             }''',
-    '''            Place::Start => {
+    r'''            Place::Start => {
                 buf.push_str("<tg-time unix=\"");
                 buf.push_str(&unix_time.to_string());
                 buf.push('"');
@@ -253,7 +251,6 @@ mod tests {
 '''
 path.write_text(text)
 
-# Markdown writer: escape link destinations and remove infallible write! unwraps.
 path = ROOT / "crates/teloxide/src/utils/render/markdown.rs"
 text = path.read_text()
 text = text.replace("use std::fmt::Write;\n\n", "", 1)
@@ -361,7 +358,6 @@ mod tests {
 '''
 path.write_text(text)
 
-# Remove both one-shot helpers and restore the normal workflow.
 (ROOT / ".github/apply_renderer_audit.py").unlink()
 subprocess.run(["git", "fetch", "origin", "next"], cwd=ROOT, check=True)
 workflow = subprocess.run(

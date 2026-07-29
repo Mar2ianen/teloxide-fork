@@ -40,6 +40,41 @@ jobs:
           cp crates/teloxide-core/src/requests/multipart_payload.rs /tmp/multipart-original.rs
           base64 -d scripts/apply_bot_api_10_2.py.gz.b64 | gzip -d > /tmp/apply_bot_api_10_2.py
           python /tmp/apply_bot_api_10_2.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          ron_path = Path("crates/teloxide-core/schema.ron")
+          ron = ron_path.read_text()
+          start = ron.index('names: ("editMessageTextInline"')
+          end = ron.index('\n        Method(', start)
+          block = ron[start:end]
+          if 'name: "rich_message"' not in block:
+              anchor = '''                Param(
+                              name: "business_connection_id",'''
+              rich = '''                Param(
+                              name: "rich_message",
+                              ty: Option(RawTy("InputRichMessage")),
+                              descr: Doc(md: "New content of the message as a rich message. If specified, text and its formatting parameters are ignored."),
+                          ),
+          '''
+              block = block.replace(anchor, rich + anchor, 1)
+              ron = ron[:start] + block + ron[end:]
+              ron_path.write_text(ron)
+
+          json_path = Path("crates/teloxide-core/custom_v2.json")
+          data = json.loads(json_path.read_text())
+          method = next(m for m in data["methods"] if m["name"] == "editMessageTextInline")
+          if not any(a["name"] == "rich_message" for a in method["arguments"]):
+              index = next(i for i, a in enumerate(method["arguments"]) if a["name"] == "business_connection_id")
+              method["arguments"].insert(index, {
+                  "description": "New content of the message as a rich message. If specified, text and its formatting parameters are ignored.",
+                  "name": "rich_message",
+                  "required": False,
+                  "type_info": {"reference": "InputRichMessage", "type": "reference"},
+              })
+              json_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+          PY
           cp crates/teloxide-core/src/bot/api.rs /tmp/bot-api-patched.rs
           cp crates/teloxide-core/src/requests/multipart_payload.rs /tmp/multipart-patched.rs
           cp /tmp/bot-api-original.rs crates/teloxide-core/src/bot/api.rs

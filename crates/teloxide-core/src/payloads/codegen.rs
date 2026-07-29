@@ -56,21 +56,7 @@ fn codegen_payloads() {
             .map(|field| format!("    @[multipart = {}]\n", field.join(", ")))
             .unwrap_or_default();
 
-        // FIXME: CreateNewStickerSet has to be be only Debug + Clone + Serialize (maybe
-        // better fix?)
-        let derive = if !multipart.is_empty()
-            || matches!(
-                &*method.names.1,
-                "SendPaidMedia"
-                    | "SendMediaGroup"
-                    | "SendPoll"
-                    | "SetBusinessAccountProfilePhoto"
-                    | "PostStory"
-                    | "EditStory"
-                    | "EditMessageMedia"
-                    | "EditMessageMediaInline"
-                    | "CreateNewStickerSet"
-            ) {
+        let derive = if !multipart.is_empty() || !partial_eq_suitable(&method) {
             "#[derive(Debug, Clone, Serialize)]".to_owned()
         } else {
             format!("#[derive(Debug, PartialEq,{eq_hash_derive}{default_derive} Clone, Serialize)]")
@@ -178,6 +164,28 @@ fn render_doc(doc: &Doc, sibling: Option<&str>) -> String {
         .unwrap_or_default();
 
     ["    /// ", &doc.md.replace('\n', "\n    /// "), &sibling_note, &links].concat()
+}
+
+fn partial_eq_suitable(method: &Method) -> bool {
+    fn ty_partial_eq_suitable(ty: &Type) -> bool {
+        match ty {
+            Type::Option(inner) | Type::ArrayOf(inner) => ty_partial_eq_suitable(inner),
+            Type::RawTy(raw) => !matches!(
+                raw.as_str(),
+                "InputSticker"
+                    | "InputProfilePhoto"
+                    | "InputStoryContent"
+                    | "InputMedia"
+                    | "InputPaidMedia"
+                    | "InputPollMedia"
+                    | "InputPollOption"
+                    | "InputPollOptionMedia"
+            ),
+            _ => true,
+        }
+    }
+
+    method.params.iter().all(|param| ty_partial_eq_suitable(&param.ty))
 }
 
 fn eq_hash_suitable(method: &Method) -> bool {

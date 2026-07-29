@@ -36,6 +36,19 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+impl RequestError {
+    /// Returns whether this error was caused while serializing a multipart
+    /// request.
+    #[must_use]
+    pub fn is_multipart_serialization_error(&self) -> bool {
+        matches!(
+            self,
+            Self::Io(error)
+                if error.get_ref().is_some_and(|source| source.is::<Error>())
+        )
+    }
+}
+
 impl From<Error> for RequestError {
     fn from(err: Error) -> Self {
         match err {
@@ -54,11 +67,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn internal_serialization_error_does_not_panic() {
-        let error: RequestError = Error::TopLevelNotStruct.into();
-        assert!(
-            matches!(error, RequestError::Io(_)),
-            "internal serializer failures must remain recoverable"
-        );
+    fn serialization_errors_are_distinguished_from_file_io() {
+        let serialization_error: RequestError = Error::TopLevelNotStruct.into();
+        assert!(matches!(serialization_error, RequestError::Io(_)));
+        assert!(serialization_error.is_multipart_serialization_error());
+
+        let io_error: RequestError = Error::Io(std::io::Error::other("read failed")).into();
+        assert!(matches!(io_error, RequestError::Io(_)));
+        assert!(!io_error.is_multipart_serialization_error());
     }
 }

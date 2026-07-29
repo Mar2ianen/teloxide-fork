@@ -5542,9 +5542,19 @@ Schema(
                     descr: Doc(md: "Pass _true_ to exclude gifts that can be purchased an unlimited number of times")
                 ),
                 Param(
-                    name: "exclude_limited",
+                    name: "exclude_limited_upgradable",
                     ty: Option(bool),
-                    descr: Doc(md: "Pass _true_ to exclude gifts that can be purchased a limited number of times")
+                    descr: Doc(md: "Pass _true_ to exclude gifts that can be upgraded to a unique gift"),
+                ),
+                Param(
+                    name: "exclude_limited_non_upgradable",
+                    ty: Option(bool),
+                    descr: Doc(md: "Pass _true_ to exclude gifts that can't be upgraded to a unique gift"),
+                ),
+                Param(
+                    name: "exclude_from_blockchain",
+                    ty: Option(bool),
+                    descr: Doc(md: "Pass _true_ to exclude gifts that were assigned from the TON blockchain"),
                 ),
                 Param(
                     name: "exclude_unique",

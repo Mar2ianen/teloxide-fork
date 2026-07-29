@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Serialize};
 
 use crate::types::{InputPollOptionMedia, MessageEntity, ParseMode};
 
@@ -6,7 +6,7 @@ use crate::types::{InputPollOptionMedia, MessageEntity, ParseMode};
 ///
 /// [The official docs](https://core.telegram.org/bots/api#inputpolloption).
 #[derive(Clone, Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputPollOption {
     /// Option text, 1-100 characters.
@@ -16,8 +16,39 @@ pub struct InputPollOption {
     pub formatting: Option<InputPollOptionFormatting>,
 
     /// Media added to the poll option.
-    #[serde(skip_deserializing, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub media: Option<InputPollOptionMedia>,
+}
+
+#[derive(Deserialize)]
+struct InputPollOptionDeserializer {
+    text: String,
+
+    #[serde(flatten)]
+    formatting: Option<InputPollOptionFormatting>,
+
+    #[serde(default, deserialize_with = "reject_media")]
+    media: (),
+}
+
+fn reject_media<'de, D>(deserializer: D) -> Result<(), D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    de::IgnoredAny::deserialize(deserializer)?;
+    Err(de::Error::custom("deserializing InputPollOption media is not supported"))
+}
+
+impl<'de> Deserialize<'de> for InputPollOption {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        let InputPollOptionDeserializer { text, formatting, media: () } =
+            InputPollOptionDeserializer::deserialize(deserializer)?;
+
+        Ok(Self { text, formatting, media: None })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -76,6 +107,23 @@ mod tests {
     use crate::types::{CustomEmojiId, MessageEntityKind};
 
     use super::*;
+
+    #[test]
+    fn deserialize_without_media() {
+        let option: InputPollOption = serde_json::from_str(r#"{"text":"Yay"}"#).unwrap();
+
+        assert_eq!(option.text, "Yay");
+        assert!(option.formatting.is_none());
+        assert!(option.media.is_none());
+    }
+
+    #[test]
+    fn deserialize_with_media_fails() {
+        let error =
+            serde_json::from_str::<InputPollOption>(r#"{"text":"Yay","media":{}}"#).unwrap_err();
+
+        assert!(error.to_string().contains("deserializing InputPollOption media is not supported"));
+    }
 
     #[test]
     fn serialize_text_parse_mode() {

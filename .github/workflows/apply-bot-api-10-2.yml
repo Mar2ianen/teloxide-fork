@@ -36,8 +36,14 @@ jobs:
 
       - name: Restore implementation patch
         run: |
+          cp crates/teloxide-core/src/bot/api.rs /tmp/bot-api-original.rs
+          cp crates/teloxide-core/src/requests/multipart_payload.rs /tmp/multipart-original.rs
           base64 -d scripts/apply_bot_api_10_2.py.gz.b64 | gzip -d > /tmp/apply_bot_api_10_2.py
           python /tmp/apply_bot_api_10_2.py
+          cp crates/teloxide-core/src/bot/api.rs /tmp/bot-api-patched.rs
+          cp crates/teloxide-core/src/requests/multipart_payload.rs /tmp/multipart-patched.rs
+          cp /tmp/bot-api-original.rs crates/teloxide-core/src/bot/api.rs
+          cp /tmp/multipart-original.rs crates/teloxide-core/src/requests/multipart_payload.rs
 
       - name: Regenerate code
         shell: bash
@@ -51,6 +57,11 @@ jobs:
             echo "codegen pass ${attempt} changed files; rerunning"
           done
           test "$generated" = true
+
+      - name: Restore Bot and multipart integration
+        run: |
+          cp /tmp/bot-api-patched.rs crates/teloxide-core/src/bot/api.rs
+          cp /tmp/multipart-patched.rs crates/teloxide-core/src/requests/multipart_payload.rs
 
       - name: Format and verify generated tree
         run: |

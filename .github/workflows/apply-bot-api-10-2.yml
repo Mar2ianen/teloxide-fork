@@ -44,6 +44,8 @@ jobs:
           import json
           from pathlib import Path
 
+          description = "A new rich message to replace the current message content"
+
           ron_path = Path("crates/teloxide-core/schema.ron")
           ron = ron_path.read_text()
           start = ron.index('names: ("editMessageTextInline"')
@@ -52,10 +54,10 @@ jobs:
           if 'name: "rich_message"' not in block:
               anchor = '''                Param(
                               name: "business_connection_id",'''
-              rich = '''                Param(
+              rich = f'''                Param(
                               name: "rich_message",
                               ty: Option(RawTy("InputRichMessage")),
-                              descr: Doc(md: "New content of the message as a rich message. If specified, text and its formatting parameters are ignored."),
+                              descr: Doc(md: "{description}"),
                           ),
           '''
               block = block.replace(anchor, rich + anchor, 1)
@@ -68,7 +70,7 @@ jobs:
           if not any(a["name"] == "rich_message" for a in method["arguments"]):
               index = next(i for i, a in enumerate(method["arguments"]) if a["name"] == "business_connection_id")
               method["arguments"].insert(index, {
-                  "description": "New content of the message as a rich message. If specified, text and its formatting parameters are ignored.",
+                  "description": description,
                   "name": "rich_message",
                   "required": False,
                   "type_info": {"reference": "InputRichMessage", "type": "reference"},

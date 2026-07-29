@@ -8,12 +8,10 @@ use crate::types::Seconds;
 #[derive(Clone, Copy)]
 #[derive(Debug, derive_more::Display)]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[derive(Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 // Its a wrapper for a wrapper (LivePeriod for Seconds), better to just tell the
 // schemars that its a u32
 #[cfg_attr(test, schemars(with = "u32"))]
-#[serde(untagged)]
 pub enum LivePeriod {
     Timeframe(Seconds),
     Indefinite,
@@ -61,13 +59,29 @@ impl TryFrom<&LivePeriod> for Seconds {
 
 impl From<Seconds> for LivePeriod {
     fn from(seconds: Seconds) -> Self {
-        Self::Timeframe(seconds)
+        if seconds.seconds() == 0x7FFF_FFFF {
+            Self::Indefinite
+        } else {
+            Self::Timeframe(seconds)
+        }
     }
 }
 
 impl From<u32> for LivePeriod {
     fn from(seconds: u32) -> Self {
-        Self::Timeframe(Seconds::from_seconds(seconds))
+        Seconds::from_seconds(seconds).into()
+    }
+}
+
+impl Serialize for LivePeriod {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_u32(match self {
+            Self::Timeframe(seconds) => seconds.seconds(),
+            Self::Indefinite => 0x7FFF_FFFF,
+        })
     }
 }
 
@@ -136,5 +150,26 @@ mod tests {
     #[test]
     fn indefinite_cannot_be_converted_to_seconds() {
         assert_eq!(Seconds::try_from(LivePeriod::Indefinite), Err("indefinite live period"));
+    }
+
+    #[test]
+    fn serialize_indefinite() {
+        assert_eq!(serde_json::to_string(&LivePeriod::Indefinite).unwrap(), "2147483647");
+    }
+
+    #[test]
+    fn sentinel_conversions_create_indefinite() {
+        let seconds = Seconds::from_seconds(0x7FFF_FFFF);
+
+        assert_eq!(LivePeriod::from_seconds(seconds), LivePeriod::Indefinite);
+        assert_eq!(LivePeriod::from_u32(0x7FFF_FFFF), LivePeriod::Indefinite);
+    }
+
+    #[test]
+    fn round_trip_preserves_both_period_kinds() {
+        for period in [LivePeriod::Indefinite, LivePeriod::from_u32(900)] {
+            let json = serde_json::to_string(&period).unwrap();
+            assert_eq!(serde_json::from_str::<LivePeriod>(&json).unwrap(), period);
+        }
     }
 }

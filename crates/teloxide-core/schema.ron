@@ -40,7 +40,7 @@
 //! [github]: https://github.com/WaffleLapkin/tg-methods-schema
 
 Schema(
-    api_version: ApiVersion(ver: "10.0", date: "May 8, 2026"),
+    api_version: ApiVersion(ver: "10.2", date: "July 14, 2026"),
     methods: [
         Method(
             names: ("getUpdates", "GetUpdates", "get_updates"),
@@ -244,6 +244,16 @@ Schema(
                     name: "direct_messages_topic_id",
                     ty: Option(RawTy("TopicId")),
                     descr: Doc(md: "Identifier of the direct messages topic to which the message will be sent; required if the message is sent to a direct messages chat"),
+                ),
+                Param(
+                    name: "receiver_user_id",
+                    ty: Option(RawTy("UserId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, unique identifier of the user who will receive the message; for group and supergroup chats only"),
+                ),
+                Param(
+                    name: "callback_query_id",
+                    ty: Option(RawTy("CallbackQueryId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, identifier of the callback query which triggered the message, if any"),
                 ),
                 Param(
                     name: "text",
@@ -632,6 +642,16 @@ Schema(
                     descr: Doc(md: "Identifier of the direct messages topic to which the message will be sent; required if the message is sent to a direct messages chat"),
                 ),
                 Param(
+                    name: "receiver_user_id",
+                    ty: Option(RawTy("UserId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, unique identifier of the user who will receive the message; for group and supergroup chats only"),
+                ),
+                Param(
+                    name: "callback_query_id",
+                    ty: Option(RawTy("CallbackQueryId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, identifier of the callback query which triggered the message, if any"),
+                ),
+                Param(
                     name: "photo",
                     ty: RawTy("InputFile"),
                     descr: Doc(
@@ -745,6 +765,16 @@ Schema(
                     name: "direct_messages_topic_id",
                     ty: Option(RawTy("TopicId")),
                     descr: Doc(md: "Identifier of the direct messages topic to which the message will be sent; required if the message is sent to a direct messages chat"),
+                ),
+                Param(
+                    name: "receiver_user_id",
+                    ty: Option(RawTy("UserId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, unique identifier of the user who will receive the message; for group and supergroup chats only"),
+                ),
+                Param(
+                    name: "callback_query_id",
+                    ty: Option(RawTy("CallbackQueryId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, identifier of the callback query which triggered the message, if any"),
                 ),
                 Param(
                     name: "audio",
@@ -872,6 +902,16 @@ Schema(
                     descr: Doc(md: "Identifier of the direct messages topic to which the message will be sent; required if the message is sent to a direct messages chat"),
                 ),
                 Param(
+                    name: "receiver_user_id",
+                    ty: Option(RawTy("UserId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, unique identifier of the user who will receive the message; for group and supergroup chats only"),
+                ),
+                Param(
+                    name: "callback_query_id",
+                    ty: Option(RawTy("CallbackQueryId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, identifier of the callback query which triggered the message, if any"),
+                ),
+                Param(
                     name: "document",
                     ty: RawTy("InputFile"),
                     descr: Doc(
@@ -988,6 +1028,16 @@ Schema(
                     name: "direct_messages_topic_id",
                     ty: Option(RawTy("TopicId")),
                     descr: Doc(md: "Identifier of the direct messages topic to which the message will be sent; required if the message is sent to a direct messages chat"),
+                ),
+                Param(
+                    name: "receiver_user_id",
+                    ty: Option(RawTy("UserId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, unique identifier of the user who will receive the message; for group and supergroup chats only"),
+                ),
+                Param(
+                    name: "callback_query_id",
+                    ty: Option(RawTy("CallbackQueryId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, identifier of the callback query which triggered the message, if any"),
                 ),
                 Param(
                     name: "video",
@@ -1144,6 +1194,16 @@ Schema(
                     descr: Doc(md: "Identifier of the direct messages topic to which the message will be sent; required if the message is sent to a direct messages chat"),
                 ),
                 Param(
+                    name: "receiver_user_id",
+                    ty: Option(RawTy("UserId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, unique identifier of the user who will receive the message; for group and supergroup chats only"),
+                ),
+                Param(
+                    name: "callback_query_id",
+                    ty: Option(RawTy("CallbackQueryId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, identifier of the callback query which triggered the message, if any"),
+                ),
+                Param(
                     name: "animation",
                     ty: RawTy("InputFile"),
                     descr: Doc(
@@ -1283,6 +1343,16 @@ Schema(
                     descr: Doc(md: "Identifier of the direct messages topic to which the message will be sent; required if the message is sent to a direct messages chat"),
                 ),
                 Param(
+                    name: "receiver_user_id",
+                    ty: Option(RawTy("UserId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, unique identifier of the user who will receive the message; for group and supergroup chats only"),
+                ),
+                Param(
+                    name: "callback_query_id",
+                    ty: Option(RawTy("CallbackQueryId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, identifier of the callback query which triggered the message, if any"),
+                ),
+                Param(
                     name: "voice",
                     ty: RawTy("InputFile"),
                     descr: Doc(
@@ -1391,6 +1461,16 @@ Schema(
                     name: "direct_messages_topic_id",
                     ty: Option(RawTy("TopicId")),
                     descr: Doc(md: "Identifier of the direct messages topic to which the message will be sent; required if the message is sent to a direct messages chat"),
+                ),
+                Param(
+                    name: "receiver_user_id",
+                    ty: Option(RawTy("UserId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, unique identifier of the user who will receive the message; for group and supergroup chats only"),
+                ),
+                Param(
+                    name: "callback_query_id",
+                    ty: Option(RawTy("CallbackQueryId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, identifier of the callback query which triggered the message, if any"),
                 ),
                 Param(
                     name: "video_note",
@@ -1668,6 +1748,16 @@ Schema(
                     name: "direct_messages_topic_id",
                     ty: Option(RawTy("TopicId")),
                     descr: Doc(md: "Identifier of the direct messages topic to which the message will be sent; required if the message is sent to a direct messages chat"),
+                ),
+                Param(
+                    name: "receiver_user_id",
+                    ty: Option(RawTy("UserId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, unique identifier of the user who will receive the message; for group and supergroup chats only"),
+                ),
+                Param(
+                    name: "callback_query_id",
+                    ty: Option(RawTy("CallbackQueryId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, identifier of the callback query which triggered the message, if any"),
                 ),
                 Param(
                     name: "latitude",
@@ -2020,6 +2110,16 @@ Schema(
                     descr: Doc(md: "Identifier of the direct messages topic to which the message will be sent; required if the message is sent to a direct messages chat"),
                 ),
                 Param(
+                    name: "receiver_user_id",
+                    ty: Option(RawTy("UserId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, unique identifier of the user who will receive the message; for group and supergroup chats only"),
+                ),
+                Param(
+                    name: "callback_query_id",
+                    ty: Option(RawTy("CallbackQueryId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, identifier of the callback query which triggered the message, if any"),
+                ),
+                Param(
                     name: "latitude",
                     ty: f64,
                     descr: Doc(md: "Latitude of new location"),
@@ -2137,6 +2237,16 @@ Schema(
                     name: "direct_messages_topic_id",
                     ty: Option(RawTy("TopicId")),
                     descr: Doc(md: "Identifier of the direct messages topic to which the message will be sent; required if the message is sent to a direct messages chat"),
+                ),
+                Param(
+                    name: "receiver_user_id",
+                    ty: Option(RawTy("UserId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, unique identifier of the user who will receive the message; for group and supergroup chats only"),
+                ),
+                Param(
+                    name: "callback_query_id",
+                    ty: Option(RawTy("CallbackQueryId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, identifier of the callback query which triggered the message, if any"),
                 ),
                 Param(
                     name: "phone_number",
@@ -4188,6 +4298,11 @@ Schema(
                     descr: Doc(md: "New text of the message, 1-4096 characters after entities parsing")
                 ),
                 Param(
+                    name: "rich_message",
+                    ty: Option(RawTy("InputRichMessage")),
+                    descr: Doc(md: "A new rich message to replace the current message content"),
+                ),
+                Param(
                     name: "business_connection_id",
                     ty: Option(RawTy("BusinessConnectionId")),
                     descr: Doc(md: "Unique identifier of the business connection on behalf of which the message to be edited was sent"),
@@ -4240,6 +4355,11 @@ Schema(
                     name: "text",
                     ty: String,
                     descr: Doc(md: "New text of the message, 1-4096 characters after entities parsing")
+                ),
+                Param(
+                    name: "rich_message",
+                    ty: Option(RawTy("InputRichMessage")),
+                    descr: Doc(md: "A new rich message to replace the current message content"),
                 ),
                 Param(
                     name: "business_connection_id",
@@ -4659,6 +4779,16 @@ Schema(
                     name: "direct_messages_topic_id",
                     ty: Option(RawTy("TopicId")),
                     descr: Doc(md: "Identifier of the direct messages topic to which the message will be sent; required if the message is sent to a direct messages chat"),
+                ),
+                Param(
+                    name: "receiver_user_id",
+                    ty: Option(RawTy("UserId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, unique identifier of the user who will receive the message; for group and supergroup chats only"),
+                ),
+                Param(
+                    name: "callback_query_id",
+                    ty: Option(RawTy("CallbackQueryId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, identifier of the callback query which triggered the message, if any"),
                 ),
                 Param(
                     name: "sticker",
@@ -6432,6 +6562,16 @@ Schema(
                 Param(name: "chat_id", ty: RawTy("Recipient"), descr: Doc(md: "Unique identifier for the target chat or username of the target channel")),
                 Param(name: "message_thread_id", ty: Option(RawTy("ThreadId")), descr: Doc(md: "Unique identifier for the target message thread")),
                 Param(name: "direct_messages_topic_id", ty: Option(RawTy("TopicId")), descr: Doc(md: "Identifier of the direct messages topic to which the message will be sent")),
+                Param(
+                    name: "receiver_user_id",
+                    ty: Option(RawTy("UserId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, unique identifier of the user who will receive the message; for group and supergroup chats only"),
+                ),
+                Param(
+                    name: "callback_query_id",
+                    ty: Option(RawTy("CallbackQueryId")),
+                    descr: Doc(md: "For outgoing ephemeral messages, identifier of the callback query which triggered the message, if any"),
+                ),
                 Param(name: "live_photo", ty: RawTy("InputFile"), descr: Doc(md: "Live photo video to send")),
                 Param(name: "photo", ty: RawTy("InputFile"), descr: Doc(md: "The static photo to send")),
                 Param(name: "caption", ty: Option(String), descr: Doc(md: "Live photo caption")),
@@ -6670,6 +6810,134 @@ Schema(
                     ty: RawTy("TargetMessage"),
                     descr: Doc(md: "Target message")
                 )
+            ],
+        ),
+        Method(
+            names: ("answerChatJoinRequestQuery", "AnswerChatJoinRequestQuery", "answer_chat_join_request_query"),
+            return_ty: True,
+            doc: Doc(md: "Use this method to process a received chat join request query. Returns _True_ on success."),
+            tg_doc: "https://core.telegram.org/bots/api#answerchatjoinrequestquery",
+            tg_category: "Available methods",
+            params: [
+                Param(name: "chat_join_request_query_id", ty: String, descr: Doc(md: "Unique identifier of the join request query")),
+                Param(name: "result", ty: RawTy("ChatJoinRequestQueryResult"), descr: Doc(md: "Result of the query: approve, decline, or queue")),
+            ],
+        ),
+        Method(
+            names: ("sendChatJoinRequestWebApp", "SendChatJoinRequestWebApp", "send_chat_join_request_web_app"),
+            return_ty: True,
+            doc: Doc(md: "Use this method to process a received chat join request query by showing a Mini App to the user before deciding the outcome. Returns _True_ on success."),
+            tg_doc: "https://core.telegram.org/bots/api#sendchatjoinrequestwebapp",
+            tg_category: "Available methods",
+            params: [
+                Param(name: "chat_join_request_query_id", ty: String, descr: Doc(md: "Unique identifier of the join request query")),
+                Param(name: "web_app_url", ty: Url, descr: Doc(md: "HTTPS URL of a Web App to be opened")),
+            ],
+        ),
+        Method(
+            names: ("editEphemeralMessageText", "EditEphemeralMessageText", "edit_ephemeral_message_text"),
+            return_ty: True,
+            doc: Doc(md: "Use this method to edit an ephemeral text message. Returns _True_ on success."),
+            tg_doc: "https://core.telegram.org/bots/api#editephemeralmessagetext",
+            tg_category: "Updating messages",
+            params: [
+                Param(name: "chat_id", ty: RawTy("Recipient"), descr: Doc(md: "Unique identifier for the target chat or username of the target supergroup")),
+                Param(name: "receiver_user_id", ty: RawTy("UserId"), descr: Doc(md: "Identifier of the user who received the message")),
+                Param(name: "ephemeral_message_id", ty: i32, descr: Doc(md: "Identifier of the ephemeral message to edit")),
+                Param(name: "text", ty: String, descr: Doc(md: "New text of the message, 1-4096 characters after entity parsing")),
+                Param(name: "parse_mode", ty: Option(RawTy("ParseMode")), descr: Doc(md: "Mode for parsing entities in the message text")),
+                Param(name: "entities", ty: Option(ArrayOf(RawTy("MessageEntity"))), descr: Doc(md: "List of special entities that appear in message text")),
+                Param(name: "link_preview_options", ty: Option(RawTy("LinkPreviewOptions")), descr: Doc(md: "Link preview generation options for the message")),
+                Param(name: "reply_markup", ty: Option(RawTy("InlineKeyboardMarkup")), descr: Doc(md: "Inline keyboard for the message")),
+            ],
+        ),
+        Method(
+            names: ("editEphemeralMessageMedia", "EditEphemeralMessageMedia", "edit_ephemeral_message_media"),
+            return_ty: True,
+            doc: Doc(md: "Use this method to edit the media of an ephemeral message. New files can't be uploaded. Returns _True_ on success."),
+            tg_doc: "https://core.telegram.org/bots/api#editephemeralmessagemedia",
+            tg_category: "Updating messages",
+            params: [
+                Param(name: "chat_id", ty: RawTy("Recipient"), descr: Doc(md: "Unique identifier for the target chat or username of the target supergroup")),
+                Param(name: "receiver_user_id", ty: RawTy("UserId"), descr: Doc(md: "Identifier of the user who received the message")),
+                Param(name: "ephemeral_message_id", ty: i32, descr: Doc(md: "Identifier of the ephemeral message to edit")),
+                Param(name: "media", ty: RawTy("InputMedia"), descr: Doc(md: "New media content; use a file_id or URL because direct upload isn't supported")),
+                Param(name: "reply_markup", ty: Option(RawTy("InlineKeyboardMarkup")), descr: Doc(md: "Inline keyboard for the message")),
+            ],
+        ),
+        Method(
+            names: ("editEphemeralMessageCaption", "EditEphemeralMessageCaption", "edit_ephemeral_message_caption"),
+            return_ty: True,
+            doc: Doc(md: "Use this method to edit the caption of an ephemeral message. Returns _True_ on success."),
+            tg_doc: "https://core.telegram.org/bots/api#editephemeralmessagecaption",
+            tg_category: "Updating messages",
+            params: [
+                Param(name: "chat_id", ty: RawTy("Recipient"), descr: Doc(md: "Unique identifier for the target chat or username of the target supergroup")),
+                Param(name: "receiver_user_id", ty: RawTy("UserId"), descr: Doc(md: "Identifier of the user who received the message")),
+                Param(name: "ephemeral_message_id", ty: i32, descr: Doc(md: "Identifier of the ephemeral message to edit")),
+                Param(name: "caption", ty: Option(String), descr: Doc(md: "New caption of the message, 0-1024 characters after entity parsing")),
+                Param(name: "parse_mode", ty: Option(RawTy("ParseMode")), descr: Doc(md: "Mode for parsing entities in the caption")),
+                Param(name: "caption_entities", ty: Option(ArrayOf(RawTy("MessageEntity"))), descr: Doc(md: "List of special entities that appear in the caption")),
+                Param(name: "reply_markup", ty: Option(RawTy("InlineKeyboardMarkup")), descr: Doc(md: "Inline keyboard for the message")),
+            ],
+        ),
+        Method(
+            names: ("editEphemeralMessageReplyMarkup", "EditEphemeralMessageReplyMarkup", "edit_ephemeral_message_reply_markup"),
+            return_ty: True,
+            doc: Doc(md: "Use this method to edit only the reply markup of an ephemeral message. Returns _True_ on success."),
+            tg_doc: "https://core.telegram.org/bots/api#editephemeralmessagereplymarkup",
+            tg_category: "Updating messages",
+            params: [
+                Param(name: "chat_id", ty: RawTy("Recipient"), descr: Doc(md: "Unique identifier for the target chat or username of the target supergroup")),
+                Param(name: "receiver_user_id", ty: RawTy("UserId"), descr: Doc(md: "Identifier of the user who received the message")),
+                Param(name: "ephemeral_message_id", ty: i32, descr: Doc(md: "Identifier of the ephemeral message to edit")),
+                Param(name: "reply_markup", ty: Option(RawTy("InlineKeyboardMarkup")), descr: Doc(md: "Inline keyboard for the message")),
+            ],
+        ),
+        Method(
+            names: ("deleteEphemeralMessage", "DeleteEphemeralMessage", "delete_ephemeral_message"),
+            return_ty: True,
+            doc: Doc(md: "Use this method to delete an ephemeral message. Returns _True_ on success."),
+            tg_doc: "https://core.telegram.org/bots/api#deleteephemeralmessage",
+            tg_category: "Updating messages",
+            params: [
+                Param(name: "chat_id", ty: RawTy("Recipient"), descr: Doc(md: "Unique identifier for the target chat or username of the target supergroup")),
+                Param(name: "receiver_user_id", ty: RawTy("UserId"), descr: Doc(md: "Identifier of the user who received the message")),
+                Param(name: "ephemeral_message_id", ty: i32, descr: Doc(md: "Identifier of the ephemeral message to delete")),
+            ],
+        ),
+        Method(
+            names: ("sendRichMessage", "SendRichMessage", "send_rich_message"),
+            return_ty: RawTy("Message"),
+            doc: Doc(md: "Use this method to send rich messages. On success, the sent [Message] is returned.", md_links: {"Message": "https://core.telegram.org/bots/api#message"}),
+            tg_doc: "https://core.telegram.org/bots/api#sendrichmessage",
+            tg_category: "Available methods",
+            params: [
+                Param(name: "business_connection_id", ty: Option(RawTy("BusinessConnectionId")), descr: Doc(md: "Unique identifier of the business connection on behalf of which the message will be sent")),
+                Param(name: "chat_id", ty: RawTy("Recipient"), descr: Doc(md: "Unique identifier for the target chat or username")),
+                Param(name: "message_thread_id", ty: Option(RawTy("ThreadId")), descr: Doc(md: "Unique identifier for the target message thread")),
+                Param(name: "direct_messages_topic_id", ty: Option(RawTy("TopicId")), descr: Doc(md: "Identifier of the direct messages topic")),
+                Param(name: "rich_message", ty: RawTy("InputRichMessage"), descr: Doc(md: "The message to be sent")),
+                Param(name: "disable_notification", ty: Option(bool), descr: Doc(md: "Sends the message silently")),
+                Param(name: "protect_content", ty: Option(bool), descr: Doc(md: "Protects the contents from forwarding and saving")),
+                Param(name: "allow_paid_broadcast", ty: Option(bool), descr: Doc(md: "Allows paid high-throughput broadcasting")),
+                Param(name: "message_effect_id", ty: Option(RawTy("EffectId")), descr: Doc(md: "Message effect identifier")),
+                Param(name: "suggested_post_parameters", ty: Option(RawTy("SuggestedPostParameters")), descr: Doc(md: "Parameters of the suggested post")),
+                Param(name: "reply_parameters", ty: Option(RawTy("ReplyParameters")), descr: Doc(md: "Description of the message to reply to")),
+                Param(name: "reply_markup", ty: Option(RawTy("ReplyMarkup")), descr: Doc(md: "Additional interface options")),
+            ],
+        ),
+        Method(
+            names: ("sendRichMessageDraft", "SendRichMessageDraft", "send_rich_message_draft"),
+            return_ty: True,
+            doc: Doc(md: "Use this method to stream a partial rich message to a user while it is being generated. Returns _True_ on success."),
+            tg_doc: "https://core.telegram.org/bots/api#sendrichmessagedraft",
+            tg_category: "Available methods",
+            params: [
+                Param(name: "chat_id", ty: RawTy("UserId"), descr: Doc(md: "Unique identifier for the target private chat")),
+                Param(name: "message_thread_id", ty: Option(RawTy("ThreadId")), descr: Doc(md: "Unique identifier for the target message thread")),
+                Param(name: "draft_id", ty: i32, descr: Doc(md: "Unique non-zero identifier of the message draft")),
+                Param(name: "rich_message", ty: RawTy("InputRichMessage"), descr: Doc(md: "The partial message to be streamed; direct upload of new files isn't supported")),
             ],
         ),
     ],

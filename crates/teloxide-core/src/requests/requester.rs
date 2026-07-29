@@ -1790,6 +1790,118 @@ pub trait Requester {
     fn get_game_high_scores<T>(&self, user_id: UserId, target: T) -> Self::GetGameHighScores
     where
         T: Into<TargetMessage>;
+
+    type AnswerChatJoinRequestQuery: Request<Payload = AnswerChatJoinRequestQuery, Err = Self::Err>;
+
+    /// For Telegram documentation see [`AnswerChatJoinRequestQuery`].
+    fn answer_chat_join_request_query<C>(
+        &self,
+        chat_join_request_query_id: C,
+        result: ChatJoinRequestQueryResult,
+    ) -> Self::AnswerChatJoinRequestQuery
+    where
+        C: Into<String>;
+
+    type SendChatJoinRequestWebApp: Request<Payload = SendChatJoinRequestWebApp, Err = Self::Err>;
+
+    /// For Telegram documentation see [`SendChatJoinRequestWebApp`].
+    fn send_chat_join_request_web_app<C>(
+        &self,
+        chat_join_request_query_id: C,
+        web_app_url: Url,
+    ) -> Self::SendChatJoinRequestWebApp
+    where
+        C: Into<String>;
+
+    type EditEphemeralMessageText: Request<Payload = EditEphemeralMessageText, Err = Self::Err>;
+
+    /// For Telegram documentation see [`EditEphemeralMessageText`].
+    fn edit_ephemeral_message_text<C, T>(
+        &self,
+        chat_id: C,
+        receiver_user_id: UserId,
+        ephemeral_message_id: i32,
+        text: T,
+    ) -> Self::EditEphemeralMessageText
+    where
+        C: Into<Recipient>,
+        T: Into<String>;
+
+    type EditEphemeralMessageMedia: Request<Payload = EditEphemeralMessageMedia, Err = Self::Err>;
+
+    /// For Telegram documentation see [`EditEphemeralMessageMedia`].
+    fn edit_ephemeral_message_media<C>(
+        &self,
+        chat_id: C,
+        receiver_user_id: UserId,
+        ephemeral_message_id: i32,
+        media: InputMedia,
+    ) -> Self::EditEphemeralMessageMedia
+    where
+        C: Into<Recipient>;
+
+    type EditEphemeralMessageCaption: Request<
+        Payload = EditEphemeralMessageCaption,
+        Err = Self::Err,
+    >;
+
+    /// For Telegram documentation see [`EditEphemeralMessageCaption`].
+    fn edit_ephemeral_message_caption<C>(
+        &self,
+        chat_id: C,
+        receiver_user_id: UserId,
+        ephemeral_message_id: i32,
+    ) -> Self::EditEphemeralMessageCaption
+    where
+        C: Into<Recipient>;
+
+    type EditEphemeralMessageReplyMarkup: Request<
+        Payload = EditEphemeralMessageReplyMarkup,
+        Err = Self::Err,
+    >;
+
+    /// For Telegram documentation see [`EditEphemeralMessageReplyMarkup`].
+    fn edit_ephemeral_message_reply_markup<C>(
+        &self,
+        chat_id: C,
+        receiver_user_id: UserId,
+        ephemeral_message_id: i32,
+    ) -> Self::EditEphemeralMessageReplyMarkup
+    where
+        C: Into<Recipient>;
+
+    type DeleteEphemeralMessage: Request<Payload = DeleteEphemeralMessage, Err = Self::Err>;
+
+    /// For Telegram documentation see [`DeleteEphemeralMessage`].
+    fn delete_ephemeral_message<C>(
+        &self,
+        chat_id: C,
+        receiver_user_id: UserId,
+        ephemeral_message_id: i32,
+    ) -> Self::DeleteEphemeralMessage
+    where
+        C: Into<Recipient>;
+
+    type SendRichMessage: Request<Payload = SendRichMessage, Err = Self::Err>;
+
+    /// For Telegram documentation see [`SendRichMessage`].
+    fn send_rich_message<C>(
+        &self,
+        chat_id: C,
+        rich_message: InputRichMessage,
+    ) -> Self::SendRichMessage
+    where
+        C: Into<Recipient>;
+
+    type SendRichMessageDraft: Request<Payload = SendRichMessageDraft, Err = Self::Err>;
+
+    /// For Telegram documentation see [`SendRichMessageDraft`].
+    fn send_rich_message_draft(
+        &self,
+        chat_id: UserId,
+        draft_id: i32,
+        rich_message: InputRichMessage,
+    ) -> Self::SendRichMessageDraft;
     // END BLOCK requester_methods
 }
 
@@ -1992,6 +2104,15 @@ macro_rules! forward_all {
             set_game_score,
             set_game_score_inline,
             get_game_high_scores,
+            answer_chat_join_request_query,
+            send_chat_join_request_web_app,
+            edit_ephemeral_message_text,
+            edit_ephemeral_message_media,
+            edit_ephemeral_message_caption,
+            edit_ephemeral_message_reply_markup,
+            delete_ephemeral_message,
+            send_rich_message,
+            send_rich_message_draft,
             approve_chat_join_request,
             decline_chat_join_request
             => $body, $ty

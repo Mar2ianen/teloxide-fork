@@ -35,6 +35,10 @@ text = text.replace(
 """,
     1,
 )
+remaining_empty_leaves = text.count("i5(empty())")
+if remaining_empty_leaves != 4:
+    raise RuntimeError(f"expected four empty iterator leaves, found {remaining_empty_leaves}")
+text = text.replace("i5(empty())", "i5([None, None])")
 if "[Some(&update.user), Some(&update.bot)]" not in text:
     raise RuntimeError("failed to extend mentioned_users iterator tree")
 '''

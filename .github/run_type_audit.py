@@ -13,7 +13,11 @@ replacement = '''text = text.replace(
 text = text.replace(
     """        let i5 = |x| R(R(x));
 """,
-    """        let i5 = |users: [Option<&User>; 2]| R(R(users.into_iter().flatten()));
+    """        fn direct_users(users: [Option<&User>; 2]) -> impl Iterator<Item = &User> {
+            users.into_iter().flatten()
+        }
+
+        let i5 = |x| R(R(x));
 """,
     1,
 )
@@ -27,19 +31,21 @@ text = text.replace(
 """,
     """            UpdateKind::ChatJoinRequest(request) => i1(once(&request.from)),
             UpdateKind::BusinessConnection(connection) => i1(once(&connection.user)),
-            UpdateKind::ManagedBot(update) => i5([Some(&update.user), Some(&update.bot)]),
+            UpdateKind::ManagedBot(update) => {
+                i5(direct_users([Some(&update.user), Some(&update.bot)]))
+            }
 
             UpdateKind::MessageReactionCount(_)
             | UpdateKind::DeletedBusinessMessages(_)
-            | UpdateKind::Error(_) => i5([None, None]),
+            | UpdateKind::Error(_) => i5(direct_users([None, None])),
 """,
     1,
 )
 remaining_empty_leaves = text.count("i5(empty())")
 if remaining_empty_leaves != 4:
     raise RuntimeError(f"expected four empty iterator leaves, found {remaining_empty_leaves}")
-text = text.replace("i5(empty())", "i5([None, None])")
-if "[Some(&update.user), Some(&update.bot)]" not in text:
+text = text.replace("i5(empty())", "i5(direct_users([None, None]))")
+if "direct_users([Some(&update.user), Some(&update.bot)])" not in text:
     raise RuntimeError("failed to extend mentioned_users iterator tree")
 '''
 source = source[:start] + replacement + source[end:]

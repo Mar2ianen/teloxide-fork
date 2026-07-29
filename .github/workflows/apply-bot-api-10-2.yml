@@ -82,6 +82,13 @@ jobs:
           cp /tmp/bot-api-original.rs crates/teloxide-core/src/bot/api.rs
           cp /tmp/multipart-original.rs crates/teloxide-core/src/requests/multipart_payload.rs
 
+      - name: Bootstrap generated Requester API
+        run: |
+          cargo test -p teloxide-core --features "full nightly" codegen || true
+          cp /tmp/bot-api-patched.rs crates/teloxide-core/src/bot/api.rs
+          base64 -d scripts/patch_bot_api_10_2_adaptors.py.gz.b64 | gzip -d > /tmp/patch_bot_api_10_2_adaptors.py
+          python /tmp/patch_bot_api_10_2_adaptors.py
+
       - name: Regenerate code
         shell: bash
         run: |
@@ -95,10 +102,8 @@ jobs:
           done
           test "$generated" = true
 
-      - name: Restore Bot and multipart integration
-        run: |
-          cp /tmp/bot-api-patched.rs crates/teloxide-core/src/bot/api.rs
-          cp /tmp/multipart-patched.rs crates/teloxide-core/src/requests/multipart_payload.rs
+      - name: Restore multipart integration test
+        run: cp /tmp/multipart-patched.rs crates/teloxide-core/src/requests/multipart_payload.rs
 
       - name: Format and verify generated tree
         run: |
@@ -116,6 +121,7 @@ jobs:
           rm -f .github/workflows/export-worktree.yml
           rm -f .github/workflows/apply-bot-api-10-2.yml
           rm -f scripts/apply_bot_api_10_2.py.gz.b64
+          rm -f scripts/patch_bot_api_10_2_adaptors.py.gz.b64
           rmdir scripts 2>/dev/null || true
 
       - name: Commit generated implementation

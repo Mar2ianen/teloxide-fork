@@ -446,23 +446,6 @@ mod tests {
                 method: "editMessageText".to_owned(),
                 param: "disable_web_page_preview".to_owned(),
             },
-            // The Inline methods can't set these values
-            Exception::MethodField {
-                method: "editMessageTextInline".to_owned(),
-                param: "link_preview_options".to_owned(),
-            },
-            Exception::MethodField {
-                method: "editMessageCaptionInline".to_owned(),
-                param: "link_preview_options".to_owned(),
-            },
-            Exception::MethodField {
-                method: "editMessageCaptionInline".to_owned(),
-                param: "show_caption_above_media".to_owned(),
-            },
-            Exception::MethodField {
-                method: "editMessageLiveLocationInline".to_owned(),
-                param: "live_period".to_owned(),
-            },
             // getGameHighScores has `target` field for that
             Exception::MethodField {
                 method: "getGameHighScores".to_owned(),

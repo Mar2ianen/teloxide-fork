@@ -49,5 +49,12 @@ if "direct_users([Some(&update.user), Some(&update.bot)])" not in text:
     raise RuntimeError("failed to extend mentioned_users iterator tree")
 '''
 source = source[:start] + replacement + source[end:]
+source = source.replace(
+    '    assert_eq!(error, ParseError::WrongBotName("other_bot".to_owned()));',
+    '''    match error {
+        ParseError::WrongBotName(name) => assert_eq!(name, "other_bot"),
+        other => panic!("expected WrongBotName, got {other:?}"),
+    }''',
+)
 exec(compile(source, str(script), "exec"), {"__file__": str(script)})
 wrapper.unlink()

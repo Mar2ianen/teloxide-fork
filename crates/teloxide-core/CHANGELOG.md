@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `RequestError::is_multipart_serialization_error` to distinguish multipart serialization failures from file I/O errors.
 - Support for TBA 10.0
   - Add `send_live_photo`, `send_message_draft`, `get_user_profile_audios`, `set_chat_member_tag`, `get_user_personal_chat_messages`, `answer_guest_query`, `get_managed_bot_token`, `replace_managed_bot_token`, `get_managed_bot_access_settings`, `set_managed_bot_access_settings`, `set_my_profile_photo`, `remove_my_profile_photo`, `get_user_gifts`, `get_chat_gifts`, `repost_story`, `save_prepared_keyboard_button`, `delete_message_reaction` and `delete_all_message_reactions` methods
   - Add `GuestMessage` and `ManagedBot` update kinds

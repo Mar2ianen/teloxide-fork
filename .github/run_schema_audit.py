@@ -11,5 +11,9 @@ source = source.replace(
     'CORE / "src/codegen/payloads.rs"',
     'CORE / "src/payloads/codegen.rs"',
 )
+source = source.replace(
+    'test_path = CORE / "tests/business_account_gift_filters.rs"\ntest_path.write_text(',
+    'test_path = CORE / "tests/business_account_gift_filters.rs"\ntest_path.parent.mkdir(exist_ok=True)\ntest_path.write_text(',
+)
 exec(compile(source, str(script), "exec"), {"__file__": str(script)})
 wrapper.unlink()

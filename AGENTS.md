@@ -321,19 +321,9 @@ A complete GitHub CI run should cover:
 
 ## Current integration direction
 
-The integration branch currently targets full Telegram Bot API 10.0 support before moving to 10.2.
+`master` contains the integrated Telegram Bot API 10.0 work. The next API update targets Bot API 10.2.
 
-At the time this file was introduced, the known method-signature gap was `getBusinessAccountGifts`, whose legacy `exclude_limited` field needed to be replaced by the current split filters:
-
-```text
-exclude_limited_upgradable
-exclude_limited_non_upgradable
-exclude_from_blockchain
-```
-
-Agents must verify that this TODO is still current before acting on it.
-
-After closing 10.0, perform an independent external audit before changing the coverage claim from a qualified label to complete support.
+Do not state complete Bot API 10.0 coverage without an independent external audit against the official documentation. Treat the 10.0 coverage claim as qualified until that audit is recorded.
 
 For the 10.2 update, separate work into reviewable layers:
 

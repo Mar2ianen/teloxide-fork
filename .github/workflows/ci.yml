@@ -31,7 +31,7 @@ jobs:
           components: rustfmt
       - name: Apply and validate fixes
         run: |
-          python .github/apply_schema_audit.py
+          python .github/run_schema_audit.py
           cargo +${{ env.rust_nightly }} fmt --all
           cargo +${{ env.rust_nightly }} test -p teloxide-core --features "full nightly" business_account_gift_filters -- --nocapture
           cargo +${{ env.rust_nightly }} test -p teloxide-core --features "full nightly" check_ron_schema -- --nocapture

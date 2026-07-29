@@ -9,12 +9,11 @@ This repository is a development fork of `teloxide` focused on keeping Telegram 
 
 The fork has two important long-lived branches:
 
-- `master` is a clean mirror of upstream `teloxide/teloxide`
-- `next` is the integration branch for fork-specific development
+- `master` is the primary integration branch and contains the supported fork release line, including accepted fork-specific changes
+- `next` is an optional staging branch for broad or high-risk integration work before it is promoted to `master`
 
-Never make fork-specific commits on `master`.
-Never open a fork feature PR against `master`.
-Create work branches from `next` and target PRs back to `next`.
+Synchronize upstream changes into `master` before integrating fork changes when possible.
+Create feature branches from `master` and target fork feature PRs back to `master`. Use `next` only when an explicitly staged integration workflow is needed.
 
 ## Start every task by checking the repository state
 
@@ -23,8 +22,8 @@ Before editing code:
 ```shell
 git status --short --branch
 git fetch --all --prune
-git switch next
-git pull --ff-only origin next
+git switch master
+git pull --ff-only origin master
 git switch -c <type>/<short-task-name>
 ```
 
@@ -41,7 +40,7 @@ cargo metadata --no-deps --format-version 1 >/dev/null
 
 ## Non-negotiable rules
 
-1. Do not push directly to `master`
+1. Do not push directly to `master` unless the user explicitly authorizes it; prefer reviewed feature branches and PRs.
 2. Do not use stale technical branches as a base
 3. Do not edit generated files as the primary source of a change
 4. Do not claim complete Telegram Bot API coverage without an external audit against the official documentation
@@ -434,7 +433,7 @@ A task is done only when:
 - formatting and clippy pass
 - relevant workspace and feature combinations pass
 - documentation and changelog are updated when user-visible behavior changed
-- the PR targets `next`
+- the PR targets `master`, unless the work explicitly uses the `next` staging workflow
 - remaining gaps are stated explicitly
 
 Correctness at the Telegram wire boundary is more important than making local schemas, derives, or generated code look convenient.

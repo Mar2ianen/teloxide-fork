@@ -17,6 +17,7 @@ pub mod setters;
 
 mod add_sticker_to_set;
 mod answer_callback_query;
+mod answer_chat_join_request_query;
 mod answer_guest_query;
 mod answer_inline_query;
 mod answer_pre_checkout_query;
@@ -43,6 +44,7 @@ mod delete_all_message_reactions;
 mod delete_business_messages;
 mod delete_chat_photo;
 mod delete_chat_sticker_set;
+mod delete_ephemeral_message;
 mod delete_forum_topic;
 mod delete_message;
 mod delete_message_reaction;
@@ -54,6 +56,10 @@ mod delete_story;
 mod delete_webhook;
 mod edit_chat_invite_link;
 mod edit_chat_subscription_invite_link;
+mod edit_ephemeral_message_caption;
+mod edit_ephemeral_message_media;
+mod edit_ephemeral_message_reply_markup;
+mod edit_ephemeral_message_text;
 mod edit_forum_topic;
 mod edit_general_forum_topic;
 mod edit_message_caption;
@@ -131,6 +137,7 @@ mod save_prepared_keyboard_button;
 mod send_animation;
 mod send_audio;
 mod send_chat_action;
+mod send_chat_join_request_web_app;
 mod send_checklist;
 mod send_contact;
 mod send_dice;
@@ -147,6 +154,8 @@ mod send_message_draft;
 mod send_paid_media;
 mod send_photo;
 mod send_poll;
+mod send_rich_message;
+mod send_rich_message_draft;
 mod send_sticker;
 mod send_venue;
 mod send_video;
@@ -204,6 +213,9 @@ mod verify_user;
 
 pub use add_sticker_to_set::{AddStickerToSet, AddStickerToSetSetters};
 pub use answer_callback_query::{AnswerCallbackQuery, AnswerCallbackQuerySetters};
+pub use answer_chat_join_request_query::{
+    AnswerChatJoinRequestQuery, AnswerChatJoinRequestQuerySetters,
+};
 pub use answer_guest_query::{AnswerGuestQuery, AnswerGuestQuerySetters};
 pub use answer_inline_query::{AnswerInlineQuery, AnswerInlineQuerySetters};
 pub use answer_pre_checkout_query::{AnswerPreCheckoutQuery, AnswerPreCheckoutQuerySetters};
@@ -234,6 +246,7 @@ pub use delete_all_message_reactions::{
 pub use delete_business_messages::{DeleteBusinessMessages, DeleteBusinessMessagesSetters};
 pub use delete_chat_photo::{DeleteChatPhoto, DeleteChatPhotoSetters};
 pub use delete_chat_sticker_set::{DeleteChatStickerSet, DeleteChatStickerSetSetters};
+pub use delete_ephemeral_message::{DeleteEphemeralMessage, DeleteEphemeralMessageSetters};
 pub use delete_forum_topic::{DeleteForumTopic, DeleteForumTopicSetters};
 pub use delete_message::{DeleteMessage, DeleteMessageSetters};
 pub use delete_message_reaction::{DeleteMessageReaction, DeleteMessageReactionSetters};
@@ -247,6 +260,16 @@ pub use edit_chat_invite_link::{EditChatInviteLink, EditChatInviteLinkSetters};
 pub use edit_chat_subscription_invite_link::{
     EditChatSubscriptionInviteLink, EditChatSubscriptionInviteLinkSetters,
 };
+pub use edit_ephemeral_message_caption::{
+    EditEphemeralMessageCaption, EditEphemeralMessageCaptionSetters,
+};
+pub use edit_ephemeral_message_media::{
+    EditEphemeralMessageMedia, EditEphemeralMessageMediaSetters,
+};
+pub use edit_ephemeral_message_reply_markup::{
+    EditEphemeralMessageReplyMarkup, EditEphemeralMessageReplyMarkupSetters,
+};
+pub use edit_ephemeral_message_text::{EditEphemeralMessageText, EditEphemeralMessageTextSetters};
 pub use edit_forum_topic::{EditForumTopic, EditForumTopicSetters};
 pub use edit_general_forum_topic::{EditGeneralForumTopic, EditGeneralForumTopicSetters};
 pub use edit_message_caption::{EditMessageCaption, EditMessageCaptionSetters};
@@ -344,6 +367,9 @@ pub use save_prepared_keyboard_button::{
 pub use send_animation::{SendAnimation, SendAnimationSetters};
 pub use send_audio::{SendAudio, SendAudioSetters};
 pub use send_chat_action::{SendChatAction, SendChatActionSetters};
+pub use send_chat_join_request_web_app::{
+    SendChatJoinRequestWebApp, SendChatJoinRequestWebAppSetters,
+};
 pub use send_checklist::{SendChecklist, SendChecklistSetters};
 pub use send_contact::{SendContact, SendContactSetters};
 pub use send_dice::{SendDice, SendDiceSetters};
@@ -360,6 +386,8 @@ pub use send_message_draft::{SendMessageDraft, SendMessageDraftSetters};
 pub use send_paid_media::{SendPaidMedia, SendPaidMediaSetters};
 pub use send_photo::{SendPhoto, SendPhotoSetters};
 pub use send_poll::{SendPoll, SendPollSetters};
+pub use send_rich_message::{SendRichMessage, SendRichMessageSetters};
+pub use send_rich_message_draft::{SendRichMessageDraft, SendRichMessageDraftSetters};
 pub use send_sticker::{SendSticker, SendStickerSetters};
 pub use send_venue::{SendVenue, SendVenueSetters};
 pub use send_video::{SendVideo, SendVideoSetters};

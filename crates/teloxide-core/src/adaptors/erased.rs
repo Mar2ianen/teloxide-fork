@@ -372,6 +372,15 @@ where
         set_game_score,
         set_game_score_inline,
         get_game_high_scores,
+        answer_chat_join_request_query,
+        send_chat_join_request_web_app,
+        edit_ephemeral_message_text,
+        edit_ephemeral_message_media,
+        edit_ephemeral_message_caption,
+        edit_ephemeral_message_reply_markup,
+        delete_ephemeral_message,
+        send_rich_message,
+        send_rich_message_draft,
         approve_chat_join_request,
         decline_chat_join_request
         => fwd_erased, fty
@@ -1201,6 +1210,68 @@ trait ErasableRequester<'a> {
         &self,
         business_connection_id: BusinessConnectionId,
     ) -> ErasedRequest<'a, SetBusinessAccountBio, Self::Err>;
+
+    fn answer_chat_join_request_query(
+        &self,
+        chat_join_request_query_id: String,
+        result: ChatJoinRequestQueryResult,
+    ) -> ErasedRequest<'a, AnswerChatJoinRequestQuery, Self::Err>;
+
+    fn send_chat_join_request_web_app(
+        &self,
+        chat_join_request_query_id: String,
+        web_app_url: Url,
+    ) -> ErasedRequest<'a, SendChatJoinRequestWebApp, Self::Err>;
+
+    fn edit_ephemeral_message_text(
+        &self,
+        chat_id: Recipient,
+        receiver_user_id: UserId,
+        ephemeral_message_id: i32,
+        text: String,
+    ) -> ErasedRequest<'a, EditEphemeralMessageText, Self::Err>;
+
+    fn edit_ephemeral_message_media(
+        &self,
+        chat_id: Recipient,
+        receiver_user_id: UserId,
+        ephemeral_message_id: i32,
+        media: InputMedia,
+    ) -> ErasedRequest<'a, EditEphemeralMessageMedia, Self::Err>;
+
+    fn edit_ephemeral_message_caption(
+        &self,
+        chat_id: Recipient,
+        receiver_user_id: UserId,
+        ephemeral_message_id: i32,
+    ) -> ErasedRequest<'a, EditEphemeralMessageCaption, Self::Err>;
+
+    fn edit_ephemeral_message_reply_markup(
+        &self,
+        chat_id: Recipient,
+        receiver_user_id: UserId,
+        ephemeral_message_id: i32,
+    ) -> ErasedRequest<'a, EditEphemeralMessageReplyMarkup, Self::Err>;
+
+    fn delete_ephemeral_message(
+        &self,
+        chat_id: Recipient,
+        receiver_user_id: UserId,
+        ephemeral_message_id: i32,
+    ) -> ErasedRequest<'a, DeleteEphemeralMessage, Self::Err>;
+
+    fn send_rich_message(
+        &self,
+        chat_id: Recipient,
+        rich_message: InputRichMessage,
+    ) -> ErasedRequest<'a, SendRichMessage, Self::Err>;
+
+    fn send_rich_message_draft(
+        &self,
+        chat_id: UserId,
+        draft_id: i32,
+        rich_message: InputRichMessage,
+    ) -> ErasedRequest<'a, SendRichMessageDraft, Self::Err>;
 
     fn send_invoice(
         &self,
@@ -2535,6 +2606,114 @@ where
         story_id: StoryId,
     ) -> ErasedRequest<'a, DeleteStory, Self::Err> {
         Requester::delete_story(self, business_connection_id, story_id).erase()
+    }
+
+    fn answer_chat_join_request_query(
+        &self,
+        chat_join_request_query_id: String,
+        result: ChatJoinRequestQueryResult,
+    ) -> ErasedRequest<'a, AnswerChatJoinRequestQuery, Self::Err> {
+        Requester::answer_chat_join_request_query(self, chat_join_request_query_id, result).erase()
+    }
+
+    fn send_chat_join_request_web_app(
+        &self,
+        chat_join_request_query_id: String,
+        web_app_url: Url,
+    ) -> ErasedRequest<'a, SendChatJoinRequestWebApp, Self::Err> {
+        Requester::send_chat_join_request_web_app(self, chat_join_request_query_id, web_app_url)
+            .erase()
+    }
+
+    fn edit_ephemeral_message_text(
+        &self,
+        chat_id: Recipient,
+        receiver_user_id: UserId,
+        ephemeral_message_id: i32,
+        text: String,
+    ) -> ErasedRequest<'a, EditEphemeralMessageText, Self::Err> {
+        Requester::edit_ephemeral_message_text(
+            self,
+            chat_id,
+            receiver_user_id,
+            ephemeral_message_id,
+            text,
+        )
+        .erase()
+    }
+
+    fn edit_ephemeral_message_media(
+        &self,
+        chat_id: Recipient,
+        receiver_user_id: UserId,
+        ephemeral_message_id: i32,
+        media: InputMedia,
+    ) -> ErasedRequest<'a, EditEphemeralMessageMedia, Self::Err> {
+        Requester::edit_ephemeral_message_media(
+            self,
+            chat_id,
+            receiver_user_id,
+            ephemeral_message_id,
+            media,
+        )
+        .erase()
+    }
+
+    fn edit_ephemeral_message_caption(
+        &self,
+        chat_id: Recipient,
+        receiver_user_id: UserId,
+        ephemeral_message_id: i32,
+    ) -> ErasedRequest<'a, EditEphemeralMessageCaption, Self::Err> {
+        Requester::edit_ephemeral_message_caption(
+            self,
+            chat_id,
+            receiver_user_id,
+            ephemeral_message_id,
+        )
+        .erase()
+    }
+
+    fn edit_ephemeral_message_reply_markup(
+        &self,
+        chat_id: Recipient,
+        receiver_user_id: UserId,
+        ephemeral_message_id: i32,
+    ) -> ErasedRequest<'a, EditEphemeralMessageReplyMarkup, Self::Err> {
+        Requester::edit_ephemeral_message_reply_markup(
+            self,
+            chat_id,
+            receiver_user_id,
+            ephemeral_message_id,
+        )
+        .erase()
+    }
+
+    fn delete_ephemeral_message(
+        &self,
+        chat_id: Recipient,
+        receiver_user_id: UserId,
+        ephemeral_message_id: i32,
+    ) -> ErasedRequest<'a, DeleteEphemeralMessage, Self::Err> {
+        Requester::delete_ephemeral_message(self, chat_id, receiver_user_id, ephemeral_message_id)
+            .erase()
+    }
+
+    fn send_rich_message(
+        &self,
+        chat_id: Recipient,
+        rich_message: InputRichMessage,
+    ) -> ErasedRequest<'a, SendRichMessage, Self::Err> {
+        Requester::send_rich_message(self, chat_id, rich_message).erase()
+    }
+
+    fn send_rich_message_draft(
+        &self,
+        chat_id: UserId,
+        draft_id: i32,
+        rich_message: InputRichMessage,
+    ) -> ErasedRequest<'a, SendRichMessageDraft, Self::Err> {
+        Requester::send_rich_message_draft(self, chat_id, draft_id, rich_message).erase()
     }
 
     fn send_invoice(

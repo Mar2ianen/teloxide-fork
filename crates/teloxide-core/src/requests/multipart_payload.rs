@@ -119,12 +119,13 @@ impl MultipartPayload for payloads::EditStory {
 #[cfg(test)]
 mod tests {
     use crate::{
-        payloads::{EditStory, PostStory, SendPoll},
+        payloads::{EditStory, PostStory, SendPoll, SendRichMessage},
         requests::{MultipartPayload, MultipartRequest, Requester},
         types::{
             BusinessConnectionId, ChatId, InputFile, InputMediaAnimation, InputMediaLivePhoto,
             InputMediaSticker, InputMediaVideo, InputPollMedia, InputPollOption,
-            InputPollOptionMedia, InputStoryContent, InputStoryContentPhoto,
+            InputPollOptionMedia, InputRichMessage, InputRichMessageMedia,
+            InputRichMessageMediaContent, InputStoryContent, InputStoryContentPhoto,
             InputStoryContentVideo, Seconds, StoryId,
         },
         Bot,
@@ -231,5 +232,27 @@ mod tests {
                 is_animation: None,
             }),
         ));
+    }
+    #[test]
+    fn send_rich_message_collects_nested_attachments_and_uses_multipart() {
+        fn assert_multipart(_: MultipartRequest<SendRichMessage>) {}
+
+        let rich = InputRichMessage::html(r#"<img src="tg://photo?id=cover">"#).media([
+            InputRichMessageMedia::new(
+                "cover",
+                InputRichMessageMediaContent::Photo(crate::types::InputMediaPhoto::new(file())),
+            ),
+        ]);
+        let mut payload = SendRichMessage::new(ChatId(1), rich.clone());
+
+        let mut copied = 0;
+        payload.copy_files(&mut |_| copied += 1);
+        assert_eq!(copied, 1);
+
+        let mut moved = 0;
+        payload.move_files(&mut |_| moved += 1);
+        assert_eq!(moved, 1);
+
+        assert_multipart(Bot::new("token").send_rich_message(ChatId(1), rich));
     }
 }

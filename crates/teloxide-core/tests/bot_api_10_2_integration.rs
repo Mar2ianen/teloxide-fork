@@ -53,11 +53,7 @@ fn rich_only_edit_collects_local_media_and_uses_multipart() {
     payload.move_files(&mut |_| moved += 1);
     assert_eq!(moved, 1);
 
-    assert_multipart(Bot::new("token").edit_message_rich_text(
-        ChatId(1),
-        MessageId(2),
-        rich,
-    ));
+    assert_multipart(Bot::new("token").edit_message_rich_text(ChatId(1), MessageId(2), rich));
 }
 
 #[test]

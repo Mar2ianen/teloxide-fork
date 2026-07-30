@@ -4,7 +4,8 @@ use url::Url;
 
 use crate::{
     payloads::{
-        AnswerInlineQuery, AnswerWebAppQuery, CopyMessage, EditMessageCaption,
+        AnswerInlineQuery, AnswerWebAppQuery, CopyMessage, EditEphemeralMessageCaption,
+        EditEphemeralMessageMedia, EditEphemeralMessageText, EditMessageCaption,
         EditMessageCaptionInline, EditMessageChecklist, EditMessageMedia, EditMessageMediaInline,
         EditMessageText, EditMessageTextInline, EditStory, GiftPremiumSubscription, PostStory,
         SavePreparedInlineMessage, SendAnimation, SendAudio, SendChecklist, SendDocument, SendGift,
@@ -144,6 +145,9 @@ where
     B::SendDocument: Clone,
     B::SendAnimation: Clone,
     B::SendVoice: Clone,
+    B::EditEphemeralMessageText: Clone,
+    B::EditEphemeralMessageCaption: Clone,
+    B::EditEphemeralMessageMedia: Clone,
     B::EditMessageText: Clone,
     B::EditMessageTextInline: Clone,
     B::EditMessageCaption: Clone,
@@ -179,8 +183,10 @@ where
         send_voice,
         send_poll,
         send_checklist,
+        edit_ephemeral_message_text,
         edit_message_text,
         edit_message_text_inline,
+        edit_ephemeral_message_caption,
         edit_message_caption,
         edit_message_caption_inline,
         edit_message_checklist,
@@ -192,6 +198,7 @@ where
         save_prepared_inline_message,
         send_paid_media,
         send_media_group,
+        edit_ephemeral_message_media,
         edit_message_media,
         edit_message_media_inline,
         gift_premium_subscription,
@@ -356,6 +363,12 @@ where
         set_game_score,
         set_game_score_inline,
         get_game_high_scores,
+        answer_chat_join_request_query,
+        send_chat_join_request_web_app,
+        edit_ephemeral_message_reply_markup,
+        delete_ephemeral_message,
+        send_rich_message,
+        send_rich_message_draft,
         approve_chat_join_request,
         decline_chat_join_request
         => fid, ftyid
@@ -405,6 +418,8 @@ impl_visit_parse_modes! {
     SendDocument => [parse_mode],
     SendAnimation => [parse_mode],
     SendVoice => [parse_mode],
+    EditEphemeralMessageText => [parse_mode],
+    EditEphemeralMessageCaption => [parse_mode],
     EditMessageText => [parse_mode],
     EditMessageTextInline => [parse_mode],
     EditMessageCaption => [parse_mode],
@@ -446,6 +461,12 @@ impl VisitParseModes for SendMediaGroup {
         self.media
             .iter_mut()
             .for_each(|media| visit_parse_modes_in_input_media(media, &mut visitor))
+    }
+}
+
+impl VisitParseModes for EditEphemeralMessageMedia {
+    fn visit_parse_modes(&mut self, mut visitor: impl FnMut(&mut Option<ParseMode>)) {
+        visit_parse_modes_in_input_media(&mut self.media, &mut visitor);
     }
 }
 

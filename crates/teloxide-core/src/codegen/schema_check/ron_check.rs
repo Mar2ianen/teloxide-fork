@@ -55,6 +55,7 @@ enum Exception {
     MethodField { method: String, param: String },
     FieldType { ron_raw_type: String, actual_type: String },
     SiblingParam { param: String },
+    Requiredness { method: String, param: String },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -81,6 +82,10 @@ impl Exceptions {
 
     fn is_sibling_param_exception(&self, param: String) -> bool {
         self.exceptions.contains(&Exception::SiblingParam { param })
+    }
+
+    fn is_requiredness_exception(&self, method: String, param: String) -> bool {
+        self.exceptions.contains(&Exception::Requiredness { method, param })
     }
 }
 
@@ -321,7 +326,10 @@ fn check_param(
             });
         }
         ron_param.ty = *ron_param_type.clone()
-    } else if !param.required && !ignore_optional {
+    } else if !param.required
+        && !ignore_optional
+        && !exceptions.is_requiredness_exception(method_name.clone(), param.name.clone())
+    {
         errors.push(ApiCheckError::ParamIsNotRequired {
             method: method_name.clone(),
             param: param.name.clone(),
@@ -458,6 +466,10 @@ mod tests {
             Exception::MethodField {
                 method: "getGameHighScores".to_owned(),
                 param: "inline_message_id".to_owned(),
+            },
+            Exception::Requiredness {
+                method: "editMessageText".to_owned(),
+                param: "text".to_owned(),
             },
         ]);
 

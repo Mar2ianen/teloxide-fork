@@ -43,6 +43,9 @@ pub struct ChatFullInfo {
     /// The most recent pinned message (by sending date).
     pub pinned_message: Option<Box<Message>>,
 
+    /// Guard bot configured for the chat, if any.
+    pub guard_bot: Option<User>,
+
     /// The time after which all messages sent to the chat will be automatically
     /// deleted; in seconds.
     pub message_auto_delete_time: Option<Seconds>,
@@ -764,6 +767,7 @@ mod tests {
             })),
             photo: None,
             pinned_message: None,
+            guard_bot: None,
             message_auto_delete_time: None,
             has_hidden_members: false,
             has_aggressive_anti_spam_enabled: false,
@@ -831,6 +835,7 @@ mod tests {
             })),
             photo: None,
             pinned_message: None,
+            guard_bot: None,
             message_auto_delete_time: None,
             has_hidden_members: false,
             has_aggressive_anti_spam_enabled: false,
@@ -896,6 +901,7 @@ mod tests {
             })),
             photo: None,
             pinned_message: None,
+            guard_bot: None,
             message_auto_delete_time: None,
             has_hidden_members: false,
             has_aggressive_anti_spam_enabled: false,

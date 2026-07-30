@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import re
 
 root = Path.cwd()
@@ -77,3 +78,14 @@ s = s.replace(
     "| MediaKind::Location(_)\n                    | MediaKind::RichMessage(_)\n                    | MediaKind::Poll(_)",
 )
 p.write_text(s)
+
+# ReplyParameters.message_id is optional in Bot API 10.2 when
+# ephemeral_message_id is supplied; keep the external schema aligned.
+p = root / "crates/teloxide-core/custom_v2.json"
+data = json.loads(p.read_text())
+for obj in data["objects"]:
+    if obj.get("name") == "ReplyParameters":
+        for field in obj.get("fields", []):
+            if field.get("name") == "message_id":
+                field["required"] = False
+p.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")

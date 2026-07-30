@@ -42,6 +42,7 @@ where
     B::Err: AsResponseParameters,
 
     B::SendMessage: Clone + Send + Sync + 'static,
+    B::SendRichMessage: Clone + Send + Sync + 'static,
     B::ForwardMessage: Clone + Send + Sync + 'static,
     B::ForwardMessages: Clone + Send + Sync + 'static,
     B::CopyMessage: Clone + Send + Sync + 'static,
@@ -70,6 +71,7 @@ where
 
     requester_forward! {
         send_message,
+        send_rich_message,
         forward_message,
         forward_messages,
         copy_message,
@@ -256,6 +258,14 @@ where
         set_passport_data_errors,
         set_game_score,
         set_game_score_inline,
+        answer_chat_join_request_query,
+        send_chat_join_request_web_app,
+        edit_ephemeral_message_text,
+        edit_ephemeral_message_media,
+        edit_ephemeral_message_caption,
+        edit_ephemeral_message_reply_markup,
+        delete_ephemeral_message,
+        send_rich_message_draft,
         approve_chat_join_request,
         decline_chat_join_request,
         get_game_high_scores

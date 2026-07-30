@@ -42,6 +42,11 @@ pub struct User {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub supports_guest_queries: bool,
 
+    /// `true`, if the bot supports chat join request queries. Returned only in
+    /// `getMe`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub supports_join_request_queries: bool,
+
     /// `true`, if the bot has forum topic mode enabled in private chats.
     /// Returned only in `getMe`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -173,6 +178,7 @@ mod tests {
             is_premium: false,
             added_to_attachment_menu: false,
             supports_guest_queries: false,
+            supports_join_request_queries: false,
             has_topics_enabled: false,
             allows_users_to_create_topics: false,
             can_manage_bots: false,
@@ -193,6 +199,7 @@ mod tests {
             is_premium: false,
             added_to_attachment_menu: false,
             supports_guest_queries: false,
+            supports_join_request_queries: false,
             has_topics_enabled: false,
             allows_users_to_create_topics: false,
             can_manage_bots: false,
@@ -208,6 +215,7 @@ mod tests {
             is_premium: false,
             added_to_attachment_menu: false,
             supports_guest_queries: false,
+            supports_join_request_queries: false,
             has_topics_enabled: false,
             allows_users_to_create_topics: false,
             can_manage_bots: false,

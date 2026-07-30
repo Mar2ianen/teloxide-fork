@@ -6,11 +6,11 @@ use crate::{
     requests::{JsonRequest, MultipartRequest},
     types::{
         AcceptedGiftTypes, BotCommand, BusinessConnectionId, CallbackQueryId, ChatId,
-        ChatPermissions, CustomEmojiId, FileId, GiftId, InlineQueryId, InlineQueryResult,
-        InputChecklist, InputFile, InputMedia, InputPaidMedia, InputPollOption, InputProfilePhoto,
-        InputSticker, InputStoryContent, KeyboardButton, LabeledPrice, MessageId, OwnedGiftId,
-        PreCheckoutQueryId, Recipient, Seconds, ShippingQueryId, StickerFormat, StoryId,
-        TelegramTransactionId, ThreadId, UserId,
+        ChatJoinRequestQueryResult, ChatPermissions, CustomEmojiId, FileId, GiftId, InlineQueryId,
+        InlineQueryResult, InputChecklist, InputFile, InputMedia, InputPaidMedia, InputPollOption,
+        InputProfilePhoto, InputRichMessage, InputSticker, InputStoryContent, KeyboardButton,
+        LabeledPrice, MessageId, OwnedGiftId, PreCheckoutQueryId, Recipient, Seconds,
+        ShippingQueryId, StickerFormat, StoryId, TelegramTransactionId, ThreadId, UserId,
     },
     Bot,
 };
@@ -1103,7 +1103,7 @@ impl Requester for Bot {
         )
     }
 
-    type EditMessageText = JsonRequest<payloads::EditMessageText>;
+    type EditMessageText = MultipartRequest<payloads::EditMessageText>;
 
     fn edit_message_text<C, T>(
         &self,
@@ -2195,6 +2195,174 @@ impl Requester for Bot {
         )
     }
 
+    type AnswerChatJoinRequestQuery = JsonRequest<payloads::AnswerChatJoinRequestQuery>;
+
+    fn answer_chat_join_request_query<Q>(
+        &self,
+        chat_join_request_query_id: Q,
+        result: ChatJoinRequestQueryResult,
+    ) -> Self::AnswerChatJoinRequestQuery
+    where
+        Q: Into<String>,
+    {
+        Self::AnswerChatJoinRequestQuery::new(
+            self.clone(),
+            payloads::AnswerChatJoinRequestQuery::new(chat_join_request_query_id, result),
+        )
+    }
+
+    type SendChatJoinRequestWebApp = JsonRequest<payloads::SendChatJoinRequestWebApp>;
+
+    fn send_chat_join_request_web_app<Q>(
+        &self,
+        chat_join_request_query_id: Q,
+        web_app_url: Url,
+    ) -> Self::SendChatJoinRequestWebApp
+    where
+        Q: Into<String>,
+    {
+        Self::SendChatJoinRequestWebApp::new(
+            self.clone(),
+            payloads::SendChatJoinRequestWebApp::new(chat_join_request_query_id, web_app_url),
+        )
+    }
+
+    type EditEphemeralMessageText = JsonRequest<payloads::EditEphemeralMessageText>;
+
+    fn edit_ephemeral_message_text<C, T>(
+        &self,
+        chat_id: C,
+        receiver_user_id: UserId,
+        ephemeral_message_id: i32,
+        text: T,
+    ) -> Self::EditEphemeralMessageText
+    where
+        C: Into<Recipient>,
+        T: Into<String>,
+    {
+        Self::EditEphemeralMessageText::new(
+            self.clone(),
+            payloads::EditEphemeralMessageText::new(
+                chat_id,
+                receiver_user_id,
+                ephemeral_message_id,
+                text,
+            ),
+        )
+    }
+
+    type EditEphemeralMessageMedia = JsonRequest<payloads::EditEphemeralMessageMedia>;
+
+    fn edit_ephemeral_message_media<C>(
+        &self,
+        chat_id: C,
+        receiver_user_id: UserId,
+        ephemeral_message_id: i32,
+        media: InputMedia,
+    ) -> Self::EditEphemeralMessageMedia
+    where
+        C: Into<Recipient>,
+    {
+        Self::EditEphemeralMessageMedia::new(
+            self.clone(),
+            payloads::EditEphemeralMessageMedia::new(
+                chat_id,
+                receiver_user_id,
+                ephemeral_message_id,
+                media,
+            ),
+        )
+    }
+
+    type EditEphemeralMessageCaption = JsonRequest<payloads::EditEphemeralMessageCaption>;
+
+    fn edit_ephemeral_message_caption<C>(
+        &self,
+        chat_id: C,
+        receiver_user_id: UserId,
+        ephemeral_message_id: i32,
+    ) -> Self::EditEphemeralMessageCaption
+    where
+        C: Into<Recipient>,
+    {
+        Self::EditEphemeralMessageCaption::new(
+            self.clone(),
+            payloads::EditEphemeralMessageCaption::new(
+                chat_id,
+                receiver_user_id,
+                ephemeral_message_id,
+            ),
+        )
+    }
+
+    type EditEphemeralMessageReplyMarkup = JsonRequest<payloads::EditEphemeralMessageReplyMarkup>;
+
+    fn edit_ephemeral_message_reply_markup<C>(
+        &self,
+        chat_id: C,
+        receiver_user_id: UserId,
+        ephemeral_message_id: i32,
+    ) -> Self::EditEphemeralMessageReplyMarkup
+    where
+        C: Into<Recipient>,
+    {
+        Self::EditEphemeralMessageReplyMarkup::new(
+            self.clone(),
+            payloads::EditEphemeralMessageReplyMarkup::new(
+                chat_id,
+                receiver_user_id,
+                ephemeral_message_id,
+            ),
+        )
+    }
+
+    type DeleteEphemeralMessage = JsonRequest<payloads::DeleteEphemeralMessage>;
+
+    fn delete_ephemeral_message<C>(
+        &self,
+        chat_id: C,
+        receiver_user_id: UserId,
+        ephemeral_message_id: i32,
+    ) -> Self::DeleteEphemeralMessage
+    where
+        C: Into<Recipient>,
+    {
+        Self::DeleteEphemeralMessage::new(
+            self.clone(),
+            payloads::DeleteEphemeralMessage::new(chat_id, receiver_user_id, ephemeral_message_id),
+        )
+    }
+
+    type SendRichMessage = MultipartRequest<payloads::SendRichMessage>;
+
+    fn send_rich_message<C>(
+        &self,
+        chat_id: C,
+        rich_message: InputRichMessage,
+    ) -> Self::SendRichMessage
+    where
+        C: Into<Recipient>,
+    {
+        Self::SendRichMessage::new(
+            self.clone(),
+            payloads::SendRichMessage::new(chat_id, rich_message),
+        )
+    }
+
+    type SendRichMessageDraft = JsonRequest<payloads::SendRichMessageDraft>;
+
+    fn send_rich_message_draft(
+        &self,
+        chat_id: UserId,
+        draft_id: i32,
+        rich_message: InputRichMessage,
+    ) -> Self::SendRichMessageDraft {
+        Self::SendRichMessageDraft::new(
+            self.clone(),
+            payloads::SendRichMessageDraft::new(chat_id, draft_id, rich_message),
+        )
+    }
+
     type LogOut = JsonRequest<payloads::LogOut>;
 
     fn log_out(&self) -> Self::LogOut {
@@ -2250,5 +2418,41 @@ impl Requester for Bot {
         C: Into<Recipient>,
     {
         Self::UnpinAllChatMessages::new(self.clone(), payloads::UnpinAllChatMessages::new(chat_id))
+    }
+}
+
+impl Bot {
+    /// Edits a regular chat message using rich content only.
+    pub fn edit_message_rich_text<C>(
+        &self,
+        chat_id: C,
+        message_id: MessageId,
+        rich_message: InputRichMessage,
+    ) -> MultipartRequest<payloads::EditMessageText>
+    where
+        C: Into<Recipient>,
+    {
+        MultipartRequest::new(
+            self.clone(),
+            payloads::EditMessageText::rich(chat_id, message_id, rich_message),
+        )
+    }
+
+    /// Edits an inline message using rich content only.
+    ///
+    /// Telegram doesn't allow uploading new files while editing inline
+    /// messages, so rich media must use existing file IDs or URLs.
+    pub fn edit_message_rich_text_inline<I>(
+        &self,
+        inline_message_id: I,
+        rich_message: InputRichMessage,
+    ) -> JsonRequest<payloads::EditMessageTextInline>
+    where
+        I: Into<String>,
+    {
+        JsonRequest::new(
+            self.clone(),
+            payloads::EditMessageTextInline::rich(inline_message_id, rich_message),
+        )
     }
 }

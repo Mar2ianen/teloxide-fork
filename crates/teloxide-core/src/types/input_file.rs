@@ -404,7 +404,10 @@ impl InputFileLike for InputFile {
     }
 }
 
-impl InputFileLike for Option<InputFile> {
+impl<T> InputFileLike for Option<T>
+where
+    T: InputFileLike,
+{
     fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
         if let Some(this) = self {
             this.copy_into(into)

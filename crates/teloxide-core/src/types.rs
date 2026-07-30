@@ -159,6 +159,7 @@ pub use request_id::*;
 pub use response_parameters::*;
 pub use revenue_withdrawal_state::*;
 pub use rgb::*;
+pub use rich_message::*;
 pub use sent_web_app_message::*;
 pub use shared_user::*;
 pub use shipping_address::*;
@@ -339,6 +340,7 @@ mod request_id;
 mod response_parameters;
 mod revenue_withdrawal_state;
 mod rgb;
+mod rich_message;
 mod sent_web_app_message;
 mod shared_user;
 mod shipping_address;
@@ -558,45 +560,6 @@ pub(crate) mod option_url_from_string {
             let url: Struct = serde_json::from_str(json).unwrap();
             assert_eq!(url.url, Some(Url::from_str("https://github.com/token").unwrap()));
             assert_eq!(serde_json::to_string(&url).unwrap(), json.to_owned());
-        }
-    }
-}
-
-// Issue https://github.com/teloxide/teloxide/issues/1135
-// Workaround to avoid flattening with serde-multipart requests (involving
-// file-manipulations)
-pub(crate) mod msg_id_as_int {
-    use crate::types::MessageId;
-
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub(crate) fn serialize<S>(MessageId(id): &MessageId, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        id.serialize(serializer)
-    }
-
-    pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<MessageId, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        i32::deserialize(deserializer).map(MessageId)
-    }
-
-    #[test]
-    fn test() {
-        #[derive(Serialize, Deserialize)]
-        struct Struct {
-            #[serde(with = "crate::types::msg_id_as_int")]
-            message_id: MessageId,
-        }
-
-        {
-            let json = r#"{"message_id":123}"#;
-            let s: Struct = serde_json::from_str(json).unwrap();
-            assert_eq!(s.message_id, MessageId(123));
-            assert_eq!(serde_json::to_string(&s).unwrap(), json.to_owned());
         }
     }
 }

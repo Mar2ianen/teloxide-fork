@@ -3,7 +3,8 @@
 use serde::Serialize;
 
 use crate::types::{
-    BusinessConnectionId, InlineKeyboardMarkup, LinkPreviewOptions, MessageEntity, ParseMode, True,
+    BusinessConnectionId, InlineKeyboardMarkup, InputRichMessage, LinkPreviewOptions,
+    MessageEntity, ParseMode, True,
 };
 
 impl_payload! {
@@ -18,6 +19,7 @@ impl_payload! {
             /// Identifier of the inline message
             pub inline_message_id: String [into],
             /// New text of the message, 1-4096 characters after entities parsing
+            #[serde(skip_serializing_if = "String::is_empty")]
             pub text: String [into],
         }
         optional {
@@ -38,5 +40,14 @@ impl_payload! {
             /// [inline keyboard]: https://core.telegram.org/bots#inline-keyboards-and-on-the-fly-updating
             pub reply_markup: InlineKeyboardMarkup,
         }
+    }
+}
+
+impl EditMessageTextInline {
+    /// Creates a rich-only edit request.
+    pub fn rich(inline_message_id: impl Into<String>, rich_message: InputRichMessage) -> Self {
+        let mut payload = Self::new(inline_message_id, String::new());
+        payload.rich_message = Some(rich_message);
+        payload
     }
 }

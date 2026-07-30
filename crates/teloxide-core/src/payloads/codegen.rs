@@ -82,6 +82,47 @@ impl_payload! {{
             Method = method.names.1,
         );
 
+        let contents = match method.names.2.as_str() {
+            "edit_message_text" | "edit_message_text_inline" => {
+                let contents = contents.replace(
+                    "            pub text: String [into],",
+                    "            #[serde(skip_serializing_if = \"String::is_empty\")]\n            pub text: String [into],",
+                );
+                let constructor = if method.names.2 == "edit_message_text" {
+                    r#"
+impl EditMessageText {
+    /// Creates a rich-only edit request.
+    pub fn rich(
+        chat_id: impl Into<Recipient>,
+        message_id: MessageId,
+        rich_message: InputRichMessage,
+    ) -> Self {
+        let mut payload = Self::new(chat_id, message_id, String::new());
+        payload.rich_message = Some(rich_message);
+        payload
+    }
+}
+"#
+                } else {
+                    r#"
+impl EditMessageTextInline {
+    /// Creates a rich-only edit request.
+    pub fn rich(
+        inline_message_id: impl Into<String>,
+        rich_message: InputRichMessage,
+    ) -> Self {
+        let mut payload = Self::new(inline_message_id, String::new());
+        payload.rich_message = Some(rich_message);
+        payload
+    }
+}
+"#
+                };
+                format!("{contents}{constructor}")
+            }
+            _ => contents,
+        };
+
         files.push((path, reformat(add_preamble("codegen_payloads", contents))));
     }
 
@@ -267,7 +308,7 @@ fn multipart_input_file_fields(m: &Method) -> Option<Vec<&str>> {
     let mut fields: Vec<_> =
         m.params.iter().filter(|&p| ty_is_multiparty(&p.ty)).map(|p| &*p.name).collect();
 
-    if m.names.2 == "send_rich_message" {
+    if matches!(m.names.2.as_str(), "send_rich_message" | "edit_message_text") {
         fields.push("rich_message");
     }
 

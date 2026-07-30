@@ -8,6 +8,7 @@ use crate::types::{
 };
 
 impl_payload! {
+    @[multipart = rich_message]
     /// Use this method to edit text and [games] messages. On success, the edited Message is returned. Note that business messages that were not sent by the bot and do not contain an inline keyboard can only be edited within **48 hours** from the time they were sent.
     ///
     /// See also: [`EditMessageTextInline`](crate::payloads::EditMessageTextInline)
@@ -22,6 +23,7 @@ impl_payload! {
             #[serde(flatten)]
             pub message_id: MessageId,
             /// New text of the message, 1-4096 characters after entities parsing
+            #[serde(skip_serializing_if = "String::is_empty")]
             pub text: String [into],
         }
         optional {
@@ -42,5 +44,18 @@ impl_payload! {
             /// [inline keyboard]: https://core.telegram.org/bots#inline-keyboards-and-on-the-fly-updating
             pub reply_markup: InlineKeyboardMarkup,
         }
+    }
+}
+
+impl EditMessageText {
+    /// Creates a rich-only edit request.
+    pub fn rich(
+        chat_id: impl Into<Recipient>,
+        message_id: MessageId,
+        rich_message: InputRichMessage,
+    ) -> Self {
+        let mut payload = Self::new(chat_id, message_id, String::new());
+        payload.rich_message = Some(rich_message);
+        payload
     }
 }

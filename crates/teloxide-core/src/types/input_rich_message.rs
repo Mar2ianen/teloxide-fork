@@ -18,6 +18,9 @@ pub struct InputRichMessage {
     ///
     /// This is a temporary raw representation; a typed rich-block AST can
     /// replace it without changing the request methods.
+    ///
+    /// Local uploads embedded directly in raw blocks are not traversed. Use
+    /// file IDs/URLs in raw blocks, or put uploads in [`Self::media`].
     pub blocks: Option<Vec<Value>>,
     /// Content using Telegram rich-message HTML formatting.
     pub html: Option<String>,
@@ -57,6 +60,10 @@ impl InputRichMessage {
     }
 
     /// Creates a rich message from raw block JSON values.
+    ///
+    /// Raw blocks currently support only remote/file-id media. `attach://`
+    /// references created outside [`Self::media`] have no matching multipart
+    /// part and are therefore unsupported.
     pub fn blocks(blocks: impl IntoIterator<Item = Value>) -> Self {
         Self {
             blocks: Some(blocks.into_iter().collect()),

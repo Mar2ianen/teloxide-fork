@@ -180,6 +180,7 @@ fn partial_eq_suitable(method: &Method) -> bool {
                     | "InputPollMedia"
                     | "InputPollOption"
                     | "InputPollOptionMedia"
+                    | "InputRichMessage"
             ),
             _ => true,
         }
@@ -263,8 +264,12 @@ fn params(params: impl Iterator<Item = impl Borrow<Param>>) -> String {
 }
 
 fn multipart_input_file_fields(m: &Method) -> Option<Vec<&str>> {
-    let fields: Vec<_> =
+    let mut fields: Vec<_> =
         m.params.iter().filter(|&p| ty_is_multiparty(&p.ty)).map(|p| &*p.name).collect();
+
+    if m.names.2 == "send_rich_message" {
+        fields.push("rich_message");
+    }
 
     if fields.is_empty() {
         None

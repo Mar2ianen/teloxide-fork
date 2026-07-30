@@ -3,8 +3,8 @@
 use serde::Serialize;
 
 use crate::types::{
-    BusinessConnectionId, EffectId, InputFile, Message, MessageEntity, ParseMode, Recipient,
-    ReplyMarkup, ReplyParameters, SuggestedPostParameters, ThreadId, TopicId,
+    BusinessConnectionId, CallbackQueryId, EffectId, InputFile, Message, MessageEntity, ParseMode,
+    Recipient, ReplyMarkup, ReplyParameters, SuggestedPostParameters, ThreadId, TopicId, UserId,
 };
 
 impl_payload! {
@@ -29,6 +29,10 @@ impl_payload! {
             pub message_thread_id: ThreadId,
             /// Identifier of the direct messages topic to which the message will be sent; required if the message is sent to a direct messages chat
             pub direct_messages_topic_id: TopicId,
+            /// For outgoing ephemeral messages, unique identifier of the user who will receive the message; for group and supergroup chats only
+            pub receiver_user_id: UserId,
+            /// For outgoing ephemeral messages, identifier of the callback query which triggered the message, if any
+            pub callback_query_id: CallbackQueryId,
             /// Duration of the animation in seconds
             pub duration: u32,
             /// Animation width

@@ -1,13 +1,13 @@
 {
   "version": {
     "major": 10,
-    "minor": 0,
+    "minor": 2,
     "patch": 0
   },
   "recent_changes": {
     "year": 2026,
-    "month": 5,
-    "day": 8
+    "month": 7,
+    "day": 14
   },
   "methods": [
     {
@@ -259,6 +259,24 @@
           "type_info": {
             "type": "integer",
             "enumeration": []
+          }
+        },
+        {
+          "name": "receiver_user_id",
+          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "UserId"
+          }
+        },
+        {
+          "name": "callback_query_id",
+          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "CallbackQueryId"
           }
         },
         {
@@ -958,6 +976,24 @@
           }
         },
         {
+          "name": "receiver_user_id",
+          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "UserId"
+          }
+        },
+        {
+          "name": "callback_query_id",
+          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "CallbackQueryId"
+          }
+        },
+        {
           "name": "photo",
           "description": "Photo to send. Pass a file\\_id as String to send a photo that exists on the Telegram servers (recommended), pass an HTTP URL as a String for Telegram to get a photo from the Internet, or upload a new photo using multipart/form-data. The photo must be at most 10 MB in size. The photo's width and height must not exceed 10000 in total. Width and height ratio must be at most 20. [More information on Sending Files »](https://core.telegram.org/bots/api#sending-files)",
           "required": true,
@@ -1155,6 +1191,24 @@
           "type_info": {
             "type": "integer",
             "enumeration": []
+          }
+        },
+        {
+          "name": "receiver_user_id",
+          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "UserId"
+          }
+        },
+        {
+          "name": "callback_query_id",
+          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "CallbackQueryId"
           }
         },
         {
@@ -1387,6 +1441,24 @@
           }
         },
         {
+          "name": "receiver_user_id",
+          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "UserId"
+          }
+        },
+        {
+          "name": "callback_query_id",
+          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "CallbackQueryId"
+          }
+        },
+        {
           "name": "document",
           "description": "File to send. Pass a file\\_id as String to send a file that exists on the Telegram servers (recommended), pass an HTTP URL as a String for Telegram to get a file from the Internet, or upload a new one using multipart/form-data. [More information on Sending Files »](https://core.telegram.org/bots/api#sending-files)",
           "required": true,
@@ -1594,6 +1666,24 @@
           "type_info": {
             "type": "integer",
             "enumeration": []
+          }
+        },
+        {
+          "name": "receiver_user_id",
+          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "UserId"
+          }
+        },
+        {
+          "name": "callback_query_id",
+          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "CallbackQueryId"
           }
         },
         {
@@ -1877,6 +1967,24 @@
           }
         },
         {
+          "name": "receiver_user_id",
+          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "UserId"
+          }
+        },
+        {
+          "name": "callback_query_id",
+          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "CallbackQueryId"
+          }
+        },
+        {
           "name": "animation",
           "description": "Animation to send. Pass a file\\_id as String to send an animation that exists on the Telegram servers (recommended), pass an HTTP URL as a String for Telegram to get an animation from the Internet, or upload a new animation using multipart/form-data. [More information on Sending Files »](https://core.telegram.org/bots/api#sending-files)",
           "required": true,
@@ -2122,6 +2230,24 @@
           }
         },
         {
+          "name": "receiver_user_id",
+          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "UserId"
+          }
+        },
+        {
+          "name": "callback_query_id",
+          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "CallbackQueryId"
+          }
+        },
+        {
           "name": "voice",
           "description": "Audio file to send. Pass a file\\_id as String to send a file that exists on the Telegram servers (recommended), pass an HTTP URL as a String for Telegram to get a file from the Internet, or upload a new one using multipart/form-data. [More information on Sending Files »](https://core.telegram.org/bots/api#sending-files)",
           "required": true,
@@ -2312,6 +2438,24 @@
           "type_info": {
             "type": "integer",
             "enumeration": []
+          }
+        },
+        {
+          "name": "receiver_user_id",
+          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "UserId"
+          }
+        },
+        {
+          "name": "callback_query_id",
+          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "CallbackQueryId"
           }
         },
         {
@@ -2829,6 +2973,24 @@
           }
         },
         {
+          "name": "receiver_user_id",
+          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "UserId"
+          }
+        },
+        {
+          "name": "callback_query_id",
+          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "CallbackQueryId"
+          }
+        },
+        {
           "name": "latitude",
           "description": "Latitude of the location",
           "required": true,
@@ -3011,6 +3173,24 @@
           "type_info": {
             "type": "integer",
             "enumeration": []
+          }
+        },
+        {
+          "name": "receiver_user_id",
+          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "UserId"
+          }
+        },
+        {
+          "name": "callback_query_id",
+          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "CallbackQueryId"
           }
         },
         {
@@ -3215,6 +3395,24 @@
           "type_info": {
             "type": "integer",
             "enumeration": []
+          }
+        },
+        {
+          "name": "receiver_user_id",
+          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "UserId"
+          }
+        },
+        {
+          "name": "callback_query_id",
+          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "CallbackQueryId"
           }
         },
         {
@@ -7707,6 +7905,15 @@
           }
         },
         {
+          "name": "rich_message",
+          "description": "A new rich message to replace the current message content",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "InputRichMessage"
+          }
+        },
+        {
           "name": "parse_mode",
           "description": "Mode for parsing entities in the message text. See [formatting options](https://core.telegram.org/bots/api#formatting-options) for more details.",
           "required": false,
@@ -8559,6 +8766,24 @@
           "type_info": {
             "type": "integer",
             "enumeration": []
+          }
+        },
+        {
+          "name": "receiver_user_id",
+          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "UserId"
+          }
+        },
+        {
+          "name": "callback_query_id",
+          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "CallbackQueryId"
           }
         },
         {
@@ -10576,6 +10801,15 @@
           }
         },
         {
+          "description": "A new rich message to replace the current message content",
+          "name": "rich_message",
+          "required": false,
+          "type_info": {
+            "reference": "InputRichMessage",
+            "type": "reference"
+          }
+        },
+        {
           "description": "Unique identifier of the business connection on behalf of which the message to be edited was sent",
           "name": "business_connection_id",
           "required": false,
@@ -10956,6 +11190,24 @@
           "type_info": {
             "reference": "TopicId",
             "type": "reference"
+          }
+        },
+        {
+          "name": "receiver_user_id",
+          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "UserId"
+          }
+        },
+        {
+          "name": "callback_query_id",
+          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "CallbackQueryId"
           }
         },
         {
@@ -11808,6 +12060,598 @@
         "default": true,
         "type": "bool"
       }
+    },
+    {
+      "name": "answerChatJoinRequestQuery",
+      "description": "Use this method to process a received chat join request query. Returns True on success.",
+      "arguments": [
+        {
+          "name": "chat_join_request_query_id",
+          "description": "Unique identifier of the join request query",
+          "required": true,
+          "type_info": {
+            "type": "string",
+            "enumeration": []
+          }
+        },
+        {
+          "name": "result",
+          "description": "Result of the query",
+          "required": true,
+          "type_info": {
+            "type": "string",
+            "enumeration": [
+              "approve",
+              "decline",
+              "queue"
+            ]
+          }
+        }
+      ],
+      "return_type": {
+        "type": "bool",
+        "default": true
+      },
+      "documentation_link": "https://core.telegram.org/bots/api#answerchatjoinrequestquery",
+      "maybe_multipart": false
+    },
+    {
+      "name": "sendChatJoinRequestWebApp",
+      "description": "Use this method to show a Mini App while processing a chat join request query. Returns True on success.",
+      "arguments": [
+        {
+          "name": "chat_join_request_query_id",
+          "description": "Unique identifier of the join request query",
+          "required": true,
+          "type_info": {
+            "type": "string",
+            "enumeration": []
+          }
+        },
+        {
+          "name": "web_app_url",
+          "description": "HTTPS URL of a Web App to be opened",
+          "required": true,
+          "type_info": {
+            "type": "string",
+            "enumeration": []
+          }
+        }
+      ],
+      "return_type": {
+        "type": "bool",
+        "default": true
+      },
+      "documentation_link": "https://core.telegram.org/bots/api#sendchatjoinrequestwebapp",
+      "maybe_multipart": false
+    },
+    {
+      "name": "editEphemeralMessageText",
+      "description": "Use this method to edit an ephemeral text message. Returns True on success.",
+      "arguments": [
+        {
+          "name": "chat_id",
+          "description": "Target chat",
+          "required": true,
+          "type_info": {
+            "type": "any_of",
+            "any_of": [
+              {
+                "type": "integer",
+                "enumeration": []
+              },
+              {
+                "type": "string",
+                "enumeration": []
+              }
+            ]
+          }
+        },
+        {
+          "name": "receiver_user_id",
+          "description": "Recipient user",
+          "required": true,
+          "type_info": {
+            "type": "reference",
+            "reference": "UserId"
+          }
+        },
+        {
+          "name": "ephemeral_message_id",
+          "description": "Ephemeral message identifier",
+          "required": true,
+          "type_info": {
+            "type": "integer",
+            "enumeration": []
+          }
+        },
+        {
+          "name": "text",
+          "description": "New text",
+          "required": true,
+          "type_info": {
+            "type": "string",
+            "enumeration": []
+          }
+        },
+        {
+          "name": "parse_mode",
+          "description": "Parse mode",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "ParseMode"
+          }
+        },
+        {
+          "name": "entities",
+          "description": "Entities",
+          "required": false,
+          "type_info": {
+            "type": "array",
+            "array": {
+              "type": "reference",
+              "reference": "MessageEntity"
+            }
+          }
+        },
+        {
+          "name": "link_preview_options",
+          "description": "Link preview options",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "LinkPreviewOptions"
+          }
+        },
+        {
+          "name": "reply_markup",
+          "description": "Inline keyboard",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "InlineKeyboardMarkup"
+          }
+        }
+      ],
+      "return_type": {
+        "type": "bool",
+        "default": true
+      },
+      "documentation_link": "https://core.telegram.org/bots/api#editephemeralmessagetext",
+      "maybe_multipart": false
+    },
+    {
+      "name": "editEphemeralMessageMedia",
+      "description": "Use this method to edit the media of an ephemeral message. Returns True on success.",
+      "arguments": [
+        {
+          "name": "chat_id",
+          "description": "Target chat",
+          "required": true,
+          "type_info": {
+            "type": "any_of",
+            "any_of": [
+              {
+                "type": "integer",
+                "enumeration": []
+              },
+              {
+                "type": "string",
+                "enumeration": []
+              }
+            ]
+          }
+        },
+        {
+          "name": "receiver_user_id",
+          "description": "Recipient user",
+          "required": true,
+          "type_info": {
+            "type": "reference",
+            "reference": "UserId"
+          }
+        },
+        {
+          "name": "ephemeral_message_id",
+          "description": "Ephemeral message identifier",
+          "required": true,
+          "type_info": {
+            "type": "integer",
+            "enumeration": []
+          }
+        },
+        {
+          "name": "media",
+          "description": "New media",
+          "required": true,
+          "type_info": {
+            "type": "reference",
+            "reference": "InputMedia"
+          }
+        },
+        {
+          "name": "reply_markup",
+          "description": "Inline keyboard",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "InlineKeyboardMarkup"
+          }
+        }
+      ],
+      "return_type": {
+        "type": "bool",
+        "default": true
+      },
+      "documentation_link": "https://core.telegram.org/bots/api#editephemeralmessagemedia",
+      "maybe_multipart": false
+    },
+    {
+      "name": "editEphemeralMessageCaption",
+      "description": "Use this method to edit the caption of an ephemeral message. Returns True on success.",
+      "arguments": [
+        {
+          "name": "chat_id",
+          "description": "Target chat",
+          "required": true,
+          "type_info": {
+            "type": "any_of",
+            "any_of": [
+              {
+                "type": "integer",
+                "enumeration": []
+              },
+              {
+                "type": "string",
+                "enumeration": []
+              }
+            ]
+          }
+        },
+        {
+          "name": "receiver_user_id",
+          "description": "Recipient user",
+          "required": true,
+          "type_info": {
+            "type": "reference",
+            "reference": "UserId"
+          }
+        },
+        {
+          "name": "ephemeral_message_id",
+          "description": "Ephemeral message identifier",
+          "required": true,
+          "type_info": {
+            "type": "integer",
+            "enumeration": []
+          }
+        },
+        {
+          "name": "caption",
+          "description": "New caption",
+          "required": false,
+          "type_info": {
+            "type": "string",
+            "enumeration": []
+          }
+        },
+        {
+          "name": "parse_mode",
+          "description": "Parse mode",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "ParseMode"
+          }
+        },
+        {
+          "name": "caption_entities",
+          "description": "Caption entities",
+          "required": false,
+          "type_info": {
+            "type": "array",
+            "array": {
+              "type": "reference",
+              "reference": "MessageEntity"
+            }
+          }
+        },
+        {
+          "name": "reply_markup",
+          "description": "Inline keyboard",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "InlineKeyboardMarkup"
+          }
+        }
+      ],
+      "return_type": {
+        "type": "bool",
+        "default": true
+      },
+      "documentation_link": "https://core.telegram.org/bots/api#editephemeralmessagecaption",
+      "maybe_multipart": false
+    },
+    {
+      "name": "editEphemeralMessageReplyMarkup",
+      "description": "Use this method to edit the reply markup of an ephemeral message. Returns True on success.",
+      "arguments": [
+        {
+          "name": "chat_id",
+          "description": "Target chat",
+          "required": true,
+          "type_info": {
+            "type": "any_of",
+            "any_of": [
+              {
+                "type": "integer",
+                "enumeration": []
+              },
+              {
+                "type": "string",
+                "enumeration": []
+              }
+            ]
+          }
+        },
+        {
+          "name": "receiver_user_id",
+          "description": "Recipient user",
+          "required": true,
+          "type_info": {
+            "type": "reference",
+            "reference": "UserId"
+          }
+        },
+        {
+          "name": "ephemeral_message_id",
+          "description": "Ephemeral message identifier",
+          "required": true,
+          "type_info": {
+            "type": "integer",
+            "enumeration": []
+          }
+        },
+        {
+          "name": "reply_markup",
+          "description": "Inline keyboard",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "InlineKeyboardMarkup"
+          }
+        }
+      ],
+      "return_type": {
+        "type": "bool",
+        "default": true
+      },
+      "documentation_link": "https://core.telegram.org/bots/api#editephemeralmessagereplymarkup",
+      "maybe_multipart": false
+    },
+    {
+      "name": "deleteEphemeralMessage",
+      "description": "Use this method to delete an ephemeral message. Returns True on success.",
+      "arguments": [
+        {
+          "name": "chat_id",
+          "description": "Target chat",
+          "required": true,
+          "type_info": {
+            "type": "any_of",
+            "any_of": [
+              {
+                "type": "integer",
+                "enumeration": []
+              },
+              {
+                "type": "string",
+                "enumeration": []
+              }
+            ]
+          }
+        },
+        {
+          "name": "receiver_user_id",
+          "description": "Recipient user",
+          "required": true,
+          "type_info": {
+            "type": "reference",
+            "reference": "UserId"
+          }
+        },
+        {
+          "name": "ephemeral_message_id",
+          "description": "Ephemeral message identifier",
+          "required": true,
+          "type_info": {
+            "type": "integer",
+            "enumeration": []
+          }
+        }
+      ],
+      "return_type": {
+        "type": "bool",
+        "default": true
+      },
+      "documentation_link": "https://core.telegram.org/bots/api#deleteephemeralmessage",
+      "maybe_multipart": false
+    },
+    {
+      "name": "sendRichMessage",
+      "description": "Use this method to send rich messages. On success, the sent Message is returned.",
+      "arguments": [
+        {
+          "name": "business_connection_id",
+          "description": "Business connection",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "BusinessConnectionId"
+          }
+        },
+        {
+          "name": "chat_id",
+          "description": "Target chat",
+          "required": true,
+          "type_info": {
+            "type": "any_of",
+            "any_of": [
+              {
+                "type": "integer",
+                "enumeration": []
+              },
+              {
+                "type": "string",
+                "enumeration": []
+              }
+            ]
+          }
+        },
+        {
+          "name": "message_thread_id",
+          "description": "Message thread",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "ThreadId"
+          }
+        },
+        {
+          "name": "direct_messages_topic_id",
+          "description": "Direct messages topic",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "TopicId"
+          }
+        },
+        {
+          "name": "rich_message",
+          "description": "The rich message to send",
+          "required": true,
+          "type_info": {
+            "type": "reference",
+            "reference": "InputRichMessage"
+          }
+        },
+        {
+          "name": "disable_notification",
+          "description": "Send silently",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "protect_content",
+          "description": "Protect content",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "allow_paid_broadcast",
+          "description": "Allow paid broadcasting",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "message_effect_id",
+          "description": "Message effect",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "EffectId"
+          }
+        },
+        {
+          "name": "suggested_post_parameters",
+          "description": "Suggested post parameters",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "SuggestedPostParameters"
+          }
+        },
+        {
+          "name": "reply_parameters",
+          "description": "Reply parameters",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "ReplyParameters"
+          }
+        },
+        {
+          "name": "reply_markup",
+          "description": "Reply markup",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "ReplyMarkup"
+          }
+        }
+      ],
+      "return_type": {
+        "type": "reference",
+        "reference": "Message"
+      },
+      "documentation_link": "https://core.telegram.org/bots/api#sendrichmessage",
+      "maybe_multipart": true
+    },
+    {
+      "name": "sendRichMessageDraft",
+      "description": "Use this method to stream a partial rich message. Returns True on success.",
+      "arguments": [
+        {
+          "name": "chat_id",
+          "description": "Target private chat",
+          "required": true,
+          "type_info": {
+            "type": "reference",
+            "reference": "UserId"
+          }
+        },
+        {
+          "name": "message_thread_id",
+          "description": "Message thread",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "ThreadId"
+          }
+        },
+        {
+          "name": "draft_id",
+          "description": "Draft identifier",
+          "required": true,
+          "type_info": {
+            "type": "integer",
+            "enumeration": []
+          }
+        },
+        {
+          "name": "rich_message",
+          "description": "Partial rich message",
+          "required": true,
+          "type_info": {
+            "type": "reference",
+            "reference": "InputRichMessage"
+          }
+        }
+      ],
+      "return_type": {
+        "type": "bool",
+        "default": true
+      },
+      "documentation_link": "https://core.telegram.org/bots/api#sendrichmessagedraft",
+      "maybe_multipart": false
     }
   ],
   "objects": [

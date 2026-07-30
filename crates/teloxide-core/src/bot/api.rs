@@ -1103,7 +1103,7 @@ impl Requester for Bot {
         )
     }
 
-    type EditMessageText = JsonRequest<payloads::EditMessageText>;
+    type EditMessageText = MultipartRequest<payloads::EditMessageText>;
 
     fn edit_message_text<C, T>(
         &self,
@@ -2418,5 +2418,41 @@ impl Requester for Bot {
         C: Into<Recipient>,
     {
         Self::UnpinAllChatMessages::new(self.clone(), payloads::UnpinAllChatMessages::new(chat_id))
+    }
+}
+
+impl Bot {
+    /// Edits a regular chat message using rich content only.
+    pub fn edit_message_rich_text<C>(
+        &self,
+        chat_id: C,
+        message_id: MessageId,
+        rich_message: InputRichMessage,
+    ) -> MultipartRequest<payloads::EditMessageText>
+    where
+        C: Into<Recipient>,
+    {
+        MultipartRequest::new(
+            self.clone(),
+            payloads::EditMessageText::rich(chat_id, message_id, rich_message),
+        )
+    }
+
+    /// Edits an inline message using rich content only.
+    ///
+    /// Telegram doesn't allow uploading new files while editing inline
+    /// messages, so rich media must use existing file IDs or URLs.
+    pub fn edit_message_rich_text_inline<I>(
+        &self,
+        inline_message_id: I,
+        rich_message: InputRichMessage,
+    ) -> JsonRequest<payloads::EditMessageTextInline>
+    where
+        I: Into<String>,
+    {
+        JsonRequest::new(
+            self.clone(),
+            payloads::EditMessageTextInline::rich(inline_message_id, rich_message),
+        )
     }
 }

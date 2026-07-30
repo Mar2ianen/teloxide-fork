@@ -7896,7 +7896,7 @@
         {
           "name": "text",
           "description": "New text of the message, 1-4096 characters after entities parsing",
-          "required": true,
+          "required": false,
           "type_info": {
             "type": "string",
             "min_len": 1,
@@ -15007,7 +15007,16 @@
         {
           "name": "message_id",
           "description": "Identifier of the message that will be replied to in the current chat, or in the chat *chat\\_id* if it is specified",
-          "required": true,
+          "required": false,
+          "type_info": {
+            "type": "integer",
+            "enumeration": []
+          }
+        },
+        {
+          "name": "ephemeral_message_id",
+          "description": "Identifier of an ephemeral message that will be replied to",
+          "required": false,
           "type_info": {
             "type": "integer",
             "enumeration": []

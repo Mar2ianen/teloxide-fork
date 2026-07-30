@@ -15,11 +15,11 @@ use crate::types::{
     Invoice, LinkPreviewOptions, LivePhoto, Location, ManagedBotCreated, MaybeInaccessibleMessage,
     MessageAutoDeleteTimerChanged, MessageEntity, MessageEntityRef, MessageId, MessageOrigin,
     PaidMediaInfo, PaidMessagePriceChanged, PassportData, PhotoSize, Poll, PollOptionAdded,
-    PollOptionDeleted, ProximityAlertTriggered, RefundedPayment, Sticker, Story, SuccessfulPayment,
-    SuggestedPostApprovalFailed, SuggestedPostApproved, SuggestedPostDeclined, SuggestedPostInfo,
-    SuggestedPostPaid, SuggestedPostRefunded, TextQuote, ThreadId, True, UniqueGiftInfo, User,
-    UsersShared, Venue, Video, VideoChatEnded, VideoChatParticipantsInvited, VideoChatScheduled,
-    VideoChatStarted, VideoNote, Voice, WebAppData, WriteAccessAllowed,
+    PollOptionDeleted, ProximityAlertTriggered, RefundedPayment, RichMessage, Sticker, Story,
+    SuccessfulPayment, SuggestedPostApprovalFailed, SuggestedPostApproved, SuggestedPostDeclined,
+    SuggestedPostInfo, SuggestedPostPaid, SuggestedPostRefunded, TextQuote, ThreadId, True,
+    UniqueGiftInfo, User, UsersShared, Venue, Video, VideoChatEnded, VideoChatParticipantsInvited,
+    VideoChatScheduled, VideoChatStarted, VideoNote, Voice, WebAppData, WriteAccessAllowed,
 };
 
 /// This object represents a message.
@@ -83,6 +83,12 @@ pub struct Message {
     /// account. Available only for outgoing messages sent on behalf of the
     /// connected business account.
     pub sender_business_bot: Option<User>,
+
+    /// User that received an outgoing ephemeral message.
+    pub receiver_user: Option<User>,
+
+    /// Identifier of an outgoing ephemeral message.
+    pub ephemeral_message_id: Option<i32>,
 
     #[serde(flatten)]
     pub kind: MessageKind,
@@ -604,6 +610,7 @@ pub enum MediaKind {
     Location(MediaLocation),
     Photo(MediaPhoto),
     LivePhoto(MediaLivePhoto),
+    RichMessage(MediaRichMessage),
     Poll(MediaPoll),
     Checklist(MediaChecklist),
     Sticker(MediaSticker),
@@ -787,6 +794,14 @@ pub struct MediaLivePhoto {
     /// `true`, if the message media is covered by a spoiler animation.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub has_media_spoiler: bool,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct MediaRichMessage {
+    /// Message contains rich content.
+    pub rich_message: RichMessage,
 }
 
 #[serde_with::skip_serializing_none]
@@ -1510,6 +1525,7 @@ mod getters {
                     | MediaKind::Game(_)
                     | MediaKind::Venue(_)
                     | MediaKind::Location(_)
+                    | MediaKind::RichMessage(_)
                     | MediaKind::Poll(_)
                     | MediaKind::Checklist(_)
                     | MediaKind::Sticker(_)
@@ -1543,6 +1559,7 @@ mod getters {
                     | MediaKind::Game(_)
                     | MediaKind::Venue(_)
                     | MediaKind::Location(_)
+                    | MediaKind::RichMessage(_)
                     | MediaKind::Poll(_)
                     | MediaKind::Checklist(_)
                     | MediaKind::Sticker(_)
@@ -2640,6 +2657,8 @@ mod tests {
                     }),
                 },
                 sender_business_bot: None,
+                receiver_user: None,
+                ephemeral_message_id: None,
                 kind: MessageKind::ChatShared(MessageChatShared {
                     chat_shared: ChatShared {
                         request_id: RequestId(348349),
@@ -3330,6 +3349,7 @@ mod tests {
                     is_premium: false,
                     added_to_attachment_menu: false,
                     supports_guest_queries: false,
+                    supports_join_request_queries: false,
                     has_topics_enabled: false,
                     allows_users_to_create_topics: false,
                     can_manage_bots: false,
@@ -3691,6 +3711,31 @@ mod tests {
         }"#;
         let message: Message = from_str(json).unwrap();
         assert_eq!(message.effect_id().unwrap().to_string(), "5123233223429587601")
+    }
+
+    #[test]
+    fn rich_message_response_and_ephemeral_ids_deserialize() {
+        let json = r#"{
+            "message_id": 42,
+            "date": 0,
+            "chat": {"id": 1, "type": "private", "first_name": "receiver"},
+            "receiver_user": {"id": 7, "is_bot": false, "first_name": "receiver"},
+            "ephemeral_message_id": 99,
+            "rich_message": {"blocks": []}
+        }"#;
+
+        let message: Message = from_str(json).unwrap();
+        assert_eq!(message.ephemeral_message_id, Some(99));
+        assert_eq!(message.receiver_user.as_ref().map(|user| user.id.0), Some(7));
+        assert!(matches!(
+            message.kind,
+            MessageKind::Common(MessageCommon {
+                media_kind: MediaKind::RichMessage(MediaRichMessage {
+                    rich_message: RichMessage { ref blocks },
+                }),
+                ..
+            }) if blocks.is_empty()
+        ));
     }
 
     #[test]

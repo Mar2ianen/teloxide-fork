@@ -84,8 +84,20 @@ p.write_text(s)
 p = root / "crates/teloxide-core/custom_v2.json"
 data = json.loads(p.read_text())
 for obj in data["objects"]:
-    if obj.get("name") == "ReplyParameters":
-        for field in obj.get("fields", []):
-            if field.get("name") == "message_id":
-                field["required"] = False
+    if obj.get("name") != "ReplyParameters":
+        continue
+    properties = obj.setdefault("properties", [])
+    for field in properties:
+        if field.get("name") == "message_id":
+            field["required"] = False
+    if not any(field.get("name") == "ephemeral_message_id" for field in properties):
+        properties.insert(
+            1,
+            {
+                "name": "ephemeral_message_id",
+                "description": "Identifier of an ephemeral message that will be replied to",
+                "required": False,
+                "type_info": {"type": "integer", "enumeration": []},
+            },
+        )
 p.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")

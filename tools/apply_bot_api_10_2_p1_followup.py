@@ -101,3 +101,18 @@ for obj in data["objects"]:
             },
         )
 p.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+
+# No wire type uses the non-optional serde helper after ReplyParameters changed.
+p = root / "crates/teloxide-core/src/types.rs"
+s = p.read_text()
+s = re.sub(
+    r'\n// Issue https://github\.com/teloxide/teloxide/issues/1135\n'
+    r'// Workaround to avoid flattening with serde-multipart requests \(involving\n'
+    r'// file-manipulations\)\n'
+    r'pub\(crate\) mod msg_id_as_int \{.*?\n\}\n\n'
+    r'(?=pub\(crate\) mod option_msg_id_as_int)',
+    '\n',
+    s,
+    flags=re.S,
+)
+p.write_text(s)

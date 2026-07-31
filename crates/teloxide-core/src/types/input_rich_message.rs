@@ -498,6 +498,31 @@ pub struct InputRichBlockThinking {
     pub text: RichText,
 }
 
+/// Rich message content used by inline, guest, and Web App query results.
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichMessageContent {
+    /// Rich message payload.
+    pub rich_message: InputRichMessage,
+}
+
+impl InputRichMessageContent {
+    /// Wraps a rich message as inline-query message content.
+    pub const fn new(rich_message: InputRichMessage) -> Self {
+        Self { rich_message }
+    }
+}
+
+impl InputFileLike for InputRichMessageContent {
+    fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
+        self.rich_message.copy_into(into);
+    }
+
+    fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
+        self.rich_message.move_into(into);
+    }
+}
+
 /// Result of a chat join request query.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]

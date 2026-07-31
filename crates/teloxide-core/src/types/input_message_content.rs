@@ -10,7 +10,7 @@ use crate::types::{
 /// inline query.
 ///
 /// [The official docs](https://core.telegram.org/bots/api#inputmessagecontent).
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum InputMessageContent {
@@ -50,16 +50,6 @@ impl<'de> Deserialize<'de> for InputMessageContent {
         D: serde::Deserializer<'de>,
     {
         LegacyInputMessageContent::deserialize(deserializer).map(Into::into)
-    }
-}
-
-impl PartialEq for InputMessageContent {
-    fn eq(&self, other: &Self) -> bool {
-        match (serde_json::to_value(self), serde_json::to_value(other)) {
-            (Ok(left), Ok(right)) => left == right,
-            (Err(_), Err(_)) => false,
-            _ => false,
-        }
     }
 }
 
@@ -652,6 +642,20 @@ impl InputMessageContentInvoice {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{InputMediaPhoto, InputRichBlock, InputRichBlockPhoto, InputRichMessage};
+
+    #[test]
+    fn cloned_rich_content_with_upload_is_equal() {
+        let content =
+            InputMessageContent::Rich(InputRichMessageContent::new(InputRichMessage::blocks([
+                InputRichBlock::Photo(InputRichBlockPhoto {
+                    photo: InputMediaPhoto::new(InputFile::memory("photo")),
+                    caption: None,
+                }),
+            ])));
+
+        assert_eq!(content, content.clone());
+    }
 
     #[test]
     fn text_serialize() {

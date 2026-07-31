@@ -367,10 +367,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -400,10 +398,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -426,10 +422,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -462,10 +456,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -486,10 +478,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -521,10 +511,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -549,10 +537,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -588,10 +574,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -612,10 +596,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -647,10 +629,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -676,10 +656,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -716,10 +694,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -740,10 +716,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -775,10 +749,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -804,10 +776,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -844,10 +814,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -869,10 +837,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -905,10 +871,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -933,10 +897,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -972,10 +934,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -991,10 +951,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -1021,10 +979,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -1047,10 +1003,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -1081,10 +1035,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -1111,10 +1063,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -1150,10 +1100,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -1174,10 +1122,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -1206,10 +1152,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -1231,10 +1175,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -1264,10 +1206,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -1299,10 +1239,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -1334,10 +1272,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -1359,10 +1295,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -1395,10 +1329,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -1413,10 +1345,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -1431,10 +1361,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -1460,10 +1388,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -1499,10 +1425,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -1528,10 +1452,8 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 
     #[test]
@@ -1568,9 +1490,7 @@ mod tests {
         let actual_json = serde_json::to_string(&structure).unwrap();
 
         assert_eq!(expected_json, actual_json);
-        assert_eq!(
-            serde_json::to_value(&structure).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&actual_json).unwrap()
-        );
+        let decoded: InlineQueryResult = serde_json::from_str(&actual_json).unwrap();
+        assert_eq!(structure, decoded);
     }
 }

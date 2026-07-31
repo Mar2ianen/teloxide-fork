@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::types::User;
 
@@ -15,9 +15,8 @@ pub struct BotSubscriptionUpdated {
 }
 
 /// A payment subscription state reported by Telegram.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
 pub enum BotSubscriptionState {
     /// The user canceled the subscription.
     Canceled,
@@ -25,4 +24,35 @@ pub enum BotSubscriptionState {
     Active,
     /// A subscription payment failed.
     Failed,
+    /// A state introduced by Telegram after this teloxide release.
+    Unknown(String),
+}
+
+impl Serialize for BotSubscriptionState {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let state = match self {
+            Self::Canceled => "canceled",
+            Self::Active => "active",
+            Self::Failed => "failed",
+            Self::Unknown(state) => state,
+        };
+        serializer.serialize_str(state)
+    }
+}
+
+impl<'de> Deserialize<'de> for BotSubscriptionState {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(match String::deserialize(deserializer)?.as_str() {
+            "canceled" => Self::Canceled,
+            "active" => Self::Active,
+            "failed" => Self::Failed,
+            state => Self::Unknown(state.to_owned()),
+        })
+    }
 }

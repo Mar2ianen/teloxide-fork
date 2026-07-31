@@ -308,8 +308,13 @@ fn multipart_input_file_fields(m: &Method) -> Option<Vec<&str>> {
     let mut fields: Vec<_> =
         m.params.iter().filter(|&p| ty_is_multiparty(&p.ty)).map(|p| &*p.name).collect();
 
-    if matches!(m.names.2.as_str(), "send_rich_message" | "edit_message_text") {
-        fields.push("rich_message");
+    match m.names.2.as_str() {
+        "send_rich_message" | "edit_message_text" => fields.push("rich_message"),
+        "answer_inline_query" => fields.push("results"),
+        "answer_guest_query" | "answer_web_app_query" | "save_prepared_inline_message" => {
+            fields.push("result")
+        }
+        _ => {}
     }
 
     if fields.is_empty() {

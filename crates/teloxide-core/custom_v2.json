@@ -7837,7 +7837,7 @@
           }
         }
       ],
-      "maybe_multipart": false,
+      "maybe_multipart": true,
       "return_type": {
         "type": "bool",
         "default": true
@@ -9435,7 +9435,7 @@
           }
         }
       ],
-      "maybe_multipart": false,
+      "maybe_multipart": true,
       "return_type": {
         "type": "bool",
         "default": true
@@ -9504,7 +9504,7 @@
           }
         }
       ],
-      "maybe_multipart": false,
+      "maybe_multipart": true,
       "return_type": {
         "type": "bool",
         "default": true
@@ -9534,7 +9534,7 @@
           }
         }
       ],
-      "maybe_multipart": false,
+      "maybe_multipart": true,
       "return_type": {
         "type": "reference",
         "reference": "SentWebAppMessage"
@@ -11514,7 +11514,7 @@
       ],
       "description": "Use this method to get the last messages from the personal chat of a given user. On success, an array of [`Message`] objects is returned.",
       "documentation_link": "https://core.telegram.org/bots/api#getuserpersonalchatmessages",
-      "maybe_multipart": false,
+      "maybe_multipart": true,
       "name": "getUserPersonalChatMessages",
       "return_type": {
         "array": {
@@ -11547,7 +11547,7 @@
       ],
       "description": "Use this method to reply to a received guest message. On success, a [`SentGuestMessage`] object is returned.",
       "documentation_link": "https://core.telegram.org/bots/api#answerguestquery",
-      "maybe_multipart": false,
+      "maybe_multipart": true,
       "name": "answerGuestQuery",
       "return_type": {
         "reference": "SentGuestMessage",
@@ -12477,7 +12477,7 @@
         "default": true
       },
       "documentation_link": "https://core.telegram.org/bots/api#deleteephemeralmessage",
-      "maybe_multipart": false
+      "maybe_multipart": true
     },
     {
       "name": "sendRichMessage",

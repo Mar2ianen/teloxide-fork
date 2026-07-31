@@ -5,7 +5,7 @@
 //! asynchronous and built using [`tokio`].
 //!
 //!```toml
-//! teloxide-core = "0.13.0"
+//! teloxide-core = "0.14.0"
 //! ```
 //! _Compiler support: requires rustc 1.85+_.
 //!

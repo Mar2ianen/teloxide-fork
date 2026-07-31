@@ -119,14 +119,16 @@ impl MultipartPayload for payloads::EditStory {
 #[cfg(test)]
 mod tests {
     use crate::{
-        payloads::{EditStory, PostStory, SendPoll, SendRichMessage},
+        payloads::{AnswerInlineQuery, EditStory, PostStory, SendPoll, SendRichMessage},
         requests::{MultipartPayload, MultipartRequest, Requester},
         types::{
-            BusinessConnectionId, ChatId, InputFile, InputMediaAnimation, InputMediaLivePhoto,
-            InputMediaSticker, InputMediaVideo, InputPollMedia, InputPollOption,
-            InputPollOptionMedia, InputRichMessage, InputRichMessageMedia,
-            InputRichMessageMediaContent, InputStoryContent, InputStoryContentPhoto,
-            InputStoryContentVideo, Seconds, StoryId,
+            BusinessConnectionId, ChatId, InlineQueryId, InlineQueryResult,
+            InlineQueryResultArticle, InputFile, InputMediaAnimation, InputMediaLivePhoto,
+            InputMediaPhoto, InputMediaSticker, InputMediaVideo, InputMessageContent,
+            InputMessageContentText, InputPollMedia, InputPollOption, InputPollOptionMedia,
+            InputRichBlock, InputRichBlockPhoto, InputRichMessage, InputRichMessageContent,
+            InputRichMessageMedia, InputRichMessageMediaContent, InputStoryContent,
+            InputStoryContentPhoto, InputStoryContentVideo, Seconds, StoryId,
         },
         Bot,
     };
@@ -233,6 +235,47 @@ mod tests {
             }),
         ));
     }
+    #[test]
+    fn inline_query_rich_content_collects_files_from_any_result() {
+        fn assert_multipart(_: MultipartRequest<AnswerInlineQuery>) {}
+
+        let rich =
+            InputMessageContent::Rich(InputRichMessageContent::new(InputRichMessage::blocks([
+                InputRichBlock::Photo(InputRichBlockPhoto {
+                    photo: InputMediaPhoto::new(file()),
+                    caption: None,
+                }),
+            ])));
+        let first = InlineQueryResult::Article(InlineQueryResultArticle::new(
+            "first",
+            "First",
+            InputMessageContent::Text(InputMessageContentText::new("text")),
+        ));
+        let second =
+            InlineQueryResult::Article(InlineQueryResultArticle::new("second", "Second", rich));
+        let mut payload =
+            AnswerInlineQuery::new(InlineQueryId("query".to_owned()), [first, second]);
+
+        let mut copied = 0;
+        payload.copy_files(&mut |_| copied += 1);
+        assert_eq!(copied, 1);
+
+        let mut moved = 0;
+        payload.move_files(&mut |_| moved += 1);
+        assert_eq!(moved, 1);
+
+        assert_multipart(Bot::new("token").answer_inline_query(
+            InlineQueryId("query".to_owned()),
+            [InlineQueryResult::Article(InlineQueryResultArticle::new(
+                "article",
+                "Article",
+                InputMessageContent::Rich(InputRichMessageContent::new(InputRichMessage::html(
+                    "hello",
+                ))),
+            ))],
+        ));
+    }
+
     #[test]
     fn send_rich_message_collects_nested_attachments_and_uses_multipart() {
         fn assert_multipart(_: MultipartRequest<SendRichMessage>) {}

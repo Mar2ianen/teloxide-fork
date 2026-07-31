@@ -53,6 +53,16 @@ impl<'de> Deserialize<'de> for InputMessageContent {
     }
 }
 
+impl PartialEq for InputMessageContent {
+    fn eq(&self, other: &Self) -> bool {
+        match (serde_json::to_value(self), serde_json::to_value(other)) {
+            (Ok(left), Ok(right)) => left == right,
+            (Err(_), Err(_)) => false,
+            _ => false,
+        }
+    }
+}
+
 impl InputFileLike for InputMessageContent {
     fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
         if let Self::Rich(value) = self {

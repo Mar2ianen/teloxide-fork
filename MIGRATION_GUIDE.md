@@ -35,6 +35,68 @@ need a different value.
 `LinkPreviewOptions` with `is_disabled: true`; the new setter also supports the
 full link-preview configuration.
 
+## 0.17 -> 0.18
+
+This fork updates the workspace crates together:
+
+- `teloxide`: `0.17.x` -> `0.18.x`
+- `teloxide-core`: `0.13.x` -> `0.14.x`
+- `teloxide-macros`: `0.10.x` -> `0.11.x`
+
+Update direct dependencies together rather than mixing crate generations:
+
+```toml
+teloxide = { version = "0.18.0", features = ["macros"] }
+# Only if used directly:
+teloxide-core = "0.14.0"
+teloxide-macros = "0.11.0"
+```
+
+### Bot API 10.2 model additions
+
+Bot API 10.2 adds rich-message models and new update/model fields. Code that constructs public structs with struct literals may need to initialize newly added fields, including `BotCommand::is_ephemeral`. Prefer constructors where available.
+
+Subscription updates are represented by `BotSubscriptionUpdated`; `BotSubscriptionState` retains unknown future wire values as `Unknown(String)` instead of treating them as a known state. Match the new update kind and keep a fallback branch for unknown subscription states.
+
+### Rich messages
+
+Rich messages now have typed outgoing models. Use `InputRichMessage` with `send_rich_message` and `send_rich_message_draft`, and use the rich setters for the rich variants of `edit_message_text` and `edit_message_text_inline`:
+
+```rust
+let rich = InputRichMessage::blocks([
+    InputRichBlock::Paragraph(InputRichBlockParagraph {
+        text: RichText::from("Hello"),
+    }),
+]);
+
+bot.send_rich_message(chat_id, rich).await?;
+```
+
+`InputMessageContent::Rich(InputRichMessageContent::new(rich))` can be used in supported inline, guest, Web App, and prepared-message results. Rich input content is outgoing-only; it is not a replacement for deserializing legacy `InlineQueryResult` payloads.
+
+`Thinking` blocks are valid only for `send_rich_message_draft`. New direct file uploads are not supported by drafts: use a Telegram `file_id` or URL instead of `InputFile::memory`, `InputFile::file`, or `InputFile::read`. Inline-message edits have the same no-new-upload restriction.
+
+### Request validation
+
+Requests are validated automatically before serialization and transport. No explicit `validate()` call is needed. Validation checks only static constraints that are fully determined by the payload; Telegram remains responsible for permissions, capabilities, resource existence, and other server-side state.
+
+Local validation failures are returned as a distinct `RequestError::Validation(RequestValidationError)` and no HTTP request is sent. If code matches `RequestError` exhaustively, add this arm:
+
+```rust
+match error {
+    RequestError::Validation(validation) => {
+        log::warn!("invalid request: {validation}");
+    }
+    _ => {
+        // Keep the existing Telegram/API and transport error handling.
+    }
+}
+```
+
+The validation error contains a structured `RequestFieldPath`, so callers should not parse its display text. The first non-rich rule is that `send_message_draft` rejects `draft_id == 0`; non-zero negative values remain valid because the Bot API requires only a non-zero identifier.
+
+Existing non-rich requests keep their wire format and do not require code changes unless they use the new rich methods or exhaustive matches over newly extended public enums.
+
 ## 0.16 -> 0.17
 
 ### teloxide

@@ -10,7 +10,7 @@ use serde::Serialize;
 /// The source fields are private, so every constructor selects exactly one of
 /// HTML, Markdown, or typed blocks.
 #[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichMessage {
     blocks: Option<Vec<InputRichBlock>>,
@@ -119,7 +119,7 @@ impl InputFileLike for InputRichMessage {
 }
 
 /// A media element embedded in an outgoing rich message.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichMessageMedia {
     /// Identifier used by a `tg://photo`, `tg://video`, or `tg://audio` link.
@@ -143,7 +143,7 @@ impl InputRichMessageMedia {
 }
 
 /// Media kinds supported inside rich messages.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InputRichMessageMediaContent {
@@ -202,7 +202,7 @@ impl InputRichMessageMediaContent {
 
 /// A voice-note media element used in a rich message.
 #[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputMediaVoiceNote {
     pub media: InputFile,
@@ -249,7 +249,7 @@ impl InputFileLike for InputMediaVoiceNote {
 }
 
 /// A block in an outgoing rich message.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InputRichBlock {
@@ -273,6 +273,7 @@ pub enum InputRichBlock {
     Photo(InputRichBlockPhoto),
     Video(InputRichBlockVideo),
     VoiceNote(InputRichBlockVoiceNote),
+    /// Only valid when sending a rich message draft.
     Thinking(InputRichBlockThinking),
 }
 
@@ -333,7 +334,7 @@ impl InputFileLike for InputRichBlock {
 macro_rules! input_rich_text_block {
     ($($type:ident),+ $(,)?) => {
         $(
-            #[derive(Clone, Debug, Serialize)]
+            #[derive(Clone, Debug, PartialEq, Serialize)]
             #[cfg_attr(test, derive(schemars::JsonSchema))]
             pub struct $type {
                 pub text: RichText,
@@ -344,14 +345,14 @@ macro_rules! input_rich_text_block {
 
 input_rich_text_block!(InputRichBlockParagraph, InputRichBlockFooter);
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockSectionHeading {
     pub text: RichText,
     pub size: u8,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockPreformatted {
     pub text: RichText,
@@ -374,13 +375,13 @@ pub struct InputRichBlockAnchor {
     pub name: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockList {
     pub items: Vec<InputRichBlockListItem>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockListItem {
     pub blocks: Vec<InputRichBlock>,
@@ -401,35 +402,35 @@ impl InputFileLike for InputRichBlockListItem {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockBlockQuotation {
     pub blocks: Vec<InputRichBlock>,
     pub credit: Option<RichText>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockPullQuotation {
     pub text: RichText,
     pub credit: Option<RichText>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockCollage {
     pub blocks: Vec<InputRichBlock>,
     pub caption: Option<RichBlockCaption>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockSlideshow {
     pub blocks: Vec<InputRichBlock>,
     pub caption: Option<RichBlockCaption>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockTable {
     pub cells: Vec<Vec<RichBlockTableCell>>,
@@ -438,7 +439,7 @@ pub struct InputRichBlockTable {
     pub caption: Option<RichText>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockDetails {
     pub summary: RichText,
@@ -446,7 +447,7 @@ pub struct InputRichBlockDetails {
     pub is_open: Option<bool>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockMap {
     pub location: Location,
@@ -456,35 +457,35 @@ pub struct InputRichBlockMap {
     pub caption: Option<RichBlockCaption>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockAnimation {
     pub animation: InputMediaAnimation,
     pub caption: Option<RichBlockCaption>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockAudio {
     pub audio: InputMediaAudio,
     pub caption: Option<RichBlockCaption>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockPhoto {
     pub photo: InputMediaPhoto,
     pub caption: Option<RichBlockCaption>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockVideo {
     pub video: InputMediaVideo,
     pub caption: Option<RichBlockCaption>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockVoiceNote {
     pub voice_note: InputMediaVoiceNote,
@@ -492,14 +493,14 @@ pub struct InputRichBlockVoiceNote {
 }
 
 /// Only valid in `sendRichMessageDraft`.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockThinking {
     pub text: RichText,
 }
 
 /// Rich message content used by inline, guest, and Web App query results.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichMessageContent {
     /// Rich message payload.

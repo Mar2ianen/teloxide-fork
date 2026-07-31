@@ -1,4 +1,4 @@
-use serde::{de, Deserialize, Deserializer, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
 use crate::types::{Animation, Audio, Location, PhotoSize, User, Video, Voice};
@@ -12,13 +12,42 @@ pub struct RichMessage {
 }
 
 /// Rich-formatted inline text.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum RichText {
     Text(String),
     List(Vec<Self>),
     Object(RichTextObject),
+}
+
+impl<'de> Deserialize<'de> for RichText {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        match value {
+            Value::String(text) => Ok(Self::Text(text)),
+            Value::Array(_) => {
+                serde_json::from_value(value).map(Self::List).map_err(de::Error::custom)
+            }
+            Value::Object(object) => {
+                let type_name = object
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .ok_or_else(|| de::Error::missing_field("type"))?;
+                let value = Value::Object(object);
+                if is_known_rich_text_type(&type_name) {
+                    serde_json::from_value(value).map(Self::Object).map_err(de::Error::custom)
+                } else {
+                    Ok(Self::Object(RichTextObject::Unknown(value)))
+                }
+            }
+            _ => Err(de::Error::custom("rich text must be a string, array, or object")),
+        }
+    }
 }
 
 impl From<String> for RichText {
@@ -40,9 +69,8 @@ impl From<Vec<Self>> for RichText {
 }
 
 /// A typed rich-text object.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
-#[serde(tag = "type", rename_all = "snake_case")]
 pub enum RichTextObject {
     Bold(RichTextBold),
     Italic(RichTextItalic),
@@ -69,6 +97,194 @@ pub enum RichTextObject {
     AnchorLink(RichTextAnchorLink),
     Reference(RichTextReference),
     ReferenceLink(RichTextReferenceLink),
+    /// A future rich-text object preserved as its original JSON value.
+    Unknown(Value),
+}
+
+fn is_known_rich_text_type(type_name: &str) -> bool {
+    matches!(
+        type_name,
+        "bold"
+            | "italic"
+            | "underline"
+            | "strikethrough"
+            | "spoiler"
+            | "date_time"
+            | "text_mention"
+            | "subscript"
+            | "superscript"
+            | "marked"
+            | "code"
+            | "custom_emoji"
+            | "mathematical_expression"
+            | "url"
+            | "email_address"
+            | "phone_number"
+            | "bank_card_number"
+            | "mention"
+            | "hashtag"
+            | "cashtag"
+            | "bot_command"
+            | "anchor"
+            | "anchor_link"
+            | "reference"
+            | "reference_link"
+    )
+}
+
+impl<'de> Deserialize<'de> for RichTextObject {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        let type_name = value
+            .get("type")
+            .and_then(Value::as_str)
+            .ok_or_else(|| de::Error::missing_field("type"))?;
+        if is_known_rich_text_type(type_name) {
+            let known =
+                serde_json::from_value::<KnownRichTextObject>(value).map_err(de::Error::custom)?;
+            Ok(known.into())
+        } else {
+            Ok(Self::Unknown(value))
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum KnownRichTextObject {
+    Bold(RichTextBold),
+    Italic(RichTextItalic),
+    Underline(RichTextUnderline),
+    Strikethrough(RichTextStrikethrough),
+    Spoiler(RichTextSpoiler),
+    DateTime(RichTextDateTime),
+    TextMention(RichTextTextMention),
+    Subscript(RichTextSubscript),
+    Superscript(RichTextSuperscript),
+    Marked(RichTextMarked),
+    Code(RichTextCode),
+    CustomEmoji(RichTextCustomEmoji),
+    MathematicalExpression(RichTextMathematicalExpression),
+    Url(RichTextUrl),
+    EmailAddress(RichTextEmailAddress),
+    PhoneNumber(RichTextPhoneNumber),
+    BankCardNumber(RichTextBankCardNumber),
+    Mention(RichTextMention),
+    Hashtag(RichTextHashtag),
+    Cashtag(RichTextCashtag),
+    BotCommand(RichTextBotCommand),
+    Anchor(RichTextAnchor),
+    AnchorLink(RichTextAnchorLink),
+    Reference(RichTextReference),
+    ReferenceLink(RichTextReferenceLink),
+}
+
+impl From<KnownRichTextObject> for RichTextObject {
+    fn from(value: KnownRichTextObject) -> Self {
+        match value {
+            KnownRichTextObject::Bold(value) => Self::Bold(value),
+            KnownRichTextObject::Italic(value) => Self::Italic(value),
+            KnownRichTextObject::Underline(value) => Self::Underline(value),
+            KnownRichTextObject::Strikethrough(value) => Self::Strikethrough(value),
+            KnownRichTextObject::Spoiler(value) => Self::Spoiler(value),
+            KnownRichTextObject::DateTime(value) => Self::DateTime(value),
+            KnownRichTextObject::TextMention(value) => Self::TextMention(value),
+            KnownRichTextObject::Subscript(value) => Self::Subscript(value),
+            KnownRichTextObject::Superscript(value) => Self::Superscript(value),
+            KnownRichTextObject::Marked(value) => Self::Marked(value),
+            KnownRichTextObject::Code(value) => Self::Code(value),
+            KnownRichTextObject::CustomEmoji(value) => Self::CustomEmoji(value),
+            KnownRichTextObject::MathematicalExpression(value) => {
+                Self::MathematicalExpression(value)
+            }
+            KnownRichTextObject::Url(value) => Self::Url(value),
+            KnownRichTextObject::EmailAddress(value) => Self::EmailAddress(value),
+            KnownRichTextObject::PhoneNumber(value) => Self::PhoneNumber(value),
+            KnownRichTextObject::BankCardNumber(value) => Self::BankCardNumber(value),
+            KnownRichTextObject::Mention(value) => Self::Mention(value),
+            KnownRichTextObject::Hashtag(value) => Self::Hashtag(value),
+            KnownRichTextObject::Cashtag(value) => Self::Cashtag(value),
+            KnownRichTextObject::BotCommand(value) => Self::BotCommand(value),
+            KnownRichTextObject::Anchor(value) => Self::Anchor(value),
+            KnownRichTextObject::AnchorLink(value) => Self::AnchorLink(value),
+            KnownRichTextObject::Reference(value) => Self::Reference(value),
+            KnownRichTextObject::ReferenceLink(value) => Self::ReferenceLink(value),
+        }
+    }
+}
+
+fn serialize_rich_text_object<S, T>(
+    serializer: S,
+    type_name: &'static str,
+    value: &T,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+    T: Serialize,
+{
+    let mut object = serde_json::to_value(value).map_err(serde::ser::Error::custom)?;
+    let map = object
+        .as_object_mut()
+        .ok_or_else(|| serde::ser::Error::custom("rich-text object must serialize to an object"))?;
+    map.insert("type".to_owned(), Value::String(type_name.to_owned()));
+    object.serialize(serializer)
+}
+
+impl Serialize for RichTextObject {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Bold(value) => serialize_rich_text_object(serializer, "bold", value),
+            Self::Italic(value) => serialize_rich_text_object(serializer, "italic", value),
+            Self::Underline(value) => serialize_rich_text_object(serializer, "underline", value),
+            Self::Strikethrough(value) => {
+                serialize_rich_text_object(serializer, "strikethrough", value)
+            }
+            Self::Spoiler(value) => serialize_rich_text_object(serializer, "spoiler", value),
+            Self::DateTime(value) => serialize_rich_text_object(serializer, "date_time", value),
+            Self::TextMention(value) => {
+                serialize_rich_text_object(serializer, "text_mention", value)
+            }
+            Self::Subscript(value) => serialize_rich_text_object(serializer, "subscript", value),
+            Self::Superscript(value) => {
+                serialize_rich_text_object(serializer, "superscript", value)
+            }
+            Self::Marked(value) => serialize_rich_text_object(serializer, "marked", value),
+            Self::Code(value) => serialize_rich_text_object(serializer, "code", value),
+            Self::CustomEmoji(value) => {
+                serialize_rich_text_object(serializer, "custom_emoji", value)
+            }
+            Self::MathematicalExpression(value) => {
+                serialize_rich_text_object(serializer, "mathematical_expression", value)
+            }
+            Self::Url(value) => serialize_rich_text_object(serializer, "url", value),
+            Self::EmailAddress(value) => {
+                serialize_rich_text_object(serializer, "email_address", value)
+            }
+            Self::PhoneNumber(value) => {
+                serialize_rich_text_object(serializer, "phone_number", value)
+            }
+            Self::BankCardNumber(value) => {
+                serialize_rich_text_object(serializer, "bank_card_number", value)
+            }
+            Self::Mention(value) => serialize_rich_text_object(serializer, "mention", value),
+            Self::Hashtag(value) => serialize_rich_text_object(serializer, "hashtag", value),
+            Self::Cashtag(value) => serialize_rich_text_object(serializer, "cashtag", value),
+            Self::BotCommand(value) => serialize_rich_text_object(serializer, "bot_command", value),
+            Self::Anchor(value) => serialize_rich_text_object(serializer, "anchor", value),
+            Self::AnchorLink(value) => serialize_rich_text_object(serializer, "anchor_link", value),
+            Self::Reference(value) => serialize_rich_text_object(serializer, "reference", value),
+            Self::ReferenceLink(value) => {
+                serialize_rich_text_object(serializer, "reference_link", value)
+            }
+            Self::Unknown(value) => value.serialize(serializer),
+        }
+    }
 }
 
 macro_rules! rich_text_from {
@@ -211,13 +427,25 @@ pub struct RichBlockListItem {
 ///
 /// Unknown block variants are preserved instead of failing deserialization of
 /// the containing update.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub enum RichBlock {
     /// A block whose type is supported by this version of teloxide.
     Known(Box<RichBlockKind>),
     /// A future Telegram block type preserved as its original JSON value.
     Unknown(Value),
+}
+
+impl Serialize for RichBlock {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Known(value) => value.serialize(serializer),
+            Self::Unknown(value) => value.serialize(serializer),
+        }
+    }
 }
 
 impl<'de> Deserialize<'de> for RichBlock {
@@ -252,9 +480,9 @@ impl<'de> Deserialize<'de> for RichBlock {
             | "photo"
             | "video"
             | "voice_note"
-            | "thinking" => {
-                serde_json::from_value(value).map(Self::Known).map_err(de::Error::custom)
-            }
+            | "thinking" => serde_json::from_value::<RichBlockKind>(value)
+                .map(|value| Self::Known(Box::new(value)))
+                .map_err(de::Error::custom),
             _ => Ok(Self::Unknown(value)),
         }
     }
@@ -446,6 +674,42 @@ mod tests {
         let value = serde_json::json!({"type": "future_block", "x": 1});
         let block: RichBlock = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(block, RichBlock::Unknown(value));
+    }
+
+    #[test]
+    fn known_block_roundtrips_wire_shape() {
+        let raw = serde_json::json!({"type": "paragraph", "text": "hello"});
+        let block: RichBlock = serde_json::from_value(raw.clone()).unwrap();
+        assert_eq!(serde_json::to_value(block).unwrap(), raw);
+    }
+
+    #[test]
+    fn unknown_block_roundtrips_wire_shape() {
+        let raw = serde_json::json!({"type": "future_block", "x": 1});
+        let block: RichBlock = serde_json::from_value(raw.clone()).unwrap();
+        assert_eq!(serde_json::to_value(block).unwrap(), raw);
+    }
+
+    #[test]
+    fn known_rich_text_object_roundtrips_wire_shape() {
+        let raw = serde_json::json!({"type": "bold", "text": "hello"});
+        let text: RichText = serde_json::from_value(raw.clone()).unwrap();
+        assert_eq!(serde_json::to_value(text).unwrap(), raw);
+    }
+
+    #[test]
+    fn unknown_rich_text_object_is_preserved() {
+        let raw = serde_json::json!({"type": "future_text", "text": "hello"});
+        let text: RichText = serde_json::from_value(raw.clone()).unwrap();
+        assert_eq!(serde_json::to_value(text).unwrap(), raw);
+    }
+
+    #[test]
+    fn malformed_known_rich_text_object_is_rejected() {
+        let result = serde_json::from_value::<RichText>(serde_json::json!({
+            "type": "bold"
+        }));
+        assert!(result.is_err());
     }
 
     #[test]

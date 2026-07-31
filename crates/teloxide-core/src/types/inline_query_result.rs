@@ -326,13 +326,30 @@ mod tests {
         InlineQueryResultContact, InlineQueryResultDocument, InlineQueryResultGame,
         InlineQueryResultGif, InlineQueryResultLocation, InlineQueryResultMpeg4Gif,
         InlineQueryResultPhoto, InlineQueryResultVenue, InlineQueryResultVideo,
-        InlineQueryResultVoice, InputMessageContent, InputMessageContentLocation,
-        InputMessageContentText, LinkPreviewOptions, Seconds,
+        InlineQueryResultVoice, InputFile, InputMediaPhoto, InputMessageContent,
+        InputMessageContentLocation, InputMessageContentText, InputRichBlock, InputRichBlockPhoto,
+        InputRichMessage, InputRichMessageContent, LinkPreviewOptions, Seconds,
     };
 
     use mime::Mime;
     use std::str::FromStr as _;
     use url::Url;
+
+    #[test]
+    fn rich_input_message_content_is_not_deserialized() {
+        let result = InlineQueryResult::Article(InlineQueryResultArticle::new(
+            "rich",
+            "Rich",
+            InputMessageContent::Rich(InputRichMessageContent::new(InputRichMessage::blocks([
+                InputRichBlock::Photo(InputRichBlockPhoto {
+                    photo: InputMediaPhoto::new(InputFile::memory("photo")),
+                    caption: None,
+                }),
+            ]))),
+        ));
+        let json = serde_json::to_value(result).unwrap();
+        assert!(serde_json::from_value::<InlineQueryResult>(json).is_err());
+    }
 
     #[test]
     fn cached_audio_min() {

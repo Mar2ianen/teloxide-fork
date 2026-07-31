@@ -10,7 +10,7 @@ use crate::types::{InlineKeyboardMarkup, InputMessageContent, MessageEntity, Par
 ///
 /// [The official docs](https://core.telegram.org/bots/api#inlinequeryresultaudio).
 #[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InlineQueryResultAudio {
     /// Unique identifier for this result, 1-64 bytes.

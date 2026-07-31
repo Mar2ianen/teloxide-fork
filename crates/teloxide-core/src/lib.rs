@@ -110,6 +110,10 @@ mod local_macros;
 pub use self::{
     bot::Bot,
     errors::{ApiError, DownloadError, RequestError},
+    requests::{
+        InvalidValueReason, RequestFieldPath, RequestFieldPathSegment, RequestValidationError,
+        RichMessageContext, Validate, ValidateWith,
+    },
 };
 
 pub mod adaptors;

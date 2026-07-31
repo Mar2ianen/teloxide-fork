@@ -5,6 +5,7 @@ use serde::Serialize;
 use crate::types::{MessageEntity, ParseMode, ThreadId, True, UserId};
 
 impl_payload! {
+    @[validate = crate::requests::validation::validate_send_message_draft]
     /// Use this method to stream a partial message to a user while the message is being generated. Returns _True_ on success.
     #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize)]
     pub SendMessageDraft (SendMessageDraftSetters) => True {

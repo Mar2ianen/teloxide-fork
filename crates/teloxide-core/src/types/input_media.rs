@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::types::{InputFile, MessageEntity, ParseMode, Seconds};
+use crate::types::{InputFile, InputFileLike, MessageEntity, ParseMode, Seconds};
 
 /// This object represents the content of a media message to be sent.
 ///
@@ -16,6 +16,54 @@ pub enum InputMedia {
     Audio(InputMediaAudio),
     Document(InputMediaDocument),
     LivePhoto(InputMediaLivePhoto),
+}
+
+impl InputFileLike for InputMediaPhoto {
+    fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
+        self.media.copy_into(into);
+    }
+
+    fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
+        self.media.move_into(into);
+    }
+}
+
+impl InputFileLike for InputMediaVideo {
+    fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
+        self.media.copy_into(into);
+        self.thumbnail.copy_into(into);
+        self.cover.copy_into(into);
+    }
+
+    fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
+        self.media.move_into(into);
+        self.thumbnail.move_into(into);
+        self.cover.move_into(into);
+    }
+}
+
+impl InputFileLike for InputMediaAnimation {
+    fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
+        self.media.copy_into(into);
+        self.thumbnail.copy_into(into);
+    }
+
+    fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
+        self.media.move_into(into);
+        self.thumbnail.move_into(into);
+    }
+}
+
+impl InputFileLike for InputMediaAudio {
+    fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
+        self.media.copy_into(into);
+        self.thumbnail.copy_into(into);
+    }
+
+    fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
+        self.media.move_into(into);
+        self.thumbnail.move_into(into);
+    }
 }
 
 /// Represents a photo to be sent.

@@ -12,4 +12,6 @@ pub struct RichMessage {
     /// Rich-message blocks in Telegram wire format.
     #[serde(default)]
     pub blocks: Vec<Value>,
+    /// `true` when Telegram renders the rich message right-to-left.
+    pub is_rtl: Option<bool>,
 }

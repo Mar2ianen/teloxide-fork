@@ -74,6 +74,7 @@ impl EventKind for Kind {
             MessageReactionCount,
             GuestMessage,
             ManagedBot,
+            Subscription,
             InlineQuery,
             ChosenInlineResult,
             CallbackQuery,
@@ -181,6 +182,7 @@ mod tests {
                 | MessageReactionCount
                 | GuestMessage
                 | ManagedBot
+                | Subscription
                 | InlineQuery
                 | ChosenInlineResult
                 | CallbackQuery

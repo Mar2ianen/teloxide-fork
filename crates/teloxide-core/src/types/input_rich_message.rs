@@ -1,31 +1,21 @@
-use serde::Serialize;
-use serde_json::Value;
-
 use crate::types::{
     InputFile, InputFileLike, InputMediaAnimation, InputMediaAudio, InputMediaPhoto,
-    InputMediaVideo, MessageEntity, ParseMode,
+    InputMediaVideo, Location, MessageEntity, ParseMode, RichBlockCaption, RichBlockTableCell,
+    RichText,
 };
+use serde::Serialize;
 
 /// Describes a rich message to be sent.
 ///
-/// Exactly one of [`html`](Self::html), [`markdown`](Self::markdown), or
-/// [`blocks`](Self::blocks) should be present.
+/// The source fields are private, so every constructor selects exactly one of
+/// HTML, Markdown, or typed blocks.
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichMessage {
-    /// Content described as a list of blocks.
-    ///
-    /// This is a temporary raw representation; a typed rich-block AST can
-    /// replace it without changing the request methods.
-    ///
-    /// Local uploads embedded directly in raw blocks are not traversed. Use
-    /// file IDs/URLs in raw blocks, or put uploads in [`Self::media`].
-    pub blocks: Option<Vec<Value>>,
-    /// Content using Telegram rich-message HTML formatting.
-    pub html: Option<String>,
-    /// Content using Telegram rich-message Markdown formatting.
-    pub markdown: Option<String>,
+    blocks: Option<Vec<InputRichBlock>>,
+    html: Option<String>,
+    markdown: Option<String>,
     /// Media referenced by `tg://photo`, `tg://video`, or `tg://audio` links.
     pub media: Option<Vec<InputRichMessageMedia>>,
     /// Show the rich message right-to-left.
@@ -59,12 +49,10 @@ impl InputRichMessage {
         }
     }
 
-    /// Creates a rich message from raw block JSON values.
+    /// Creates a rich message from typed blocks.
     ///
-    /// Raw blocks currently support only remote/file-id media. `attach://`
-    /// references created outside [`Self::media`] have no matching multipart
-    /// part and are therefore unsupported.
-    pub fn blocks(blocks: impl IntoIterator<Item = Value>) -> Self {
+    /// Files nested in media blocks are collected for multipart uploads.
+    pub fn blocks(blocks: impl IntoIterator<Item = InputRichBlock>) -> Self {
         Self {
             blocks: Some(blocks.into_iter().collect()),
             html: None,
@@ -100,15 +88,33 @@ impl InputRichMessage {
     fn files_mut(&mut self) -> impl Iterator<Item = &mut InputFile> {
         self.media.iter_mut().flatten().flat_map(InputRichMessageMedia::files_mut)
     }
+
+    /// Returns the block source, if this message was constructed from blocks.
+    pub fn blocks_ref(&self) -> Option<&[InputRichBlock]> {
+        self.blocks.as_deref()
+    }
+
+    /// Returns the HTML source, if this message was constructed from HTML.
+    pub fn html_ref(&self) -> Option<&str> {
+        self.html.as_deref()
+    }
+
+    /// Returns the Markdown source, if this message was constructed from
+    /// Markdown.
+    pub fn markdown_ref(&self) -> Option<&str> {
+        self.markdown.as_deref()
+    }
 }
 
 impl InputFileLike for InputRichMessage {
     fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
         self.files().for_each(|file| file.copy_into(into));
+        self.blocks.copy_into(into);
     }
 
     fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
         self.files_mut().for_each(|file| file.move_into(into));
+        self.blocks.move_into(into);
     }
 }
 
@@ -232,6 +238,266 @@ impl InputMediaVoiceNote {
     }
 }
 
+impl InputFileLike for InputMediaVoiceNote {
+    fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
+        self.media.copy_into(into);
+    }
+
+    fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
+        self.media.move_into(into);
+    }
+}
+
+/// A block in an outgoing rich message.
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum InputRichBlock {
+    Paragraph(InputRichBlockParagraph),
+    Heading(InputRichBlockSectionHeading),
+    Pre(InputRichBlockPreformatted),
+    Footer(InputRichBlockFooter),
+    Divider(InputRichBlockDivider),
+    MathematicalExpression(InputRichBlockMathematicalExpression),
+    Anchor(InputRichBlockAnchor),
+    List(InputRichBlockList),
+    Blockquote(InputRichBlockBlockQuotation),
+    Pullquote(InputRichBlockPullQuotation),
+    Collage(InputRichBlockCollage),
+    Slideshow(InputRichBlockSlideshow),
+    Table(InputRichBlockTable),
+    Details(InputRichBlockDetails),
+    Map(InputRichBlockMap),
+    Animation(InputRichBlockAnimation),
+    Audio(InputRichBlockAudio),
+    Photo(InputRichBlockPhoto),
+    Video(InputRichBlockVideo),
+    VoiceNote(InputRichBlockVoiceNote),
+    Thinking(InputRichBlockThinking),
+}
+
+impl InputFileLike for InputRichBlock {
+    fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
+        match self {
+            Self::List(value) => value.items.copy_into(into),
+            Self::Blockquote(value) => value.blocks.copy_into(into),
+            Self::Collage(value) => value.blocks.copy_into(into),
+            Self::Slideshow(value) => value.blocks.copy_into(into),
+            Self::Details(value) => value.blocks.copy_into(into),
+            Self::Animation(value) => value.animation.copy_into(into),
+            Self::Audio(value) => value.audio.copy_into(into),
+            Self::Photo(value) => value.photo.copy_into(into),
+            Self::Video(value) => value.video.copy_into(into),
+            Self::VoiceNote(value) => value.voice_note.copy_into(into),
+            Self::Paragraph(_)
+            | Self::Heading(_)
+            | Self::Pre(_)
+            | Self::Footer(_)
+            | Self::Divider(_)
+            | Self::MathematicalExpression(_)
+            | Self::Anchor(_)
+            | Self::Pullquote(_)
+            | Self::Table(_)
+            | Self::Map(_)
+            | Self::Thinking(_) => {}
+        }
+    }
+
+    fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
+        match self {
+            Self::List(value) => value.items.move_into(into),
+            Self::Blockquote(value) => value.blocks.move_into(into),
+            Self::Collage(value) => value.blocks.move_into(into),
+            Self::Slideshow(value) => value.blocks.move_into(into),
+            Self::Details(value) => value.blocks.move_into(into),
+            Self::Animation(value) => value.animation.move_into(into),
+            Self::Audio(value) => value.audio.move_into(into),
+            Self::Photo(value) => value.photo.move_into(into),
+            Self::Video(value) => value.video.move_into(into),
+            Self::VoiceNote(value) => value.voice_note.move_into(into),
+            Self::Paragraph(_)
+            | Self::Heading(_)
+            | Self::Pre(_)
+            | Self::Footer(_)
+            | Self::Divider(_)
+            | Self::MathematicalExpression(_)
+            | Self::Anchor(_)
+            | Self::Pullquote(_)
+            | Self::Table(_)
+            | Self::Map(_)
+            | Self::Thinking(_) => {}
+        }
+    }
+}
+
+macro_rules! input_rich_text_block {
+    ($($type:ident),+ $(,)?) => {
+        $(
+            #[derive(Clone, Debug, Serialize)]
+            #[cfg_attr(test, derive(schemars::JsonSchema))]
+            pub struct $type {
+                pub text: RichText,
+            }
+        )+
+    };
+}
+
+input_rich_text_block!(InputRichBlockParagraph, InputRichBlockFooter);
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockSectionHeading {
+    pub text: RichText,
+    pub size: u8,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockPreformatted {
+    pub text: RichText,
+    pub language: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockDivider {}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockMathematicalExpression {
+    pub expression: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockAnchor {
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockList {
+    pub items: Vec<InputRichBlockListItem>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockListItem {
+    pub blocks: Vec<InputRichBlock>,
+    pub has_checkbox: Option<bool>,
+    pub is_checked: Option<bool>,
+    pub value: Option<i64>,
+    #[serde(rename = "type")]
+    pub type_field: Option<String>,
+}
+
+impl InputFileLike for InputRichBlockListItem {
+    fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
+        self.blocks.copy_into(into);
+    }
+
+    fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
+        self.blocks.move_into(into);
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockBlockQuotation {
+    pub blocks: Vec<InputRichBlock>,
+    pub credit: Option<RichText>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockPullQuotation {
+    pub text: RichText,
+    pub credit: Option<RichText>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockCollage {
+    pub blocks: Vec<InputRichBlock>,
+    pub caption: Option<RichBlockCaption>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockSlideshow {
+    pub blocks: Vec<InputRichBlock>,
+    pub caption: Option<RichBlockCaption>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockTable {
+    pub cells: Vec<Vec<RichBlockTableCell>>,
+    pub is_bordered: Option<bool>,
+    pub is_striped: Option<bool>,
+    pub caption: Option<RichText>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockDetails {
+    pub summary: RichText,
+    pub blocks: Vec<InputRichBlock>,
+    pub is_open: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockMap {
+    pub location: Location,
+    pub zoom: u8,
+    pub width: u32,
+    pub height: u32,
+    pub caption: Option<RichBlockCaption>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockAnimation {
+    pub animation: InputMediaAnimation,
+    pub caption: Option<RichBlockCaption>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockAudio {
+    pub audio: InputMediaAudio,
+    pub caption: Option<RichBlockCaption>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockPhoto {
+    pub photo: InputMediaPhoto,
+    pub caption: Option<RichBlockCaption>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockVideo {
+    pub video: InputMediaVideo,
+    pub caption: Option<RichBlockCaption>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockVoiceNote {
+    pub voice_note: InputMediaVoiceNote,
+    pub caption: Option<RichBlockCaption>,
+}
+
+/// Only valid in `sendRichMessageDraft`.
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockThinking {
+    pub text: RichText,
+}
+
 /// Result of a chat join request query.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
@@ -261,6 +527,30 @@ mod tests {
                 "skip_entity_detection": true
             })
         );
+    }
+
+    #[test]
+    fn nested_media_files_are_collected() {
+        let message = InputRichMessage::blocks([InputRichBlock::Details(InputRichBlockDetails {
+            summary: RichText::from("files"),
+            blocks: vec![InputRichBlock::Video(InputRichBlockVideo {
+                video: InputMediaVideo::new(InputFile::memory("video"))
+                    .thumbnail(InputFile::memory("thumbnail"))
+                    .cover(InputFile::memory("cover")),
+                caption: None,
+            })],
+            is_open: None,
+        })]);
+
+        let value = serde_json::to_value(&message).unwrap();
+        assert!(value["blocks"][0]["blocks"][0]["video"]["media"]
+            .as_str()
+            .unwrap()
+            .starts_with("attach://"));
+
+        let mut files = Vec::new();
+        message.copy_into(&mut |file| files.push(file));
+        assert_eq!(files.len(), 3);
     }
 
     #[test]

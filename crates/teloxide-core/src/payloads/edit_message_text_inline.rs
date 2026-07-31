@@ -8,6 +8,7 @@ use crate::types::{
 };
 
 impl_payload! {
+    @[validate = crate::requests::validation::validate_edit_message_text_inline]
     /// Use this method to edit text and [games] messages. On success, _True_ is returned. Note that business messages that were not sent by the bot and do not contain an inline keyboard can only be edited within **48 hours** from the time they were sent.
     ///
     /// See also: [`EditMessageText`](crate::payloads::EditMessageText)

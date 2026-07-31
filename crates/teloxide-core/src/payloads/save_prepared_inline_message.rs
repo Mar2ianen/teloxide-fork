@@ -6,6 +6,7 @@ use crate::types::{InlineQueryResult, PreparedInlineMessage, UserId};
 
 impl_payload! {
     @[multipart = result]
+    @[validate = crate::requests::validation::validate_save_prepared_inline_message]
     /// Stores a message that can be sent by a user of a Mini App. Returns a [`PreparedInlineMessage`] object.
     ///
     /// [`PreparedInlineMessage`]: crate::types::PreparedInlineMessage

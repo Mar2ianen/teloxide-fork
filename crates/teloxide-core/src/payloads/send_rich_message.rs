@@ -9,6 +9,7 @@ use crate::types::{
 
 impl_payload! {
     @[multipart = rich_message]
+    @[validate = crate::requests::validation::validate_send_rich_message]
     /// Use this method to send rich messages. On success, the sent [`Message`] is returned.
     ///
     /// [`Message`]: crate::types::Message

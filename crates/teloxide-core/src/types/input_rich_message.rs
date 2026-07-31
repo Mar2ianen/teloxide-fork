@@ -8,7 +8,13 @@ use serde::Serialize;
 /// Describes a rich message to be sent.
 ///
 /// The source fields are private, so every constructor selects exactly one of
-/// HTML, Markdown, or typed blocks.
+/// HTML, Markdown, or typed blocks. Method-specific static constraints can be
+/// checked with [`ValidateWith<RichMessageContext>`] before dispatch. This
+/// validation does not prove that Telegram will accept permissions or other
+/// server-side capabilities.
+///
+/// [`ValidateWith<RichMessageContext>`]: crate::requests::ValidateWith
+/// [`RichMessageContext`]: crate::requests::RichMessageContext
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]

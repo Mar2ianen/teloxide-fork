@@ -3777,7 +3777,7 @@ mod tests {
             message.kind,
             MessageKind::Common(MessageCommon {
                 media_kind: MediaKind::RichMessage(MediaRichMessage {
-                    rich_message: RichMessage { ref blocks },
+                    rich_message: RichMessage { ref blocks, .. },
                 }),
                 ..
             }) if blocks.is_empty()

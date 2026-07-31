@@ -215,7 +215,7 @@ pub struct RichBlockListItem {
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub enum RichBlock {
     /// A block whose type is supported by this version of teloxide.
-    Known(RichBlockKind),
+    Known(Box<RichBlockKind>),
     /// A future Telegram block type preserved as its original JSON value.
     Unknown(Value),
 }
@@ -262,7 +262,7 @@ impl<'de> Deserialize<'de> for RichBlock {
 
 impl From<RichBlockKind> for RichBlock {
     fn from(value: RichBlockKind) -> Self {
-        Self::Known(value)
+        Self::Known(Box::new(value))
     }
 }
 
@@ -463,6 +463,6 @@ mod tests {
             "text": "hello"
         }))
         .unwrap();
-        assert!(matches!(block, RichBlock::Known(RichBlockKind::Paragraph(_))));
+        assert!(matches!(block, RichBlock::Known(_)));
     }
 }

@@ -4175,6 +4175,7 @@ Schema(
         ),
         Method(
             names: ("answerInlineQuery", "AnswerInlineQuery", "answer_inline_query"),
+            validation: Some("crate::requests::validation::validate_answer_inline_query"),
             return_ty: True,
             doc: Doc(md: "Use this method to send answers to an inline query. On success, _True_ is returned. No more than **50** results per query are allowed."),
             tg_doc: "https://core.telegram.org/bots/api#answerinlinequery",
@@ -4215,6 +4216,7 @@ Schema(
         ),
         Method(
             names: ("answerWebAppQuery", "AnswerWebAppQuery", "answer_web_app_query"),
+            validation: Some("crate::requests::validation::validate_answer_web_app_query"),
             return_ty: RawTy("SentWebAppMessage"),
             doc: Doc(
                 md: "Use this method to set the result of an interaction with a [Web App] and send a corresponding message on behalf of the user to the chat from which the query originated.",
@@ -4238,6 +4240,7 @@ Schema(
         ),
         Method(
             names: ("savePreparedInlineMessage", "SavePreparedInlineMessage", "save_prepared_inline_message"),
+            validation: Some("crate::requests::validation::validate_save_prepared_inline_message"),
             return_ty: RawTy("PreparedInlineMessage"),
             doc: Doc(
                 md: "Stores a message that can be sent by a user of a Mini App. Returns a [PreparedInlineMessage] object.",
@@ -4281,6 +4284,7 @@ Schema(
         ),
         Method(
             names: ("editMessageText", "EditMessageText", "edit_message_text"),
+            validation: Some("crate::requests::validation::validate_edit_message_text"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to edit text and [games] messages. On success, the edited Message is returned. Note that business messages that were not sent by the bot and do not contain an inline keyboard can only be edited within **48 hours** from the time they were sent.",
@@ -4346,6 +4350,7 @@ Schema(
         ),
         Method(
             names: ("editMessageTextInline", "EditMessageTextInline", "edit_message_text_inline"),
+            validation: Some("crate::requests::validation::validate_edit_message_text_inline"),
             return_ty: True,
             doc: Doc(
                 md: "Use this method to edit text and [games] messages. On success, _True_ is returned. Note that business messages that were not sent by the bot and do not contain an inline keyboard can only be edited within **48 hours** from the time they were sent.",
@@ -6654,6 +6659,7 @@ Schema(
         ),
         Method(
             names: ("answerGuestQuery", "AnswerGuestQuery", "answer_guest_query"),
+            validation: Some("crate::requests::validation::validate_answer_guest_query"),
             return_ty: RawTy("SentGuestMessage"),
             doc: Doc(md: "Use this method to reply to a received guest message. On success, a [SentGuestMessage] object is returned.", md_links: {"SentGuestMessage": "https://core.telegram.org/bots/api#sentguestmessage"}),
             tg_doc: "https://core.telegram.org/bots/api#answerguestquery",
@@ -6923,6 +6929,7 @@ Schema(
         ),
         Method(
             names: ("sendRichMessage", "SendRichMessage", "send_rich_message"),
+            validation: Some("crate::requests::validation::validate_send_rich_message"),
             return_ty: RawTy("Message"),
             doc: Doc(md: "Use this method to send rich messages. On success, the sent [Message] is returned.", md_links: {"Message": "https://core.telegram.org/bots/api#message"}),
             tg_doc: "https://core.telegram.org/bots/api#sendrichmessage",
@@ -6945,6 +6952,7 @@ Schema(
         ),
         Method(
             names: ("sendRichMessageDraft", "SendRichMessageDraft", "send_rich_message_draft"),
+            validation: Some("crate::requests::validation::validate_send_rich_message_draft"),
             return_ty: True,
             doc: Doc(md: "Use this method to stream a partial rich message to a user while it is being generated. Returns _True_ on success."),
             tg_doc: "https://core.telegram.org/bots/api#sendrichmessagedraft",

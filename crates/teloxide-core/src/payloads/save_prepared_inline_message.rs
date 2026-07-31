@@ -5,10 +5,11 @@ use serde::Serialize;
 use crate::types::{InlineQueryResult, PreparedInlineMessage, UserId};
 
 impl_payload! {
+    @[multipart = result]
     /// Stores a message that can be sent by a user of a Mini App. Returns a [`PreparedInlineMessage`] object.
     ///
     /// [`PreparedInlineMessage`]: crate::types::PreparedInlineMessage
-    #[derive(Debug, PartialEq, Clone, Serialize)]
+    #[derive(Debug, Clone, Serialize)]
     pub SavePreparedInlineMessage (SavePreparedInlineMessageSetters) => PreparedInlineMessage {
         required {
             /// Unique identifier of the target user that can use the prepared message

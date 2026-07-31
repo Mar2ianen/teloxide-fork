@@ -56,6 +56,12 @@ fn codegen_payloads() {
             .map(|field| format!("    @[multipart = {}]\n", field.join(", ")))
             .unwrap_or_default();
 
+        let validation = method
+            .validation
+            .as_deref()
+            .map(|function| format!("    @[validate = {function}]\n"))
+            .unwrap_or_default();
+
         let derive = if !multipart.is_empty() || !partial_eq_suitable(&method) {
             "#[derive(Debug, Clone, Serialize)]".to_owned()
         } else {
@@ -72,7 +78,7 @@ fn codegen_payloads() {
 {uses}
 
 impl_payload! {{
-{multipart}{timeout_secs}{method_doc}
+{multipart}{validation}{timeout_secs}{method_doc}
     {derive}
     pub {Method} ({Method}Setters) => {return_ty} {{
 {required}{optional}

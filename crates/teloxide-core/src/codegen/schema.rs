@@ -43,6 +43,8 @@ pub struct Method {
     pub notes: Vec<Doc>,
     #[serde(default)]
     pub multipart: Vec<String>,
+    #[serde(default)]
+    pub validation: Option<String>,
     pub params: Vec<Param>,
     #[serde(default)]
     pub sibling: Option<String>,

@@ -10,7 +10,7 @@ use crate::types::{
     InlineQueryResultCachedVoice, InlineQueryResultContact, InlineQueryResultDocument,
     InlineQueryResultGame, InlineQueryResultGif, InlineQueryResultLocation,
     InlineQueryResultMpeg4Gif, InlineQueryResultPhoto, InlineQueryResultVenue,
-    InlineQueryResultVideo, InlineQueryResultVoice, InputFile, InputFileLike,
+    InlineQueryResultVideo, InlineQueryResultVoice, InputFile, InputFileLike, InputMessageContent,
 };
 
 /// This object represents one result of an inline query.
@@ -52,6 +52,33 @@ pub enum InlineQueryResult {
     Venue(InlineQueryResultVenue),
     Video(InlineQueryResultVideo),
     Voice(InlineQueryResultVoice),
+}
+
+impl InlineQueryResult {
+    pub(crate) fn input_message_content_ref(&self) -> Option<&InputMessageContent> {
+        match self {
+            Self::CachedAudio(value) => value.input_message_content.as_ref(),
+            Self::CachedDocument(value) => value.input_message_content.as_ref(),
+            Self::CachedGif(value) => value.input_message_content.as_ref(),
+            Self::CachedMpeg4Gif(value) => value.input_message_content.as_ref(),
+            Self::CachedPhoto(value) => value.input_message_content.as_ref(),
+            Self::CachedSticker(value) => value.input_message_content.as_ref(),
+            Self::CachedVideo(value) => value.input_message_content.as_ref(),
+            Self::CachedVoice(value) => value.input_message_content.as_ref(),
+            Self::Article(value) => Some(&value.input_message_content),
+            Self::Audio(value) => value.input_message_content.as_ref(),
+            Self::Contact(value) => value.input_message_content.as_ref(),
+            Self::Game(_) => None,
+            Self::Document(value) => value.input_message_content.as_ref(),
+            Self::Gif(value) => value.input_message_content.as_ref(),
+            Self::Location(value) => value.input_message_content.as_ref(),
+            Self::Mpeg4Gif(value) => value.input_message_content.as_ref(),
+            Self::Photo(value) => value.input_message_content.as_ref(),
+            Self::Venue(value) => value.input_message_content.as_ref(),
+            Self::Video(value) => value.input_message_content.as_ref(),
+            Self::Voice(value) => value.input_message_content.as_ref(),
+        }
+    }
 }
 
 impl InputFileLike for InlineQueryResult {

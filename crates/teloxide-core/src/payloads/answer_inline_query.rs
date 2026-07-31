@@ -6,6 +6,7 @@ use crate::types::{InlineQueryId, InlineQueryResult, InlineQueryResultsButton, T
 
 impl_payload! {
     @[multipart = results]
+    @[validate = crate::requests::validation::validate_answer_inline_query]
     /// Use this method to send answers to an inline query. On success, _True_ is returned. No more than **50** results per query are allowed.
     #[derive(Debug, Clone, Serialize)]
     pub AnswerInlineQuery (AnswerInlineQuerySetters) => True {

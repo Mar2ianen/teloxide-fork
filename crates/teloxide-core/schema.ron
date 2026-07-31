@@ -6603,6 +6603,7 @@ Schema(
         ),
         Method(
             names: ("sendMessageDraft", "SendMessageDraft", "send_message_draft"),
+            validation: Some("crate::requests::validation::validate_send_message_draft"),
             return_ty: True,
             doc: Doc(md: "Use this method to stream a partial message to a user while the message is being generated. Returns _True_ on success."),
             tg_doc: "https://core.telegram.org/bots/api#sendmessagedraft",

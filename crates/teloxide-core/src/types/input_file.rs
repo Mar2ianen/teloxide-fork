@@ -421,6 +421,23 @@ where
     }
 }
 
+impl<T> InputFileLike for Vec<T>
+where
+    T: InputFileLike,
+{
+    fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
+        for value in self {
+            value.copy_into(into);
+        }
+    }
+
+    fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
+        for value in self {
+            value.move_into(into);
+        }
+    }
+}
+
 impl InputFileLike for InputSticker {
     fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
         self.sticker.copy_into(into)

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// [The official docs](https://core.telegram.org/bots/api#botcommand).
 #[serde_with::skip_serializing_none]
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct BotCommand {
@@ -12,7 +13,7 @@ pub struct BotCommand {
     /// Can contain only lowercase English letters, digits and underscores.
     pub command: String,
 
-    /// Description of the command, 3-256 characters.
+    /// Description of the command, 1-256 characters.
     pub description: String,
 
     /// `true` if the command sends an ephemeral message visible only to its

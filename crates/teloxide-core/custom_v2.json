@@ -7837,7 +7837,7 @@
           }
         }
       ],
-      "maybe_multipart": true,
+      "maybe_multipart": false,
       "return_type": {
         "type": "bool",
         "default": true
@@ -7953,7 +7953,7 @@
           }
         }
       ],
-      "maybe_multipart": false,
+      "maybe_multipart": true,
       "return_type": {
         "type": "any_of",
         "any_of": [
@@ -9435,7 +9435,7 @@
           }
         }
       ],
-      "maybe_multipart": true,
+      "maybe_multipart": false,
       "return_type": {
         "type": "bool",
         "default": true
@@ -9596,7 +9596,7 @@
           }
         }
       ],
-      "maybe_multipart": false,
+      "maybe_multipart": true,
       "return_type": {
         "type": "reference",
         "reference": "PreparedInlineMessage"
@@ -11514,7 +11514,7 @@
       ],
       "description": "Use this method to get the last messages from the personal chat of a given user. On success, an array of [`Message`] objects is returned.",
       "documentation_link": "https://core.telegram.org/bots/api#getuserpersonalchatmessages",
-      "maybe_multipart": true,
+      "maybe_multipart": false,
       "name": "getUserPersonalChatMessages",
       "return_type": {
         "array": {
@@ -12477,7 +12477,7 @@
         "default": true
       },
       "documentation_link": "https://core.telegram.org/bots/api#deleteephemeralmessage",
-      "maybe_multipart": true
+      "maybe_multipart": false
     },
     {
       "name": "sendRichMessage",

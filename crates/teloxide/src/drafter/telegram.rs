@@ -47,7 +47,12 @@ fn is_message_not_modified(error: &RequestError) -> bool {
     matches!(error, RequestError::Api(ApiError::MessageNotModified))
 }
 
-/// Options shared by permanent text and rich-message requests.
+/// Options for permanent text and rich-message requests.
+///
+/// Status backends copy only the preview-safe subset into their temporary
+/// status message. Final-only fields such as buttons, message effects, paid
+/// broadcasts and suggested-post parameters are never applied to that
+/// temporary request.
 #[derive(Clone, Debug, Default)]
 pub struct TelegramSendOptions {
     pub business_connection_id: Option<BusinessConnectionId>,
@@ -68,6 +73,15 @@ pub struct TelegramSendOptions {
 }
 
 impl TelegramSendOptions {
+    fn preview_safe(&self) -> Self {
+        let mut options = self.clone();
+        options.allow_paid_broadcast = None;
+        options.message_effect_id = None;
+        options.suggested_post_parameters = None;
+        options.reply_markup = None;
+        options
+    }
+
     #[must_use]
     pub fn message_thread_id(mut self, value: ThreadId) -> Self {
         self.message_thread_id = Some(value);
@@ -625,7 +639,8 @@ pub struct StatusThenRichBackend<R> {
     bot: R,
     chat_id: ChatId,
     preview_message_id: Option<MessageId>,
-    send_options: TelegramSendOptions,
+    preview_send_options: TelegramSendOptions,
+    final_send_options: TelegramSendOptions,
     edit_options: TelegramEditOptions,
     cleanup: StatusCleanup,
     cleanup_error: Option<RequestError>,
@@ -645,7 +660,8 @@ impl<R> StatusThenRichBackend<R> {
             bot,
             chat_id,
             preview_message_id: None,
-            send_options: TelegramSendOptions::default(),
+            preview_send_options: TelegramSendOptions::default(),
+            final_send_options: TelegramSendOptions::default(),
             edit_options: TelegramEditOptions::default(),
             cleanup: StatusCleanup::DeleteAfterFinalSuccess,
             cleanup_error: None,
@@ -654,19 +670,36 @@ impl<R> StatusThenRichBackend<R> {
 
     #[must_use]
     pub fn reply_parameters(mut self, reply_parameters: ReplyParameters) -> Self {
-        self.send_options.reply_parameters = Some(reply_parameters);
+        self.final_send_options.reply_parameters = Some(reply_parameters);
         self
     }
 
     #[must_use]
     pub fn message_thread_id(mut self, thread_id: ThreadId) -> Self {
-        self.send_options.message_thread_id = Some(thread_id);
+        self.preview_send_options.message_thread_id = Some(thread_id);
+        self.final_send_options.message_thread_id = Some(thread_id);
         self
     }
 
+    /// Sets options for the permanent rich message.
     #[must_use]
     pub fn send_options(mut self, options: TelegramSendOptions) -> Self {
-        self.send_options = options;
+        self.preview_send_options = options.preview_safe();
+        self.final_send_options = options;
+        self
+    }
+
+    /// Sets options for the temporary status message only.
+    #[must_use]
+    pub fn preview_send_options(mut self, options: TelegramSendOptions) -> Self {
+        self.preview_send_options = options.preview_safe();
+        self
+    }
+
+    /// Sets options for the permanent rich message only.
+    #[must_use]
+    pub fn final_send_options(mut self, options: TelegramSendOptions) -> Self {
+        self.final_send_options = options;
         self
     }
 
@@ -722,7 +755,8 @@ where
             )
             .await
         } else {
-            let message = send_text(&self.bot, self.chat_id, preview, &self.send_options).await?;
+            let message =
+                send_text(&self.bot, self.chat_id, preview, &self.preview_send_options).await?;
             self.preview_message_id = Some(message.id);
             Ok(message)
         };
@@ -738,7 +772,8 @@ where
         final_payload: &InputRichMessage,
     ) -> Result<Message, RequestError> {
         let result =
-            send_rich(&self.bot, self.chat_id, final_payload.clone(), &self.send_options).await;
+            send_rich(&self.bot, self.chat_id, final_payload.clone(), &self.final_send_options)
+                .await;
         if result.is_ok() {
             self.cleanup_preview().await;
         }
@@ -747,7 +782,8 @@ where
 
     async fn finish(&mut self, final_payload: &InputRichMessage) -> Result<Message, RequestError> {
         let result =
-            send_rich(&self.bot, self.chat_id, final_payload.clone(), &self.send_options).await;
+            send_rich(&self.bot, self.chat_id, final_payload.clone(), &self.final_send_options)
+                .await;
         if result.is_ok() && self.cleanup == StatusCleanup::DeleteAfterFinalSuccess {
             if let Some(message_id) = self.preview_message_id.take() {
                 if let Err(error) = self.bot.delete_message(self.chat_id, message_id).await {
@@ -763,7 +799,7 @@ where
             return Ok(());
         }
         if let Some(message_id) = self.preview_message_id {
-            let _ = self.bot.delete_message(self.chat_id, message_id).await;
+            self.bot.delete_message(self.chat_id, message_id).await?;
         }
         Ok(())
     }
@@ -812,7 +848,8 @@ pub struct StatusThenTextBackend<R> {
     bot: R,
     chat_id: ChatId,
     preview_message_id: Option<MessageId>,
-    send_options: TelegramSendOptions,
+    preview_send_options: TelegramSendOptions,
+    final_send_options: TelegramSendOptions,
     edit_options: TelegramEditOptions,
     cleanup: StatusCleanup,
     cleanup_error: Option<RequestError>,
@@ -825,7 +862,8 @@ impl<R> StatusThenTextBackend<R> {
             bot,
             chat_id,
             preview_message_id: None,
-            send_options: TelegramSendOptions::default(),
+            preview_send_options: TelegramSendOptions::default(),
+            final_send_options: TelegramSendOptions::default(),
             edit_options: TelegramEditOptions::default(),
             cleanup: StatusCleanup::DeleteAfterFinalSuccess,
             cleanup_error: None,
@@ -834,19 +872,36 @@ impl<R> StatusThenTextBackend<R> {
 
     #[must_use]
     pub fn reply_parameters(mut self, reply_parameters: ReplyParameters) -> Self {
-        self.send_options.reply_parameters = Some(reply_parameters);
+        self.final_send_options.reply_parameters = Some(reply_parameters);
         self
     }
 
     #[must_use]
     pub fn message_thread_id(mut self, thread_id: ThreadId) -> Self {
-        self.send_options.message_thread_id = Some(thread_id);
+        self.preview_send_options.message_thread_id = Some(thread_id);
+        self.final_send_options.message_thread_id = Some(thread_id);
         self
     }
 
+    /// Sets options for the permanent text message.
     #[must_use]
     pub fn send_options(mut self, options: TelegramSendOptions) -> Self {
-        self.send_options = options;
+        self.preview_send_options = options.preview_safe();
+        self.final_send_options = options;
+        self
+    }
+
+    /// Sets options for the temporary status message only.
+    #[must_use]
+    pub fn preview_send_options(mut self, options: TelegramSendOptions) -> Self {
+        self.preview_send_options = options.preview_safe();
+        self
+    }
+
+    /// Sets options for the permanent text message only.
+    #[must_use]
+    pub fn final_send_options(mut self, options: TelegramSendOptions) -> Self {
+        self.final_send_options = options;
         self
     }
 
@@ -909,7 +964,8 @@ where
                 }
             })
         } else {
-            let message = send_text(&self.bot, self.chat_id, preview, &self.send_options).await?;
+            let message =
+                send_text(&self.bot, self.chat_id, preview, &self.preview_send_options).await?;
             self.preview_message_id = Some(message.id);
             Ok(PreviewAck)
         }
@@ -917,7 +973,8 @@ where
 
     async fn commit_segment(&mut self, final_payload: &String) -> Result<Message, RequestError> {
         let result =
-            send_text(&self.bot, self.chat_id, final_payload.clone(), &self.send_options).await;
+            send_text(&self.bot, self.chat_id, final_payload.clone(), &self.final_send_options)
+                .await;
         if result.is_ok() {
             self.cleanup_preview().await;
         }
@@ -926,7 +983,8 @@ where
 
     async fn finish(&mut self, final_payload: &String) -> Result<Message, RequestError> {
         let result =
-            send_text(&self.bot, self.chat_id, final_payload.clone(), &self.send_options).await;
+            send_text(&self.bot, self.chat_id, final_payload.clone(), &self.final_send_options)
+                .await;
         if result.is_ok() && self.cleanup == StatusCleanup::DeleteAfterFinalSuccess {
             if let Some(message_id) = self.preview_message_id.take() {
                 if let Err(error) = self.bot.delete_message(self.chat_id, message_id).await {
@@ -940,7 +998,7 @@ where
     async fn abort(self) -> Result<(), RequestError> {
         if self.cleanup == StatusCleanup::DeleteAfterFinalSuccess {
             if let Some(message_id) = self.preview_message_id {
-                let _ = self.bot.delete_message(self.chat_id, message_id).await;
+                self.bot.delete_message(self.chat_id, message_id).await?;
             }
         }
         Ok(())
@@ -1520,7 +1578,7 @@ impl TelegramDrafter {
 mod tests {
     use teloxide_core::{
         requests::Requester,
-        types::{MessageId, ThreadId},
+        types::{InlineKeyboardButton, MessageId, ThreadId},
     };
 
     use super::*;
@@ -1541,6 +1599,21 @@ mod tests {
         assert_eq!(request.protect_content, Some(true));
         assert_eq!(request.parse_mode, Some(ParseMode::Html));
         assert_eq!(request.reply_parameters, Some(ReplyParameters::new(MessageId(4))));
+    }
+
+    #[test]
+    fn status_preview_options_drop_final_only_fields() {
+        let options = TelegramSendOptions::default()
+            .allow_paid_broadcast(true)
+            .message_effect_id(EffectId("effect".to_owned()))
+            .suggested_post_parameters(SuggestedPostParameters { price: None, send_date: None })
+            .reply_markup(ReplyMarkup::inline_kb(std::iter::empty::<Vec<InlineKeyboardButton>>()));
+        let preview_options = options.preview_safe();
+
+        assert_eq!(preview_options.allow_paid_broadcast, None);
+        assert_eq!(preview_options.message_effect_id, None);
+        assert_eq!(preview_options.suggested_post_parameters, None);
+        assert_eq!(preview_options.reply_markup, None);
     }
 
     #[test]

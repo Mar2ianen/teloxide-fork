@@ -3,19 +3,24 @@ use std::sync::{
     Arc,
 };
 
-use teloxide_core::types::ChatId;
+use teloxide_core::types::{ChatId, MessageId};
 
-use super::{DraftRevision, DrafterMode, DrafterOperation};
+use super::{DraftId, DraftRevision, DrafterMode, DrafterOperation};
 
 /// Lifecycle event emitted by a drafter without payload or user text.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DrafterEvent {
+    pub instance_id: u64,
     pub kind: DrafterEventKind,
     pub mode: DrafterMode,
     pub chat_id: ChatId,
     pub segment: u64,
     pub revision: Option<DraftRevision>,
+    pub from_revision: Option<DraftRevision>,
+    pub to_revision: Option<DraftRevision>,
     pub operation: Option<DrafterOperation>,
+    pub draft_id: Option<DraftId>,
+    pub preview_message_id: Option<MessageId>,
 }
 
 /// Events exposed by the scheduler for tracing, metrics and tests.
@@ -29,6 +34,7 @@ pub enum DrafterEventKind {
     PreviewError,
     PreviewTimeout,
     RetryAfter,
+    TransientRetry,
     Refresh,
     FlushStart,
     FlushComplete,
@@ -67,12 +73,17 @@ impl DrafterObserver for TracingDrafterObserver {
     fn record(&self, event: DrafterEvent) {
         tracing::debug!(
             target: "teloxide::drafter",
+            instance_id = event.instance_id,
             event = ?event.kind,
             mode = ?event.mode,
             chat_id = event.chat_id.0,
             segment = event.segment,
             revision = event.revision.map(DraftRevision::get),
+            from_revision = event.from_revision.map(DraftRevision::get),
+            to_revision = event.to_revision.map(DraftRevision::get),
             operation = ?event.operation,
+            draft_id = event.draft_id.map(DraftId::get),
+            preview_message_id = event.preview_message_id.map(|id| id.0),
             "drafter lifecycle"
         );
     }
@@ -86,6 +97,11 @@ pub(crate) fn default_observer() -> Arc<dyn DrafterObserver> {
 
     #[cfg(not(feature = "tracing"))]
     Arc::new(NoopDrafterObserver)
+}
+
+pub(crate) fn next_instance_id() -> u64 {
+    static NEXT_INSTANCE_ID: AtomicU64 = AtomicU64::new(1);
+    NEXT_INSTANCE_ID.fetch_add(1, Ordering::Relaxed)
 }
 
 /// Thread-safe event counters suitable for a bot-local metrics registry.
@@ -102,6 +118,7 @@ struct MetricsCounters {
     refresh_requests: AtomicU64,
     retry_count: AtomicU64,
     rate_limit_count: AtomicU64,
+    transient_retry_count: AtomicU64,
     segment_count: AtomicU64,
     preview_failures: AtomicU64,
     final_failures: AtomicU64,
@@ -117,6 +134,7 @@ pub struct DrafterMetricsSnapshot {
     pub refresh_requests: u64,
     pub retry_count: u64,
     pub rate_limit_count: u64,
+    pub transient_retry_count: u64,
     pub segment_count: u64,
     pub preview_failures: u64,
     pub final_failures: u64,
@@ -134,6 +152,7 @@ impl DrafterMetricsCollector {
             refresh_requests: load(&self.counters.refresh_requests),
             retry_count: load(&self.counters.retry_count),
             rate_limit_count: load(&self.counters.rate_limit_count),
+            transient_retry_count: load(&self.counters.transient_retry_count),
             segment_count: load(&self.counters.segment_count),
             preview_failures: load(&self.counters.preview_failures),
             final_failures: load(&self.counters.final_failures),
@@ -145,11 +164,13 @@ impl DrafterMetricsCollector {
 impl DrafterObserver for DrafterMetricsCollector {
     fn record(&self, event: DrafterEvent) {
         let counter = match event.kind {
-            DrafterEventKind::Update => Some(&self.counters.received_updates),
+            DrafterEventKind::Update => None,
             DrafterEventKind::PreviewSuccess => Some(&self.counters.sent_previews),
-            DrafterEventKind::Coalesced => Some(&self.counters.coalesced_updates),
+            DrafterEventKind::Coalesced => None,
             DrafterEventKind::Refresh => Some(&self.counters.refresh_requests),
-            DrafterEventKind::RetryAfter => Some(&self.counters.retry_count),
+            DrafterEventKind::RetryAfter | DrafterEventKind::TransientRetry => {
+                Some(&self.counters.retry_count)
+            }
             DrafterEventKind::SegmentCommit => Some(&self.counters.segment_count),
             DrafterEventKind::PreviewError | DrafterEventKind::PreviewTimeout => {
                 Some(&self.counters.preview_failures)
@@ -172,8 +193,24 @@ impl DrafterObserver for DrafterMetricsCollector {
             counter.fetch_add(1, Ordering::Relaxed);
         }
 
+        if matches!(event.kind, DrafterEventKind::Update) {
+            self.counters.received_updates.fetch_add(1, Ordering::Relaxed);
+        }
+
+        if matches!(event.kind, DrafterEventKind::Coalesced) {
+            if let (Some(from), Some(to)) = (event.from_revision, event.to_revision) {
+                self.counters.coalesced_updates.fetch_add(
+                    to.get().saturating_sub(from.get()).saturating_add(1),
+                    Ordering::Relaxed,
+                );
+            }
+        }
+
         if matches!(event.kind, DrafterEventKind::RetryAfter) {
             self.counters.rate_limit_count.fetch_add(1, Ordering::Relaxed);
+        }
+        if matches!(event.kind, DrafterEventKind::TransientRetry) {
+            self.counters.transient_retry_count.fetch_add(1, Ordering::Relaxed);
         }
     }
 }

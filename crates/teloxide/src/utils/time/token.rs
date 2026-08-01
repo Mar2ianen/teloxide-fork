@@ -1,4 +1,4 @@
-use jiff::{civil, Timestamp};
+use jiff::{Timestamp, civil};
 use teloxide_core::types::{RichText, RichTextDateTime, RichTextObject};
 
 use super::{
@@ -34,6 +34,15 @@ impl DateTimeToken {
                 )
                 .expect("an Instant cannot fail normalization"),
         }
+    }
+
+    pub fn instant_in_unix(
+        context: &TimeContext,
+        unix_time: i64,
+        format: DateTimeFormat,
+    ) -> Result<Self, TimeError> {
+        let value = Timestamp::from_second(unix_time).map_err(TimeError::InvalidCivil)?;
+        Ok(Self::instant_in(context, value, format))
     }
 
     pub fn civil_date(

@@ -1,4 +1,4 @@
-use jiff::{Timestamp, civil};
+use jiff::{civil, Timestamp};
 use teloxide_core::types::{RichText, RichTextDateTime, RichTextObject};
 
 use super::{
@@ -11,7 +11,8 @@ pub struct DateTimeToken {
 }
 
 impl DateTimeToken {
-    pub fn instant(value: Timestamp, format: DateTimeFormat) -> Self {
+    /// Creates a token for an absolute instant with an explicitly UTC fallback.
+    pub fn instant_utc(value: Timestamp, format: DateTimeFormat) -> Self {
         let fallback_text = fallback_in_utc(value, format);
         Self {
             normalized: NormalizedDateTime {
@@ -21,6 +22,14 @@ impl DateTimeToken {
                 fallback_text,
             },
         }
+    }
+
+    /// Creates a token for an absolute instant using UTC fallback text.
+    ///
+    /// Prefer [`Self::instant_in`] when the fallback should use a configured
+    /// timezone. This alias remains for source compatibility.
+    pub fn instant(value: Timestamp, format: DateTimeFormat) -> Self {
+        Self::instant_utc(value, format)
     }
 
     pub fn instant_in(context: &TimeContext, value: Timestamp, format: DateTimeFormat) -> Self {

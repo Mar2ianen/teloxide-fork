@@ -1,16 +1,17 @@
-use jiff::{SignedDuration, Timestamp, civil, tz::TimeZone};
+use jiff::{civil, tz::TimeZone, SignedDuration, Timestamp};
 
 use super::{
-    DateTimeFormat, TimeBindings, TimeError, TimeExpression, TimeValue, model::SignedTimeSpan,
+    model::SignedTimeSpan, DateTimeFormat, TimeBindings, TimeError, TimeExpression, TimeValue,
 };
 
 /// Immutable base timezone used by all explicit time renders.
 ///
-/// Civil dates and clock values are converted through this zone. Around DST
-/// transitions a local value can be missing or ambiguous; Jiff's compatible
-/// disambiguation is intentional best-effort behavior. Automated messages
-/// that require an exact instant should use [`crate::utils::time::DateTimeToken::instant`]
-/// or a complete civil date-time instead.
+/// `Instant` is an exact absolute moment. `CivilDateTime` is local civil time
+/// and is resolved in this zone with a deterministic compatible DST policy; it
+/// is not itself an exact instant. A bare clock is additionally anchored to
+/// the local date derived from the one captured `now` passed to a render call.
+/// If choosing one of two DST fold instants would be invalid for the event,
+/// callers must provide an `Instant`.
 #[derive(Clone, Debug)]
 pub struct TimeContext {
     zone: TimeZone,

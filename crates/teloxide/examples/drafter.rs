@@ -1,7 +1,7 @@
 //! Minimal native-draft lifecycle.
 //!
 //! Run with `TELOXIDE_TOKEN=... TELOXIDE_USER_ID=... \
-//! cargo run --example drafter -p teloxide`.
+//! cargo run -p teloxide --features drafter --example drafter`.
 
 use teloxide::{
     drafter::{DraftConfig, InProcessRateLimiter, TelegramDrafter},

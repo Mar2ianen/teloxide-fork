@@ -6,7 +6,7 @@ use std::{
 
 use teloxide_core::types::{ChatId, MessageId};
 
-use super::{DrafterErrorClass, DrafterOperation, DrafterRateLimitKey};
+use super::{DrafterErrorDisposition, DrafterOperation, DrafterRateLimitKey};
 
 /// Successful acknowledgement of a preview request.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -82,11 +82,9 @@ pub trait DrafterBackend: Send + 'static {
 
     fn classify_error(
         &self,
-        _operation: DrafterOperation,
-        _error: &Self::Error,
-    ) -> DrafterErrorClass {
-        DrafterErrorClass::Transient { retry_safe: true }
-    }
+        operation: DrafterOperation,
+        error: &Self::Error,
+    ) -> DrafterErrorDisposition;
 
     /// Takes a best-effort cleanup failure observed after a successful delivery.
     ///

@@ -18,28 +18,40 @@ use teloxide_core::{
 };
 
 use super::{
-    CleanupFailure, DraftConfig, DraftId, DraftSink, DraftStartError, Drafter, DrafterBackend,
-    DrafterCapabilities, DrafterErrorClass, DrafterMode, DrafterOperation, DrafterRateLimitKey,
-    InProcessRateLimiter, PreviewAck, ReplacePreview,
+    CleanupFailure, DeliveryCertainty, DraftConfig, DraftId, DraftSink, DraftStartError, Drafter,
+    DrafterBackend, DrafterCapabilities, DrafterErrorClass, DrafterErrorDisposition, DrafterMode,
+    DrafterOperation, DrafterRateLimitKey, InProcessRateLimiter, PreviewAck, ReplacePreview,
 };
 
-fn classify_request_error(operation: DrafterOperation, error: &RequestError) -> DrafterErrorClass {
-    match error {
-        RequestError::RetryAfter(seconds) => DrafterErrorClass::RetryAfter {
-            delay: Duration::from_secs(seconds.seconds() as u64),
-            scope: super::DrafterRateLimitScope::Global,
-        },
-        RequestError::Network(_) | RequestError::Io(_) | RequestError::InvalidJson { .. } => {
+fn classify_request_error(
+    operation: DrafterOperation,
+    error: &RequestError,
+) -> DrafterErrorDisposition {
+    let (class, delivery) = match error {
+        RequestError::RetryAfter(seconds) => (
+            DrafterErrorClass::RetryAfter {
+                delay: Duration::from_secs(seconds.seconds() as u64),
+                scope: super::DrafterRateLimitScope::Global,
+            },
+            DeliveryCertainty::Rejected,
+        ),
+        RequestError::Network(_) | RequestError::Io(_) | RequestError::InvalidJson { .. } => (
             DrafterErrorClass::Transient {
                 retry_safe: !matches!(
                     operation,
                     DrafterOperation::PreviewFirstSend | DrafterOperation::Final
                 ),
-            }
+            },
+            DeliveryCertainty::Unknown,
+        ),
+        RequestError::Validation(_) => {
+            (DrafterErrorClass::InvalidPayload, DeliveryCertainty::NotAttempted)
         }
-        RequestError::Validation(_) => DrafterErrorClass::InvalidPayload,
-        RequestError::Api(_) | RequestError::MigrateToChatId(_) => DrafterErrorClass::Permanent,
-    }
+        RequestError::Api(_) | RequestError::MigrateToChatId(_) => {
+            (DrafterErrorClass::Permanent, DeliveryCertainty::Rejected)
+        }
+    };
+    DrafterErrorDisposition { class, delivery }
 }
 
 fn is_message_not_modified(error: &RequestError) -> bool {
@@ -507,7 +519,7 @@ where
         &self,
         operation: DrafterOperation,
         error: &RequestError,
-    ) -> DrafterErrorClass {
+    ) -> DrafterErrorDisposition {
         classify_request_error(operation, error)
     }
 }
@@ -628,7 +640,7 @@ where
         &self,
         operation: DrafterOperation,
         error: &RequestError,
-    ) -> DrafterErrorClass {
+    ) -> DrafterErrorDisposition {
         classify_request_error(operation, error)
     }
 }
@@ -811,7 +823,7 @@ where
         &self,
         operation: DrafterOperation,
         error: &RequestError,
-    ) -> DrafterErrorClass {
+    ) -> DrafterErrorDisposition {
         let operation = if self.preview_message_id.is_none()
             && matches!(operation, DrafterOperation::Preview)
         {
@@ -1018,7 +1030,7 @@ where
         &self,
         operation: DrafterOperation,
         error: &RequestError,
-    ) -> DrafterErrorClass {
+    ) -> DrafterErrorDisposition {
         let operation = if self.preview_message_id.is_none()
             && matches!(operation, DrafterOperation::Preview)
         {
@@ -1248,7 +1260,7 @@ where
         &self,
         operation: DrafterOperation,
         error: &RequestError,
-    ) -> DrafterErrorClass {
+    ) -> DrafterErrorDisposition {
         let operation =
             if self.message_id.is_none() && matches!(operation, DrafterOperation::Preview) {
                 DrafterOperation::PreviewFirstSend
@@ -1433,7 +1445,7 @@ impl DrafterBackend for RichEditInPlaceBackend {
         &self,
         operation: DrafterOperation,
         error: &RequestError,
-    ) -> DrafterErrorClass {
+    ) -> DrafterErrorDisposition {
         let operation =
             if self.message_id.is_none() && matches!(operation, DrafterOperation::Preview) {
                 DrafterOperation::PreviewFirstSend

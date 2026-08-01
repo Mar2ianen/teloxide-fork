@@ -57,7 +57,8 @@ struct SnapshotState<P> {
     dirty_since: Option<Instant>,
 }
 
-/// Replace-the-latest source used by [`DraftSink::update`](super::DraftSink::update).
+/// Replace-the-latest source used by
+/// [`DraftSink::update`](super::DraftSink::update).
 pub struct ReplacePreview<P> {
     state: Mutex<SnapshotState<P>>,
 }

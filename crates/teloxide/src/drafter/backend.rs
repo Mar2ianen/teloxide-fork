@@ -86,7 +86,8 @@ pub trait DrafterBackend: Send + 'static {
         error: &Self::Error,
     ) -> DrafterErrorDisposition;
 
-    /// Takes a best-effort cleanup failure observed after a successful delivery.
+    /// Takes a best-effort cleanup failure observed after a successful
+    /// delivery.
     ///
     /// Cleanup must not turn an already confirmed final delivery into a retry,
     /// but schedulers can still expose the failure through observability.

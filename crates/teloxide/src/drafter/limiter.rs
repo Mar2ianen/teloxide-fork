@@ -74,6 +74,7 @@ struct LimiterState {
     chat_next: HashMap<ChatId, Instant>,
     chat_penalty_until: HashMap<ChatId, Instant>,
     next_waiter_id: u64,
+    operation_count: u64,
     waiters: Vec<LimiterWaiter>,
 }
 
@@ -149,6 +150,7 @@ impl DrafterRateLimiter for InProcessRateLimiter {
     async fn acquire(&self, key: DrafterRateLimitKey, priority: DrafterPriority) -> DrafterPermit {
         let (id, mut waiter) = {
             let mut state = self.state.lock().expect("drafter limiter mutex poisoned");
+            state.record_operation(Instant::now());
             let id = state.next_waiter_id;
             state.next_waiter_id = state.next_waiter_id.wrapping_add(1);
             state.waiters.push(LimiterWaiter { id, key, priority });
@@ -210,6 +212,7 @@ impl DrafterRateLimiter for InProcessRateLimiter {
     fn penalize(&self, scope: DrafterRateLimitScope, retry_after: Duration) {
         let deadline = Instant::now() + retry_after;
         let mut state = self.state.lock().expect("drafter limiter mutex poisoned");
+        state.record_operation(deadline - retry_after);
         match scope {
             DrafterRateLimitScope::Global => {
                 state.global_penalty_until =
@@ -225,6 +228,17 @@ impl DrafterRateLimiter for InProcessRateLimiter {
 }
 
 impl LimiterState {
+    fn record_operation(&mut self, now: Instant) {
+        self.operation_count = self.operation_count.wrapping_add(1);
+        if self.operation_count % 512 == 0
+            || self.chat_next.len() > 4096
+            || self.chat_penalty_until.len() > 4096
+        {
+            self.chat_next.retain(|_, deadline| *deadline > now);
+            self.chat_penalty_until.retain(|_, deadline| *deadline > now);
+        }
+    }
+
     fn availability_deadline(&self, key: DrafterRateLimitKey, now: Instant) -> Instant {
         let chat_deadline = self
             .chat_next
@@ -364,5 +378,36 @@ mod tests {
         };
         low_waiter.await.unwrap();
         release_high.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn expired_chat_deadlines_are_pruned_opportunistically() {
+        let limiter = InProcessRateLimiter::new(Duration::from_secs(1), Duration::ZERO);
+        let active = ChatId(10_000);
+        limiter.penalize(DrafterRateLimitScope::Chat(active), Duration::from_secs(60));
+        for index in 0..600 {
+            let key = DrafterRateLimitKey { chat_id: ChatId(index) };
+            limiter.acquire(key, DrafterPriority::ChangedPreview).await;
+            limiter.penalize(DrafterRateLimitScope::Chat(key.chat_id), Duration::from_secs(1));
+        }
+        {
+            let state = limiter.state.lock().unwrap();
+            assert!(state.chat_next.len() >= 600);
+            assert!(state.chat_penalty_until.len() >= 601);
+        }
+
+        tokio::time::advance(Duration::from_secs(2)).await;
+        for index in 600..1_024 {
+            limiter
+                .acquire(
+                    DrafterRateLimitKey { chat_id: ChatId(index) },
+                    DrafterPriority::ChangedPreview,
+                )
+                .await;
+        }
+        let state = limiter.state.lock().unwrap();
+        assert!(state.chat_next.values().all(|deadline| *deadline > Instant::now()));
+        assert!(state.chat_penalty_until.contains_key(&active));
+        assert!(state.chat_penalty_until.len() < 10);
     }
 }

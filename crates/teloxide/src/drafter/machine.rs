@@ -8,19 +8,21 @@ use std::{
     time::Duration,
 };
 
-use tokio::sync::{mpsc, oneshot, Notify};
-use tokio::time::Instant;
+use tokio::{
+    sync::{mpsc, oneshot, Notify},
+    time::Instant,
+};
 
 #[cfg(feature = "tracing")]
 use tracing::Instrument;
 
-use super::observer::next_instance_id;
 use super::{
-    AccumulatorSource, CleanupFailure, DeliveryCertainty, DraftAbortError, DraftCommitError,
-    DraftConfig, DraftFinishError, DraftFlushError, DraftPushError, DraftRevision, DraftStartError,
-    DrafterBackend, DrafterCapabilities, DrafterErrorClass, DrafterErrorDisposition, DrafterEvent,
-    DrafterEventKind, DrafterObserver, DrafterOperation, DrafterPermit, DrafterPriority,
-    DrafterRateLimiter, PreviewAck, PreviewSource, ReplacePreview,
+    observer::next_instance_id, AccumulatorSource, CleanupFailure, DeliveryCertainty,
+    DraftAbortError, DraftCommitError, DraftConfig, DraftFinishError, DraftFlushError,
+    DraftPushError, DraftRevision, DraftStartError, DrafterBackend, DrafterCapabilities,
+    DrafterErrorClass, DrafterErrorDisposition, DrafterEvent, DrafterEventKind, DrafterObserver,
+    DrafterOperation, DrafterPermit, DrafterPriority, DrafterRateLimiter, PreviewAck,
+    PreviewSource, ReplacePreview,
 };
 
 /// A cloneable synchronous producer handle.

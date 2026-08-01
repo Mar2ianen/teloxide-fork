@@ -1,9 +1,16 @@
-use jiff::{civil, tz::TimeZone, SignedDuration, Timestamp};
+use jiff::{SignedDuration, Timestamp, civil, tz::TimeZone};
 
 use super::{
-    model::SignedTimeSpan, DateTimeFormat, TimeBindings, TimeError, TimeExpression, TimeValue,
+    DateTimeFormat, TimeBindings, TimeError, TimeExpression, TimeValue, model::SignedTimeSpan,
 };
 
+/// Immutable base timezone used by all explicit time renders.
+///
+/// Civil dates and clock values are converted through this zone. Around DST
+/// transitions a local value can be missing or ambiguous; Jiff's compatible
+/// disambiguation is intentional best-effort behavior. Automated messages
+/// that require an exact instant should use [`crate::utils::time::DateTimeToken::instant`]
+/// or a complete civil date-time instead.
 #[derive(Clone, Debug)]
 pub struct TimeContext {
     zone: TimeZone,
@@ -77,10 +84,14 @@ impl TimeContext {
         captured_now: Timestamp,
     ) -> Result<Timestamp, TimeError> {
         // Telegram requires an absolute timestamp even when the source only
-        // contains a clock time. Bare clocks use the captured date in the
-        // configured zone; exact scheduled moments should use an Instant or a
-        // complete CivilDateTime. Jiff's compatible resolution intentionally
-        // handles DST gaps and folds deterministically.
+        // contains a clock time. Bare clock values are therefore anchored to
+        // the date captured once for this render call in the configured base
+        // time zone.
+        //
+        // Around DST transitions, a local civil time may be missing or
+        // ambiguous. Compatible disambiguation is intentional best-effort
+        // rendering. Scheduled events that require an exact instant must use
+        // an Instant or a complete civil date-time value instead.
         let anchor = captured_now.to_zoned(self.zone.clone()).date();
         self.zone
             .to_zoned(anchor.to_datetime(time))

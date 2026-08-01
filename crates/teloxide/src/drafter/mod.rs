@@ -4,6 +4,16 @@
 //! A [`DraftSink`] is intentionally synchronous: it only updates local state
 //! and wakes a Tokio worker. Network requests, throttling and lifecycle
 //! transitions belong to the owning [`Drafter`].
+//!
+//! Standard Telegram backends are available through [`TelegramDrafter`]. Pass
+//! one [`InProcessRateLimiter`] instance to all drafters that share a bot
+//! token. The `*_with_observer` constructors expose lifecycle events without
+//! recording preview payloads or user text; enabling the `tracing` feature
+//! installs the payload-free tracing observer by default.
+//!
+//! Distributed rate limiting, persistence/recovery, automatic native-to-edit
+//! fallback, rich pagination and automatic semantic segment splitting are
+//! intentionally outside this local runtime's MVP boundary.
 
 mod backend;
 mod config;

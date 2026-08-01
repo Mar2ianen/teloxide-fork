@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Optional `drafter` feature for asynchronous preview/final delivery, shared rate limiting, segment lifecycle and delivery certainty
+- Optional `time-rendering` feature for explicit Markdown/typed time rendering, timezone normalization and deterministic DST handling
 - `ParticipantIdInvalid` and `ChatAdminRequired` variants to `ApiError` ([#1349](https://github.com/teloxide/teloxide/issues/1349))
 - Support for TBA 10.0
   - Add request methods introduced in TBA 9.3 through 10.0, including live photos, message drafts, guest queries, managed bots, prepared keyboard buttons, chat gifts, profile photos, story reposting and reaction deletion
@@ -20,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Bound LLM time-marker scanning to local syntax and skip URI/code/link destinations without treating ordinary ISO dates as malformed markers
+- Keep final delivery classification conservative for segment commits and clean temporary previews after confirmed final rejection
 - Make sure `postgres-storage-rustls` feature actually enables rustls-based postgres storage ([#1400](https://github.com/teloxide/teloxide/pull/1400))
 - Escape `@` mentions in `markdown::user_mention_or_link` ([#1411](https://github.com/teloxide/teloxide/pull/1411))
 - Add local TBA file downloading support in `crate::net::download` ([#1173](https://github.com/teloxide/teloxide/pull/1173))

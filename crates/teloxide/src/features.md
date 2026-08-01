@@ -19,6 +19,8 @@
 | `sqlite-storage-rustls`     | Enables the [Sqlite] storage support for dialogues (depends on `rustls`, conflicts with `sqlite-storage-nativetls`). |
 | `cbor-serializer`    | Enables the [CBOR] serializer for dialogues. |
 | `bincode-serializer` | Enables the [Bincode] serializer for dialogues. |
+| `drafter`            | Enables asynchronous latest-wins preview/final delivery with Telegram Drafter backends. |
+| `time-rendering`     | Enables explicit Markdown and typed time rendering with timezone and DST normalization. |
 
 [Redis]: https://redis.io/
 [Sqlite]: https://www.sqlite.org/

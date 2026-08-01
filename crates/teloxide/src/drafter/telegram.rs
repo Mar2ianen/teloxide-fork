@@ -149,18 +149,19 @@ where
     }
 
     async fn update(&mut self, preview: String) -> Result<PreviewAck, RequestError> {
-        self.bot
-            .send_message_draft(self.chat_id, self.draft_id.get())
-            .text(preview)
-            .await
-            .map(|_| PreviewAck)
+        let mut request =
+            self.bot.send_message_draft(self.chat_id, self.draft_id.get()).text(preview);
+        if let Some(thread_id) = self.message_thread_id {
+            request = request.message_thread_id(thread_id);
+        }
+        request.await.map(|_| PreviewAck)
     }
 
-    async fn commit_segment(&mut self, final_payload: String) -> Result<Message, RequestError> {
+    async fn commit_segment(&mut self, final_payload: &String) -> Result<Message, RequestError> {
         let result = send_text(
             &self.bot,
             self.chat_id.into(),
-            final_payload,
+            final_payload.clone(),
             self.reply_parameters.clone(),
             self.message_thread_id,
         )
@@ -171,12 +172,12 @@ where
         result
     }
 
-    async fn finish(self, final_payload: String) -> Result<Message, RequestError> {
+    async fn finish(&mut self, final_payload: &String) -> Result<Message, RequestError> {
         send_text(
             &self.bot,
             self.chat_id.into(),
-            final_payload,
-            self.reply_parameters,
+            final_payload.clone(),
+            self.reply_parameters.clone(),
             self.message_thread_id,
         )
         .await
@@ -271,12 +272,12 @@ where
 
     async fn commit_segment(
         &mut self,
-        final_payload: InputRichMessage,
+        final_payload: &InputRichMessage,
     ) -> Result<Message, RequestError> {
         let result = send_rich(
             &self.bot,
             self.chat_id.into(),
-            final_payload,
+            final_payload.clone(),
             self.reply_parameters.clone(),
             self.message_thread_id,
         )
@@ -287,12 +288,12 @@ where
         result
     }
 
-    async fn finish(self, final_payload: InputRichMessage) -> Result<Message, RequestError> {
+    async fn finish(&mut self, final_payload: &InputRichMessage) -> Result<Message, RequestError> {
         send_rich(
             &self.bot,
             self.chat_id.into(),
-            final_payload,
-            self.reply_parameters,
+            final_payload.clone(),
+            self.reply_parameters.clone(),
             self.message_thread_id,
         )
         .await
@@ -411,12 +412,12 @@ where
 
     async fn commit_segment(
         &mut self,
-        final_payload: InputRichMessage,
+        final_payload: &InputRichMessage,
     ) -> Result<Message, RequestError> {
         let result = send_rich(
             &self.bot,
             self.chat_id,
-            final_payload,
+            final_payload.clone(),
             self.reply_parameters.clone(),
             self.message_thread_id,
         )
@@ -427,20 +428,18 @@ where
         result
     }
 
-    async fn finish(self, final_payload: InputRichMessage) -> Result<Message, RequestError> {
-        let StatusThenRichBackend {
-            bot,
-            chat_id,
-            preview_message_id,
-            reply_parameters,
-            message_thread_id,
-            cleanup,
-        } = self;
-        let result =
-            send_rich(&bot, chat_id, final_payload, reply_parameters, message_thread_id).await;
-        if result.is_ok() && cleanup == StatusCleanup::DeleteAfterFinalSuccess {
-            if let Some(message_id) = preview_message_id {
-                let _ = bot.delete_message(chat_id, message_id).await;
+    async fn finish(&mut self, final_payload: &InputRichMessage) -> Result<Message, RequestError> {
+        let result = send_rich(
+            &self.bot,
+            self.chat_id,
+            final_payload.clone(),
+            self.reply_parameters.clone(),
+            self.message_thread_id,
+        )
+        .await;
+        if result.is_ok() && self.cleanup == StatusCleanup::DeleteAfterFinalSuccess {
+            if let Some(message_id) = self.preview_message_id.take() {
+                let _ = self.bot.delete_message(self.chat_id, message_id).await;
             }
         }
         result
@@ -586,11 +585,11 @@ where
         }
     }
 
-    async fn commit_segment(&mut self, final_payload: String) -> Result<Message, RequestError> {
+    async fn commit_segment(&mut self, final_payload: &String) -> Result<Message, RequestError> {
         let result = send_text(
             &self.bot,
             self.chat_id,
-            final_payload,
+            final_payload.clone(),
             self.reply_parameters.clone(),
             self.message_thread_id,
         )
@@ -601,20 +600,18 @@ where
         result
     }
 
-    async fn finish(self, final_payload: String) -> Result<Message, RequestError> {
-        let StatusThenTextBackend {
-            bot,
-            chat_id,
-            preview_message_id,
-            reply_parameters,
-            message_thread_id,
-            cleanup,
-        } = self;
-        let result =
-            send_text(&bot, chat_id, final_payload, reply_parameters, message_thread_id).await;
-        if result.is_ok() && cleanup == StatusCleanup::DeleteAfterFinalSuccess {
-            if let Some(message_id) = preview_message_id {
-                let _ = bot.delete_message(chat_id, message_id).await;
+    async fn finish(&mut self, final_payload: &String) -> Result<Message, RequestError> {
+        let result = send_text(
+            &self.bot,
+            self.chat_id,
+            final_payload.clone(),
+            self.reply_parameters.clone(),
+            self.message_thread_id,
+        )
+        .await;
+        if result.is_ok() && self.cleanup == StatusCleanup::DeleteAfterFinalSuccess {
+            if let Some(message_id) = self.preview_message_id.take() {
+                let _ = self.bot.delete_message(self.chat_id, message_id).await;
             }
         }
         result
@@ -780,14 +777,14 @@ where
         }
     }
 
-    async fn commit_segment(&mut self, final_payload: String) -> Result<Message, RequestError> {
+    async fn commit_segment(&mut self, final_payload: &String) -> Result<Message, RequestError> {
         let result = if let Some(message_id) = self.message_id {
-            self.bot.edit_message_text(self.chat_id, message_id, final_payload).await
+            self.bot.edit_message_text(self.chat_id, message_id, final_payload.clone()).await
         } else {
             send_text(
                 &self.bot,
                 self.chat_id,
-                final_payload,
+                final_payload.clone(),
                 self.reply_parameters.clone(),
                 self.message_thread_id,
             )
@@ -812,9 +809,10 @@ where
         }
     }
 
-    async fn finish(self, final_payload: String) -> Result<Message, RequestError> {
+    async fn finish(&mut self, final_payload: &String) -> Result<Message, RequestError> {
         if let Some(message_id) = self.message_id {
-            match self.bot.edit_message_text(self.chat_id, message_id, final_payload).await {
+            match self.bot.edit_message_text(self.chat_id, message_id, final_payload.clone()).await
+            {
                 Ok(message) => Ok(message),
                 Err(error) if is_message_not_modified(&error) => {
                     self.last_message.clone().ok_or(error)
@@ -825,8 +823,8 @@ where
             send_text(
                 &self.bot,
                 self.chat_id,
-                final_payload,
-                self.reply_parameters,
+                final_payload.clone(),
+                self.reply_parameters.clone(),
                 self.message_thread_id,
             )
             .await
@@ -960,10 +958,14 @@ impl DrafterBackend for RichEditInPlaceBackend {
 
     async fn commit_segment(
         &mut self,
-        final_payload: InputRichMessage,
+        final_payload: &InputRichMessage,
     ) -> Result<Message, RequestError> {
         let result = if let Some(message_id) = self.message_id {
-            match self.bot.edit_message_rich_text(self.chat_id, message_id, final_payload).await {
+            match self
+                .bot
+                .edit_message_rich_text(self.chat_id, message_id, final_payload.clone())
+                .await
+            {
                 Ok(message) => Ok(message),
                 Err(error) if is_message_not_modified(&error) => {
                     self.last_message.clone().ok_or(error)
@@ -974,7 +976,7 @@ impl DrafterBackend for RichEditInPlaceBackend {
             send_rich(
                 &self.bot,
                 self.chat_id,
-                final_payload,
+                final_payload.clone(),
                 self.reply_parameters.clone(),
                 self.message_thread_id,
             )
@@ -988,9 +990,13 @@ impl DrafterBackend for RichEditInPlaceBackend {
         result
     }
 
-    async fn finish(self, final_payload: InputRichMessage) -> Result<Message, RequestError> {
+    async fn finish(&mut self, final_payload: &InputRichMessage) -> Result<Message, RequestError> {
         if let Some(message_id) = self.message_id {
-            match self.bot.edit_message_rich_text(self.chat_id, message_id, final_payload).await {
+            match self
+                .bot
+                .edit_message_rich_text(self.chat_id, message_id, final_payload.clone())
+                .await
+            {
                 Ok(message) => Ok(message),
                 Err(error) if is_message_not_modified(&error) => {
                     self.last_message.clone().ok_or(error)
@@ -1001,8 +1007,8 @@ impl DrafterBackend for RichEditInPlaceBackend {
             send_rich(
                 &self.bot,
                 self.chat_id,
-                final_payload,
-                self.reply_parameters,
+                final_payload.clone(),
+                self.reply_parameters.clone(),
                 self.message_thread_id,
             )
             .await
@@ -1158,7 +1164,11 @@ impl TelegramDrafter {
         Drafter::snapshots(StatusThenTextBackend::new(bot, chat_id), limiter, config)
     }
 
-    pub fn native_text_with_defaults<R>(
+    /// Creates a native text drafter with a limiter owned only by this drafter.
+    ///
+    /// Prefer [`Self::native_text`] with one bot-scoped limiter shared by all
+    /// drafters when several workers use the same bot token.
+    pub fn native_text_with_isolated_limiter<R>(
         bot: R,
         chat_id: UserId,
         config: DraftConfig,

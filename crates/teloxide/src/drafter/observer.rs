@@ -51,6 +51,14 @@ pub enum DrafterEventKind {
 }
 
 /// Receives scheduler lifecycle events.
+///
+/// `record` is called synchronously, including from [`DraftSink::update`] and
+/// [`DraftSink::push`]. Implementations must therefore be fast, non-blocking,
+/// and panic-free. The scheduler catches unwinding panics as a last-resort
+/// boundary, but it cannot interrupt an observer that blocks the producer.
+///
+/// [`DraftSink::update`]: super::DraftSink::update
+/// [`DraftSink::push`]: super::DraftSink::push
 pub trait DrafterObserver: Send + Sync + 'static {
     fn record(&self, event: DrafterEvent);
 }

@@ -1,5 +1,6 @@
 use std::{
     marker::PhantomData,
+    panic::{catch_unwind, AssertUnwindSafe},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -54,7 +55,7 @@ impl<U> DraftSink<U> {
 enum Command<B: DrafterBackend> {
     Flush {
         target: DraftRevision,
-        reply: oneshot::Sender<Result<DraftRevision, DraftFlushError<B::Error>>>,
+        reply: oneshot::Sender<Result<DraftRevision, DraftFlushError>>,
     },
     Commit {
         final_payload: B::Final,
@@ -69,9 +70,9 @@ enum Command<B: DrafterBackend> {
     },
 }
 
-struct FlushWaiter<E> {
+struct FlushWaiter {
     target: DraftRevision,
-    reply: oneshot::Sender<Result<DraftRevision, DraftFlushError<E>>>,
+    reply: oneshot::Sender<Result<DraftRevision, DraftFlushError>>,
 }
 
 enum PreviewRunResult<B: DrafterBackend> {
@@ -100,7 +101,7 @@ where
     retry_delay: Duration,
     consecutive_preview_failures: u32,
     preview_disabled: bool,
-    flush_waiters: Vec<FlushWaiter<B::Error>>,
+    flush_waiters: Vec<FlushWaiter>,
     observer: Arc<dyn DrafterObserver>,
     rate_limit_key: super::DrafterRateLimitKey,
     instance_id: u64,
@@ -109,7 +110,13 @@ where
 }
 
 fn emit_event(observer: &Arc<dyn DrafterObserver>, event: DrafterEvent) {
-    observer.record(event);
+    if catch_unwind(AssertUnwindSafe(|| observer.record(event))).is_err() {
+        #[cfg(feature = "tracing")]
+        tracing::warn!(
+            target: "teloxide::drafter",
+            "drafter observer panicked; event was dropped"
+        );
+    }
 }
 
 impl<S, B, L> Worker<S, B, L>
@@ -423,6 +430,7 @@ where
                 self.retry_delay = (self.retry_delay * 2).min(self.config.retry_max);
             }
             DrafterErrorClass::Transient { retry_safe: false }
+            | DrafterErrorClass::InvalidPayload
             | DrafterErrorClass::Permanent
             | DrafterErrorClass::Ambiguous
             | DrafterErrorClass::Transient { retry_safe: true } => {
@@ -500,6 +508,7 @@ where
                 let mode = self.capabilities.mode;
                 let chat_id = self.rate_limit_key.chat_id;
                 let segment = self.segment;
+                let mut payload_invalid = false;
                 let result = loop {
                     let _permit = self.limiter.acquire(key, DrafterPriority::SegmentCommit).await;
                     match backend.commit_segment(&final_payload).await {
@@ -527,6 +536,7 @@ where
                                 self.limiter.penalize(scope, delay);
                                 continue;
                             }
+                            payload_invalid = matches!(class, DrafterErrorClass::InvalidPayload);
                             break Err(error);
                         }
                     }
@@ -556,9 +566,11 @@ where
                             None,
                             Some(DrafterOperation::SegmentCommit),
                         );
-                        self.source.close();
+                        if !payload_invalid {
+                            self.source.close();
+                        }
                         let _ = reply.send(Err(DraftCommitError::Backend(error)));
-                        false
+                        payload_invalid
                     }
                 }
             }
@@ -704,6 +716,14 @@ where
 }
 
 /// Owns a drafter worker and the transition to its permanent result.
+///
+/// Dropping a drafter is a hard cancellation: its worker is aborted and no
+/// asynchronous backend cleanup is attempted. A message-based backend may
+/// therefore leave its temporary status preview in Telegram. Call [`finish`]
+/// or [`abort`] on the normal lifecycle path when cleanup matters.
+///
+/// [`finish`]: Self::finish
+/// [`abort`]: Self::abort
 pub struct Drafter<S, B, L>
 where
     S: PreviewSource,
@@ -734,19 +754,22 @@ where
         let rate_limit_key = backend.rate_limit_key();
         let instance_id = next_instance_id();
         let segment_counter = Arc::new(AtomicU64::new(0));
-        observer.record(DrafterEvent {
-            instance_id,
-            kind: DrafterEventKind::Spawn,
-            mode: capabilities.mode,
-            chat_id: rate_limit_key.chat_id,
-            segment: 0,
-            revision: None,
-            from_revision: None,
-            to_revision: None,
-            operation: None,
-            draft_id: backend.draft_id(),
-            preview_message_id: backend.preview_message_id(),
-        });
+        emit_event(
+            &observer,
+            DrafterEvent {
+                instance_id,
+                kind: DrafterEventKind::Spawn,
+                mode: capabilities.mode,
+                chat_id: rate_limit_key.chat_id,
+                segment: 0,
+                revision: None,
+                from_revision: None,
+                to_revision: None,
+                operation: None,
+                draft_id: backend.draft_id(),
+                preview_message_id: backend.preview_message_id(),
+            },
+        );
         let source = Arc::new(source);
         let notify = Arc::new(Notify::new());
         let (commands, command_rx) = mpsc::channel(16);
@@ -814,7 +837,7 @@ where
     }
 
     /// Waits until a revision existing at call time has been delivered.
-    pub async fn flush(&self) -> Result<DraftRevision, DraftFlushError<B::Error>> {
+    pub async fn flush(&self) -> Result<DraftRevision, DraftFlushError> {
         let target = self.source.current_revision();
         let (reply, receiver) = oneshot::channel();
         self.commands
@@ -1052,6 +1075,7 @@ mod tests {
     enum TestError {
         RetryAfter,
         Transient,
+        InvalidPayload,
         Ambiguous,
     }
 
@@ -1072,6 +1096,7 @@ mod tests {
         ambiguous_final: bool,
         commit_attempts: Arc<Mutex<usize>>,
         retry_commit_once: bool,
+        invalid_commit_once: bool,
         cleanup_retry_once: bool,
         abort_cleanup_retry_once: bool,
         preview_message_id: Option<teloxide_core::types::MessageId>,
@@ -1106,7 +1131,10 @@ mod tests {
 
         async fn commit_segment(&mut self, final_payload: &String) -> Result<String, Self::Error> {
             *self.commit_attempts.lock().unwrap() += 1;
-            if self.retry_commit_once {
+            if self.invalid_commit_once {
+                self.invalid_commit_once = false;
+                Err(TestError::InvalidPayload)
+            } else if self.retry_commit_once {
                 self.retry_commit_once = false;
                 Err(TestError::RetryAfter)
             } else {
@@ -1160,6 +1188,7 @@ mod tests {
                     scope: DrafterRateLimitScope::Global,
                 },
                 TestError::Transient => DrafterErrorClass::Transient { retry_safe: true },
+                TestError::InvalidPayload => DrafterErrorClass::InvalidPayload,
                 TestError::Ambiguous => DrafterErrorClass::Ambiguous,
             }
         }
@@ -1443,6 +1472,7 @@ mod tests {
             ambiguous_final: false,
             commit_attempts: Arc::new(Mutex::new(0)),
             retry_commit_once: false,
+            invalid_commit_once: false,
             cleanup_retry_once: false,
             abort_cleanup_retry_once: false,
             preview_message_id: None,
@@ -1498,6 +1528,7 @@ mod tests {
             ambiguous_final: false,
             commit_attempts: Arc::new(Mutex::new(0)),
             retry_commit_once: false,
+            invalid_commit_once: false,
             cleanup_retry_once: false,
             abort_cleanup_retry_once: false,
             preview_message_id: None,
@@ -1532,6 +1563,7 @@ mod tests {
             ambiguous_final: false,
             commit_attempts: Arc::new(Mutex::new(0)),
             retry_commit_once: false,
+            invalid_commit_once: false,
             cleanup_retry_once: true,
             abort_cleanup_retry_once: false,
             preview_message_id: Some(teloxide_core::types::MessageId(77)),
@@ -1574,6 +1606,7 @@ mod tests {
             ambiguous_final: false,
             commit_attempts: Arc::new(Mutex::new(0)),
             retry_commit_once: false,
+            invalid_commit_once: false,
             cleanup_retry_once: true,
             abort_cleanup_retry_once: false,
             preview_message_id: Some(teloxide_core::types::MessageId(77)),
@@ -1618,6 +1651,7 @@ mod tests {
             ambiguous_final: false,
             commit_attempts: Arc::new(Mutex::new(0)),
             retry_commit_once: false,
+            invalid_commit_once: false,
             cleanup_retry_once: false,
             abort_cleanup_retry_once: true,
             preview_message_id: Some(teloxide_core::types::MessageId(88)),
@@ -1648,6 +1682,7 @@ mod tests {
             ambiguous_final: false,
             commit_attempts: Arc::clone(&commit_attempts),
             retry_commit_once: true,
+            invalid_commit_once: false,
             cleanup_retry_once: false,
             abort_cleanup_retry_once: false,
             preview_message_id: None,
@@ -1669,6 +1704,39 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn invalid_segment_commit_keeps_worker_for_corrected_payload() {
+        let commit_attempts = Arc::new(Mutex::new(0));
+        let backend = ClassifiedBackend {
+            previews: Arc::new(Mutex::new(Vec::new())),
+            update_calls: 0,
+            fail_update_at: None,
+            final_attempts: Arc::new(Mutex::new(0)),
+            retry_final_once: false,
+            ambiguous_final: false,
+            commit_attempts: Arc::clone(&commit_attempts),
+            retry_commit_once: false,
+            invalid_commit_once: true,
+            cleanup_retry_once: false,
+            abort_cleanup_retry_once: false,
+            preview_message_id: None,
+            expires_without_refresh: false,
+        };
+        let (mut drafter, sink) =
+            Drafter::snapshots(backend, NoopLimiter, DraftConfig::default()).unwrap();
+
+        let first = drafter.commit_segment("invalid".to_owned()).await;
+        assert!(matches!(first, Err(DraftCommitError::Backend(TestError::InvalidPayload))));
+        assert!(matches!(
+            sink.update("must wait for corrected commit".to_owned()),
+            Err(DraftPushError::ClosedForTransition)
+        ));
+
+        assert_eq!(drafter.commit_segment("corrected".to_owned()).await.unwrap(), "corrected");
+        assert_eq!(*commit_attempts.lock().unwrap(), 2);
+        drafter.finish("final".to_owned()).await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn ambiguous_final_is_not_retried() {
         let final_attempts = Arc::new(Mutex::new(0));
         let backend = ClassifiedBackend {
@@ -1680,6 +1748,7 @@ mod tests {
             ambiguous_final: true,
             commit_attempts: Arc::new(Mutex::new(0)),
             retry_commit_once: false,
+            invalid_commit_once: false,
             cleanup_retry_once: false,
             abort_cleanup_retry_once: false,
             preview_message_id: None,
@@ -1691,6 +1760,29 @@ mod tests {
 
         assert!(matches!(result, Err(DraftFinishError::Backend(TestError::Ambiguous))));
         assert_eq!(*final_attempts.lock().unwrap(), 1);
+    }
+
+    struct PanickingObserver;
+
+    impl DrafterObserver for PanickingObserver {
+        fn record(&self, _event: DrafterEvent) {
+            panic!("observer failure");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn observer_panic_does_not_reach_synchronous_producer() {
+        let observer: Arc<dyn DrafterObserver> = Arc::new(PanickingObserver);
+        let (drafter, sink) = Drafter::snapshots_with_observer(
+            FakeBackend::default(),
+            NoopLimiter,
+            DraftConfig::default(),
+            observer,
+        )
+        .unwrap();
+
+        assert!(sink.update("preview".to_owned()).is_ok());
+        drafter.abort().await.unwrap();
     }
 
     #[tokio::test(start_paused = true)]

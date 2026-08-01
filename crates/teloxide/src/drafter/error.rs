@@ -70,31 +70,38 @@ pub enum DrafterOperation {
 /// A backend's classification of a failed operation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DrafterErrorClass {
-    RetryAfter { delay: Duration, scope: super::DrafterRateLimitScope },
-    Transient { retry_safe: bool },
+    RetryAfter {
+        delay: Duration,
+        scope: super::DrafterRateLimitScope,
+    },
+    Transient {
+        retry_safe: bool,
+    },
+    /// The payload was rejected before it could have an external side effect.
+    /// Segment commits keep the worker alive so the caller can submit a
+    /// corrected payload.
+    InvalidPayload,
     Permanent,
     Ambiguous,
 }
 
 /// Error returned by `flush` when the worker cannot deliver the target.
 #[derive(Debug)]
-pub enum DraftFlushError<E> {
+pub enum DraftFlushError {
     WorkerStopped,
     PreviewDisabled,
-    Backend(E),
 }
 
-impl<E: fmt::Display> fmt::Display for DraftFlushError<E> {
+impl fmt::Display for DraftFlushError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::WorkerStopped => f.write_str("drafter worker stopped"),
             Self::PreviewDisabled => f.write_str("preview delivery is disabled"),
-            Self::Backend(error) => write!(f, "preview delivery failed: {error}"),
         }
     }
 }
 
-impl<E: std::error::Error + 'static> std::error::Error for DraftFlushError<E> {}
+impl std::error::Error for DraftFlushError {}
 
 /// Error returned by `commit_segment`.
 #[derive(Debug)]

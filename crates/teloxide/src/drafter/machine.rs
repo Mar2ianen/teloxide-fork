@@ -1,4 +1,11 @@
-use std::{marker::PhantomData, sync::Arc, time::Duration};
+use std::{
+    marker::PhantomData,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use tokio::sync::{mpsc, oneshot, Notify};
 use tokio::time::Instant;
@@ -6,6 +13,7 @@ use tokio::time::Instant;
 #[cfg(feature = "tracing")]
 use tracing::Instrument;
 
+use super::observer::next_instance_id;
 use super::{
     AccumulatorSource, DraftAbortError, DraftCommitError, DraftConfig, DraftFinishError,
     DraftFlushError, DraftPushError, DraftRevision, DraftStartError, DrafterBackend,
@@ -95,21 +103,13 @@ where
     flush_waiters: Vec<FlushWaiter<B::Error>>,
     observer: Arc<dyn DrafterObserver>,
     rate_limit_key: super::DrafterRateLimitKey,
+    instance_id: u64,
     segment: u64,
-    last_observed_revision: DraftRevision,
-    last_coalesced_revision: DraftRevision,
+    segment_counter: Arc<AtomicU64>,
 }
 
-fn emit_event(
-    observer: &Arc<dyn DrafterObserver>,
-    mode: super::DrafterMode,
-    chat_id: teloxide_core::types::ChatId,
-    segment: u64,
-    kind: DrafterEventKind,
-    revision: Option<DraftRevision>,
-    operation: Option<DrafterOperation>,
-) {
-    observer.record(DrafterEvent { kind, mode, chat_id, segment, revision, operation });
+fn emit_event(observer: &Arc<dyn DrafterObserver>, event: DrafterEvent) {
+    observer.record(event);
 }
 
 impl<S, B, L> Worker<S, B, L>
@@ -173,12 +173,51 @@ where
     ) {
         emit_event(
             &self.observer,
-            self.capabilities.mode,
-            self.rate_limit_key.chat_id,
-            self.segment,
-            kind,
-            revision,
-            operation,
+            DrafterEvent {
+                instance_id: self.instance_id,
+                kind,
+                mode: self.capabilities.mode,
+                chat_id: self.rate_limit_key.chat_id,
+                segment: self.segment,
+                revision,
+                from_revision: None,
+                to_revision: None,
+                operation,
+                draft_id: self.backend.as_ref().and_then(DrafterBackend::draft_id),
+                preview_message_id: self
+                    .backend
+                    .as_ref()
+                    .and_then(DrafterBackend::preview_message_id),
+            },
+        );
+    }
+
+    fn record_range(
+        &self,
+        kind: DrafterEventKind,
+        revision: Option<DraftRevision>,
+        from_revision: DraftRevision,
+        to_revision: DraftRevision,
+        operation: Option<DrafterOperation>,
+    ) {
+        emit_event(
+            &self.observer,
+            DrafterEvent {
+                instance_id: self.instance_id,
+                kind,
+                mode: self.capabilities.mode,
+                chat_id: self.rate_limit_key.chat_id,
+                segment: self.segment,
+                revision,
+                from_revision: Some(from_revision),
+                to_revision: Some(to_revision),
+                operation,
+                draft_id: self.backend.as_ref().and_then(DrafterBackend::draft_id),
+                preview_message_id: self
+                    .backend
+                    .as_ref()
+                    .and_then(DrafterBackend::preview_message_id),
+            },
         );
     }
 
@@ -229,10 +268,6 @@ where
 
         let now = Instant::now();
         let current_revision = self.source.current_revision();
-        if current_revision > self.last_observed_revision {
-            self.last_observed_revision = current_revision;
-            self.record(DrafterEventKind::Update, Some(current_revision), None);
-        }
         let changed = current_revision > self.last_delivered;
         let flush_requested =
             self.flush_waiters.iter().any(|waiter| waiter.target > self.last_delivered);
@@ -254,10 +289,6 @@ where
                 .is_none_or(|last_attempt| now >= last_attempt + self.config.min_update_interval)
             && self.retry_not_before.is_none_or(|deadline| now >= deadline);
         if !changed_due && !refresh_due {
-            if changed && current_revision > self.last_coalesced_revision {
-                self.last_coalesced_revision = current_revision;
-                self.record(DrafterEventKind::Coalesced, Some(current_revision), None);
-            }
             self.complete_flushes();
             return PreviewRunResult::Idle;
         }
@@ -309,6 +340,8 @@ where
 
         match result {
             Ok(Ok(PreviewAck)) => {
+                let skipped_from = DraftRevision(self.last_delivered.get().saturating_add(1));
+                let skipped_to = DraftRevision(snapshot.revision.get().saturating_sub(1));
                 self.last_delivered = self.last_delivered.max(snapshot.revision);
                 self.source.mark_delivered(snapshot.revision);
                 self.retry_delay = self.config.retry_initial;
@@ -323,6 +356,15 @@ where
                     Some(snapshot.revision),
                     Some(operation),
                 );
+                if skipped_from <= skipped_to {
+                    self.record_range(
+                        DrafterEventKind::Coalesced,
+                        Some(snapshot.revision),
+                        skipped_from,
+                        skipped_to,
+                        Some(operation),
+                    );
+                }
                 self.complete_flushes();
             }
             Ok(Err(error)) => {
@@ -336,7 +378,7 @@ where
                     Some(snapshot.revision),
                     Some(operation),
                 );
-                self.handle_preview_error(class);
+                self.handle_preview_error(class, operation);
             }
             Err(_) => {
                 let retry_safe = !matches!(
@@ -348,17 +390,17 @@ where
                     Some(snapshot.revision),
                     Some(operation),
                 );
-                self.handle_preview_error(DrafterErrorClass::Transient { retry_safe });
+                self.handle_preview_error(DrafterErrorClass::Transient { retry_safe }, operation);
             }
         }
         PreviewRunResult::Continue
     }
 
-    fn handle_preview_error(&mut self, class: DrafterErrorClass) {
+    fn handle_preview_error(&mut self, class: DrafterErrorClass, operation: DrafterOperation) {
         self.consecutive_preview_failures = self.consecutive_preview_failures.saturating_add(1);
         match class {
             DrafterErrorClass::RetryAfter { delay, scope } => {
-                self.record(DrafterEventKind::RetryAfter, None, None);
+                self.record(DrafterEventKind::RetryAfter, None, Some(operation));
                 self.limiter.penalize(scope, delay);
                 self.retry_not_before = Some(Instant::now() + delay);
             }
@@ -368,6 +410,7 @@ where
                     .max_consecutive_preview_failures
                     .is_none_or(|max| self.consecutive_preview_failures < max) =>
             {
+                self.record(DrafterEventKind::TransientRetry, None, Some(operation));
                 self.retry_not_before = Some(Instant::now() + self.retry_delay);
                 self.retry_delay = (self.retry_delay * 2).min(self.config.retry_max);
             }
@@ -395,12 +438,22 @@ where
                 let _ = waiter.reply.send(Ok(last_delivered));
                 emit_event(
                     &observer,
-                    mode,
-                    chat_id,
-                    segment,
-                    DrafterEventKind::FlushComplete,
-                    Some(last_delivered),
-                    None,
+                    DrafterEvent {
+                        instance_id: self.instance_id,
+                        kind: DrafterEventKind::FlushComplete,
+                        mode,
+                        chat_id,
+                        segment,
+                        revision: Some(last_delivered),
+                        from_revision: None,
+                        to_revision: None,
+                        operation: None,
+                        draft_id: self.backend.as_ref().and_then(DrafterBackend::draft_id),
+                        preview_message_id: self
+                            .backend
+                            .as_ref()
+                            .and_then(DrafterBackend::preview_message_id),
+                    },
                 );
             } else if preview_disabled {
                 let _ = waiter.reply.send(Err(DraftFlushError::PreviewDisabled));
@@ -449,12 +502,19 @@ where
                             if let DrafterErrorClass::RetryAfter { delay, scope } = class {
                                 emit_event(
                                     &observer,
-                                    mode,
-                                    chat_id,
-                                    segment,
-                                    DrafterEventKind::RetryAfter,
-                                    None,
-                                    Some(DrafterOperation::SegmentCommit),
+                                    DrafterEvent {
+                                        instance_id: self.instance_id,
+                                        kind: DrafterEventKind::RetryAfter,
+                                        mode,
+                                        chat_id,
+                                        segment,
+                                        revision: None,
+                                        from_revision: None,
+                                        to_revision: None,
+                                        operation: Some(DrafterOperation::SegmentCommit),
+                                        draft_id: backend.draft_id(),
+                                        preview_message_id: backend.preview_message_id(),
+                                    },
                                 );
                                 self.limiter.penalize(scope, delay);
                                 continue;
@@ -463,15 +523,11 @@ where
                         }
                     }
                 };
-                let cleanup_failed = backend.take_cleanup_error().is_some();
+                let cleanup_error = backend.take_cleanup_error();
                 match result {
                     Ok(output) => {
-                        if cleanup_failed {
-                            self.record(
-                                DrafterEventKind::CleanupError,
-                                None,
-                                Some(DrafterOperation::Cleanup),
-                            );
+                        if let Some(error) = cleanup_error {
+                            self.observe_cleanup_error(error);
                         }
                         self.record(
                             DrafterEventKind::SegmentCommit,
@@ -481,6 +537,7 @@ where
                         self.source.reopen_segment();
                         self.reset_segment_state();
                         self.segment = self.segment.saturating_add(1);
+                        self.segment_counter.store(self.segment, Ordering::Relaxed);
                         self.record(DrafterEventKind::SegmentRotate, None, None);
                         let _ = reply.send(Ok(output));
                         true
@@ -521,12 +578,19 @@ where
                             if let DrafterErrorClass::RetryAfter { delay, scope } = class {
                                 emit_event(
                                     &observer,
-                                    mode,
-                                    chat_id,
-                                    segment,
-                                    DrafterEventKind::RetryAfter,
-                                    None,
-                                    Some(DrafterOperation::Final),
+                                    DrafterEvent {
+                                        instance_id: self.instance_id,
+                                        kind: DrafterEventKind::RetryAfter,
+                                        mode,
+                                        chat_id,
+                                        segment,
+                                        revision: None,
+                                        from_revision: None,
+                                        to_revision: None,
+                                        operation: Some(DrafterOperation::Final),
+                                        draft_id: backend.draft_id(),
+                                        preview_message_id: backend.preview_message_id(),
+                                    },
                                 );
                                 self.limiter.penalize(scope, delay);
                                 continue;
@@ -535,14 +599,9 @@ where
                         }
                     }
                 };
-                let cleanup_failed = backend.take_cleanup_error().is_some();
-                self.backend.take();
-                if cleanup_failed {
-                    self.record(
-                        DrafterEventKind::CleanupError,
-                        None,
-                        Some(DrafterOperation::Cleanup),
-                    );
+                let cleanup_error = backend.take_cleanup_error();
+                if let Some(error) = cleanup_error {
+                    self.observe_cleanup_error(error);
                 }
                 if result.is_ok() {
                     self.record(
@@ -553,6 +612,7 @@ where
                 } else {
                     self.record(DrafterEventKind::FinalError, None, Some(DrafterOperation::Final));
                 }
+                self.backend.take();
                 let _ = reply.send(result.map_err(DraftFinishError::Backend));
                 false
             }
@@ -593,8 +653,19 @@ where
         self.retry_delay = self.config.retry_initial;
         self.consecutive_preview_failures = 0;
         self.preview_disabled = false;
-        self.last_observed_revision = DraftRevision::default();
-        self.last_coalesced_revision = DraftRevision::default();
+    }
+
+    fn observe_cleanup_error(&mut self, error: B::Error) {
+        let class = self
+            .backend
+            .as_ref()
+            .expect("backend exists while observing cleanup")
+            .classify_error(DrafterOperation::Cleanup, &error);
+        if let DrafterErrorClass::RetryAfter { delay, scope } = class {
+            self.record(DrafterEventKind::RetryAfter, None, Some(DrafterOperation::Cleanup));
+            self.limiter.penalize(scope, delay);
+        }
+        self.record(DrafterEventKind::CleanupError, None, Some(DrafterOperation::Cleanup));
     }
 }
 
@@ -627,17 +698,20 @@ where
         let capabilities = backend.capabilities();
         config.validate(capabilities).map_err(DraftStartError::InvalidConfig)?;
         let rate_limit_key = backend.rate_limit_key();
-        #[cfg(feature = "tracing")]
-        let draft_id = backend.draft_id().map(super::DraftId::get);
-        #[cfg(feature = "tracing")]
-        let preview_message_id = backend.preview_message_id().map(|id| id.0);
+        let instance_id = next_instance_id();
+        let segment_counter = Arc::new(AtomicU64::new(0));
         observer.record(DrafterEvent {
+            instance_id,
             kind: DrafterEventKind::Spawn,
             mode: capabilities.mode,
             chat_id: rate_limit_key.chat_id,
             segment: 0,
             revision: None,
+            from_revision: None,
+            to_revision: None,
             operation: None,
+            draft_id: backend.draft_id(),
+            preview_message_id: backend.preview_message_id(),
         });
         let source = Arc::new(source);
         let notify = Arc::new(Notify::new());
@@ -660,17 +734,18 @@ where
             flush_waiters: Vec::new(),
             observer,
             rate_limit_key,
+            instance_id,
             segment: 0,
-            last_observed_revision: DraftRevision::default(),
-            last_coalesced_revision: DraftRevision::default(),
+            segment_counter: Arc::clone(&segment_counter),
         };
+        let sink_observer = Arc::clone(&worker.observer);
+        let sink_segment_counter = Arc::clone(&segment_counter);
         #[cfg(feature = "tracing")]
         let worker_span = tracing::info_span!(
             "teloxide.drafter",
+            instance_id,
             mode = ?capabilities.mode,
             chat_id = rate_limit_key.chat_id.0,
-            draft_id = ?draft_id,
-            preview_message_id = ?preview_message_id,
         );
         #[cfg(feature = "tracing")]
         let worker = tokio::spawn(worker.run().instrument(worker_span));
@@ -678,8 +753,26 @@ where
         let worker = tokio::spawn(worker.run());
         let sink_source = Arc::clone(&source);
         let sink_notify = Arc::clone(&notify);
+        let sink_mode = capabilities.mode;
+        let sink_chat_id = rate_limit_key.chat_id;
         let sink = DraftSink::new(move |update| {
             let revision = sink_source.apply(update)?;
+            emit_event(
+                &sink_observer,
+                DrafterEvent {
+                    instance_id,
+                    kind: DrafterEventKind::Update,
+                    mode: sink_mode,
+                    chat_id: sink_chat_id,
+                    segment: sink_segment_counter.load(Ordering::Relaxed),
+                    revision: Some(revision),
+                    from_revision: None,
+                    to_revision: None,
+                    operation: None,
+                    draft_id: None,
+                    preview_message_id: None,
+                },
+            );
             sink_notify.notify_one();
             Ok(revision)
         });
@@ -846,6 +939,36 @@ mod tests {
         fn penalize(&self, _scope: DrafterRateLimitScope, _retry_after: Duration) {}
     }
 
+    #[derive(Clone, Default)]
+    struct RecordingLimiter {
+        penalties: Arc<Mutex<Vec<(DrafterRateLimitScope, Duration)>>>,
+    }
+
+    impl DrafterRateLimiter for RecordingLimiter {
+        async fn acquire(
+            &self,
+            _key: DrafterRateLimitKey,
+            _priority: DrafterPriority,
+        ) -> DrafterPermit {
+            DrafterPermit::new()
+        }
+
+        fn penalize(&self, scope: DrafterRateLimitScope, retry_after: Duration) {
+            self.penalties.lock().unwrap().push((scope, retry_after));
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct RecordingObserver {
+        events: Arc<Mutex<Vec<DrafterEvent>>>,
+    }
+
+    impl DrafterObserver for RecordingObserver {
+        fn record(&self, event: DrafterEvent) {
+            self.events.lock().unwrap().push(event);
+        }
+    }
+
     struct FakeBackend {
         previews: Arc<Mutex<Vec<String>>>,
         expires_without_refresh: bool,
@@ -915,6 +1038,7 @@ mod tests {
         ambiguous_final: bool,
         commit_attempts: Arc<Mutex<usize>>,
         retry_commit_once: bool,
+        cleanup_retry_once: bool,
         expires_without_refresh: bool,
     }
 
@@ -968,6 +1092,15 @@ mod tests {
 
         async fn abort(self) -> Result<(), Self::Error> {
             Ok(())
+        }
+
+        fn take_cleanup_error(&mut self) -> Option<Self::Error> {
+            if self.cleanup_retry_once {
+                self.cleanup_retry_once = false;
+                Some(TestError::RetryAfter)
+            } else {
+                None
+            }
         }
 
         fn classify_error(
@@ -1264,6 +1397,7 @@ mod tests {
             ambiguous_final: false,
             commit_attempts: Arc::new(Mutex::new(0)),
             retry_commit_once: false,
+            cleanup_retry_once: false,
             expires_without_refresh: true,
         };
         let limiter = InProcessRateLimiter::new(Duration::ZERO, Duration::ZERO);
@@ -1316,6 +1450,7 @@ mod tests {
             ambiguous_final: false,
             commit_attempts: Arc::new(Mutex::new(0)),
             retry_commit_once: false,
+            cleanup_retry_once: false,
             expires_without_refresh: false,
         };
         let limiter = InProcessRateLimiter::new(Duration::ZERO, Duration::ZERO);
@@ -1335,6 +1470,33 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn cleanup_retry_after_penalizes_shared_limiter() {
+        let penalties = Arc::new(Mutex::new(Vec::new()));
+        let limiter = RecordingLimiter { penalties: Arc::clone(&penalties) };
+        let backend = ClassifiedBackend {
+            previews: Arc::new(Mutex::new(Vec::new())),
+            update_calls: 0,
+            fail_update_at: None,
+            final_attempts: Arc::new(Mutex::new(0)),
+            retry_final_once: false,
+            ambiguous_final: false,
+            commit_attempts: Arc::new(Mutex::new(0)),
+            retry_commit_once: false,
+            cleanup_retry_once: true,
+            expires_without_refresh: false,
+        };
+        let (drafter, _sink) =
+            Drafter::snapshots(backend, limiter, DraftConfig::default()).unwrap();
+
+        drafter.finish("final".to_owned()).await.unwrap();
+
+        assert_eq!(
+            penalties.lock().unwrap().as_slice(),
+            &[(DrafterRateLimitScope::Global, Duration::from_millis(20))]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn segment_commit_retries_explicit_retry_after() {
         let commit_attempts = Arc::new(Mutex::new(0));
         let backend = ClassifiedBackend {
@@ -1346,6 +1508,7 @@ mod tests {
             ambiguous_final: false,
             commit_attempts: Arc::clone(&commit_attempts),
             retry_commit_once: true,
+            cleanup_retry_once: false,
             expires_without_refresh: false,
         };
         let limiter = InProcessRateLimiter::new(Duration::ZERO, Duration::ZERO);
@@ -1375,6 +1538,7 @@ mod tests {
             ambiguous_final: true,
             commit_attempts: Arc::new(Mutex::new(0)),
             retry_commit_once: false,
+            cleanup_retry_once: false,
             expires_without_refresh: false,
         };
         let (drafter, _sink) =
@@ -1400,13 +1564,49 @@ mod tests {
         )
         .unwrap();
 
-        sink.update("preview".to_owned()).unwrap();
+        for index in 0..100 {
+            sink.update(index.to_string()).unwrap();
+        }
         tokio::time::advance(Duration::from_millis(2)).await;
         drafter.flush().await.unwrap();
         let _ = drafter.finish("final".to_owned()).await;
 
         let snapshot = collector.snapshot();
-        assert_eq!(snapshot.received_updates, 1);
+        assert_eq!(snapshot.received_updates, 100);
         assert_eq!(snapshot.sent_previews, 1);
+        assert_eq!(snapshot.coalesced_updates, 99);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn lifecycle_events_have_unique_instance_ids() {
+        let observer = RecordingObserver::default();
+        let observer_ref = Arc::new(observer.clone());
+        let (drafter_a, _sink_a) = Drafter::snapshots_with_observer(
+            FakeBackend::default(),
+            NoopLimiter,
+            DraftConfig::default(),
+            Arc::clone(&observer_ref) as Arc<dyn DrafterObserver>,
+        )
+        .unwrap();
+        let (drafter_b, _sink_b) = Drafter::snapshots_with_observer(
+            FakeBackend::default(),
+            NoopLimiter,
+            DraftConfig::default(),
+            observer_ref,
+        )
+        .unwrap();
+
+        let spawn_ids: Vec<_> = {
+            let events = observer.events.lock().unwrap();
+            events
+                .iter()
+                .filter(|event| event.kind == DrafterEventKind::Spawn)
+                .map(|event| event.instance_id)
+                .collect()
+        };
+        assert_eq!(spawn_ids.len(), 2);
+        assert_ne!(spawn_ids[0], spawn_ids[1]);
+        drafter_a.finish("a".to_owned()).await.unwrap();
+        drafter_b.finish("b".to_owned()).await.unwrap();
     }
 }

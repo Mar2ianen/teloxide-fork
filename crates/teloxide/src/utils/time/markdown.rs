@@ -2,8 +2,8 @@ use jiff::Timestamp;
 use teloxide_core::types::InputRichMessage;
 
 use super::{
-    model::parse_expression, DateTimeFormat, DateTimeNode, RenderError, RichNode, TimeBindings,
-    TimeContext, TimeExpression,
+    DateTimeFormat, DateTimeNode, RenderError, RichNode, TimeBindings, TimeContext, TimeExpression,
+    model::parse_expression,
 };
 
 #[derive(Clone)]
@@ -57,6 +57,14 @@ impl MainMarkdownFormatter {
         bindings: &TimeBindings,
     ) -> Result<RenderedMessage, RenderError> {
         self.render_at(source, bindings, Timestamp::now())
+    }
+
+    pub fn render_with_bindings(
+        &self,
+        source: &str,
+        bindings: &TimeBindings,
+    ) -> Result<RenderedMessage, RenderError> {
+        self.render(source, bindings)
     }
 
     pub fn render_at(
@@ -384,11 +392,7 @@ fn skip_inline_code(source: &str, index: usize) -> usize {
 
 fn skip_escaped(source: &str, index: usize) -> usize {
     let next = next_char_boundary(source, index);
-    if next < source.len() {
-        next_char_boundary(source, next)
-    } else {
-        next
-    }
+    if next < source.len() { next_char_boundary(source, next) } else { next }
 }
 
 fn next_char_boundary(source: &str, index: usize) -> usize {
@@ -454,9 +458,7 @@ mod tests {
     #[test]
     fn llm_formatter_maps_full_local_datetime() {
         let formatter = LlmMarkdownFormatter::new(context());
-        let rendered = formatter
-            .render_at("Release: 2026-08-03 14:::00/.", instant())
-            .unwrap();
+        let rendered = formatter.render_at("Release: 2026-08-03 14:::00/.", instant()).unwrap();
         assert_eq!(rendered.fallback_text, "Release: 2026-08-03 14:00.");
     }
 
@@ -486,12 +488,38 @@ mod tests {
     #[test]
     fn main_formatter_rejects_missing_binding_and_invalid_relative_value() {
         let formatter = MainMarkdownFormatter::new(context());
-        assert!(formatter
-            .render_at("@time($missing)", &TimeBindings::default(), instant())
-            .is_err());
-        assert!(formatter
-            .render_at("@relative(14:00)", &TimeBindings::default(), instant())
-            .is_err());
+        assert!(
+            formatter.render_at("@time($missing)", &TimeBindings::default(), instant()).is_err()
+        );
+        assert!(
+            formatter.render_at("@relative(14:00)", &TimeBindings::default(), instant()).is_err()
+        );
+    }
+
+    #[test]
+    fn dst_gap_and_fold_use_compatible_disambiguation() {
+        let context = TimeContext::from_name("America/New_York").unwrap();
+        let gap = "2026-03-08T02:30".parse().unwrap();
+        let gap = context
+            .normalize(
+                &TimeExpression::CivilDateTime(gap),
+                DateTimeFormat::DateTime,
+                instant(),
+                &TimeBindings::default(),
+            )
+            .unwrap();
+        assert_eq!(gap.timestamp.to_string(), "2026-03-08T07:30:00Z");
+
+        let fold = "2026-11-01T01:30".parse().unwrap();
+        let fold = context
+            .normalize(
+                &TimeExpression::CivilDateTime(fold),
+                DateTimeFormat::DateTime,
+                instant(),
+                &TimeBindings::default(),
+            )
+            .unwrap();
+        assert_eq!(fold.timestamp.to_string(), "2026-11-01T05:30:00Z");
     }
 
     #[test]

@@ -641,7 +641,28 @@ where
                         }
                     }
                 };
+                let failed_delivery_cleanup = if let Some(disposition) = failure_disposition {
+                    if matches!(
+                        disposition.delivery,
+                        DeliveryCertainty::NotAttempted | DeliveryCertainty::Rejected
+                    ) {
+                        match backend.abort().await {
+                            Ok(()) => None,
+                            Err(error) => Some((
+                                backend.classify_error(DrafterOperation::Cleanup, &error),
+                                backend.preview_message_id(),
+                            )),
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
                 let cleanup_failure = backend.take_cleanup_failure();
+                if let Some((disposition, preview_message_id)) = failed_delivery_cleanup {
+                    self.observe_cleanup_disposition(disposition, preview_message_id);
+                }
                 if let Some(failure) = cleanup_failure {
                     self.observe_cleanup_failure(failure);
                 }
@@ -732,12 +753,20 @@ where
             .as_ref()
             .expect("backend exists while observing cleanup")
             .classify_error(DrafterOperation::Cleanup, &failure.error);
+        self.observe_cleanup_disposition(disposition, Some(failure.message_id));
+    }
+
+    fn observe_cleanup_disposition(
+        &self,
+        disposition: DrafterErrorDisposition,
+        preview_message_id: Option<teloxide_core::types::MessageId>,
+    ) {
         if let DrafterErrorClass::RetryAfter { delay, scope } = disposition.class {
             self.record_with_preview_message_id(
                 DrafterEventKind::RetryAfter,
                 None,
                 Some(DrafterOperation::Cleanup),
-                Some(failure.message_id),
+                preview_message_id,
             );
             self.limiter.penalize(scope, delay);
         }
@@ -745,7 +774,7 @@ where
             DrafterEventKind::CleanupError,
             None,
             Some(DrafterOperation::Cleanup),
-            Some(failure.message_id),
+            preview_message_id,
         );
     }
 }
@@ -1123,6 +1152,7 @@ mod tests {
         RetryAfter,
         Transient,
         InvalidPayload,
+        Rejected,
         Ambiguous,
     }
 
@@ -1140,12 +1170,14 @@ mod tests {
         fail_update_at: Option<usize>,
         final_attempts: Arc<Mutex<usize>>,
         retry_final_once: bool,
+        rejected_final: bool,
         ambiguous_final: bool,
         commit_attempts: Arc<Mutex<usize>>,
         retry_commit_once: bool,
         invalid_commit_once: bool,
         cleanup_retry_once: bool,
         abort_cleanup_retry_once: bool,
+        abort_calls: Arc<Mutex<usize>>,
         preview_message_id: Option<teloxide_core::types::MessageId>,
         expires_without_refresh: bool,
     }
@@ -1193,6 +1225,9 @@ mod tests {
             *self.final_attempts.lock().unwrap() += 1;
             if self.ambiguous_final {
                 Err(TestError::Ambiguous)
+            } else if self.rejected_final {
+                self.rejected_final = false;
+                Err(TestError::Rejected)
             } else if self.retry_final_once {
                 self.retry_final_once = false;
                 Err(TestError::RetryAfter)
@@ -1202,6 +1237,7 @@ mod tests {
         }
 
         async fn abort(&mut self) -> Result<(), Self::Error> {
+            *self.abort_calls.lock().unwrap() += 1;
             if self.abort_cleanup_retry_once {
                 self.abort_cleanup_retry_once = false;
                 Err(TestError::RetryAfter)
@@ -1243,6 +1279,7 @@ mod tests {
                 TestError::InvalidPayload => {
                     (DrafterErrorClass::InvalidPayload, DeliveryCertainty::NotAttempted)
                 }
+                TestError::Rejected => (DrafterErrorClass::Permanent, DeliveryCertainty::Rejected),
                 TestError::Ambiguous => (DrafterErrorClass::Ambiguous, DeliveryCertainty::Unknown),
             };
             DrafterErrorDisposition { class, delivery }
@@ -1524,12 +1561,14 @@ mod tests {
             fail_update_at: Some(2),
             final_attempts: Arc::new(Mutex::new(0)),
             retry_final_once: false,
+            rejected_final: false,
             ambiguous_final: false,
             commit_attempts: Arc::new(Mutex::new(0)),
             retry_commit_once: false,
             invalid_commit_once: false,
             cleanup_retry_once: false,
             abort_cleanup_retry_once: false,
+            abort_calls: Arc::new(Mutex::new(0)),
             preview_message_id: None,
             expires_without_refresh: true,
         };
@@ -1580,12 +1619,14 @@ mod tests {
             fail_update_at: None,
             final_attempts: Arc::clone(&final_attempts),
             retry_final_once: true,
+            rejected_final: false,
             ambiguous_final: false,
             commit_attempts: Arc::new(Mutex::new(0)),
             retry_commit_once: false,
             invalid_commit_once: false,
             cleanup_retry_once: false,
             abort_cleanup_retry_once: false,
+            abort_calls: Arc::new(Mutex::new(0)),
             preview_message_id: None,
             expires_without_refresh: false,
         };
@@ -1615,12 +1656,14 @@ mod tests {
             fail_update_at: None,
             final_attempts: Arc::new(Mutex::new(0)),
             retry_final_once: false,
+            rejected_final: false,
             ambiguous_final: false,
             commit_attempts: Arc::new(Mutex::new(0)),
             retry_commit_once: false,
             invalid_commit_once: false,
             cleanup_retry_once: true,
             abort_cleanup_retry_once: false,
+            abort_calls: Arc::new(Mutex::new(0)),
             preview_message_id: Some(teloxide_core::types::MessageId(77)),
             expires_without_refresh: false,
         };
@@ -1658,12 +1701,14 @@ mod tests {
             fail_update_at: None,
             final_attempts: Arc::new(Mutex::new(0)),
             retry_final_once: false,
+            rejected_final: false,
             ambiguous_final: false,
             commit_attempts: Arc::new(Mutex::new(0)),
             retry_commit_once: false,
             invalid_commit_once: false,
             cleanup_retry_once: true,
             abort_cleanup_retry_once: false,
+            abort_calls: Arc::new(Mutex::new(0)),
             preview_message_id: Some(teloxide_core::types::MessageId(77)),
             expires_without_refresh: false,
         };
@@ -1703,12 +1748,14 @@ mod tests {
             fail_update_at: None,
             final_attempts: Arc::new(Mutex::new(0)),
             retry_final_once: false,
+            rejected_final: false,
             ambiguous_final: false,
             commit_attempts: Arc::new(Mutex::new(0)),
             retry_commit_once: false,
             invalid_commit_once: false,
             cleanup_retry_once: false,
             abort_cleanup_retry_once: true,
+            abort_calls: Arc::new(Mutex::new(0)),
             preview_message_id: Some(teloxide_core::types::MessageId(88)),
             expires_without_refresh: false,
         };
@@ -1734,12 +1781,14 @@ mod tests {
             fail_update_at: None,
             final_attempts: Arc::new(Mutex::new(0)),
             retry_final_once: false,
+            rejected_final: false,
             ambiguous_final: false,
             commit_attempts: Arc::clone(&commit_attempts),
             retry_commit_once: true,
             invalid_commit_once: false,
             cleanup_retry_once: false,
             abort_cleanup_retry_once: false,
+            abort_calls: Arc::new(Mutex::new(0)),
             preview_message_id: None,
             expires_without_refresh: false,
         };
@@ -1767,12 +1816,14 @@ mod tests {
             fail_update_at: None,
             final_attempts: Arc::new(Mutex::new(0)),
             retry_final_once: false,
+            rejected_final: false,
             ambiguous_final: false,
             commit_attempts: Arc::clone(&commit_attempts),
             retry_commit_once: false,
             invalid_commit_once: true,
             cleanup_retry_once: false,
             abort_cleanup_retry_once: false,
+            abort_calls: Arc::new(Mutex::new(0)),
             preview_message_id: None,
             expires_without_refresh: false,
         };
@@ -1799,6 +1850,40 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn rejected_final_cleans_up_preview_before_returning_error() {
+        let abort_calls = Arc::new(Mutex::new(0));
+        let backend = ClassifiedBackend {
+            previews: Arc::new(Mutex::new(Vec::new())),
+            update_calls: 0,
+            fail_update_at: None,
+            final_attempts: Arc::new(Mutex::new(0)),
+            retry_final_once: false,
+            rejected_final: true,
+            ambiguous_final: false,
+            commit_attempts: Arc::new(Mutex::new(0)),
+            retry_commit_once: false,
+            invalid_commit_once: false,
+            cleanup_retry_once: false,
+            abort_cleanup_retry_once: false,
+            abort_calls: Arc::clone(&abort_calls),
+            preview_message_id: Some(teloxide_core::types::MessageId(90)),
+            expires_without_refresh: false,
+        };
+        let (drafter, _sink) = Drafter::snapshots(backend, NoopLimiter, DraftConfig::default())
+            .expect("fake drafter should start");
+
+        assert!(matches!(
+            drafter.finish("final".to_owned()).await,
+            Err(DraftFinishError::Backend {
+                class: DrafterErrorClass::Permanent,
+                delivery: DeliveryCertainty::Rejected,
+                ..
+            })
+        ));
+        assert_eq!(*abort_calls.lock().unwrap(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn ambiguous_final_is_not_retried() {
         let final_attempts = Arc::new(Mutex::new(0));
         let backend = ClassifiedBackend {
@@ -1807,12 +1892,14 @@ mod tests {
             fail_update_at: None,
             final_attempts: Arc::clone(&final_attempts),
             retry_final_once: false,
+            rejected_final: false,
             ambiguous_final: true,
             commit_attempts: Arc::new(Mutex::new(0)),
             retry_commit_once: false,
             invalid_commit_once: false,
             cleanup_retry_once: false,
             abort_cleanup_retry_once: false,
+            abort_calls: Arc::new(Mutex::new(0)),
             preview_message_id: None,
             expires_without_refresh: false,
         };

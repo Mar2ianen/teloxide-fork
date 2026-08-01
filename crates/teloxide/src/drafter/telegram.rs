@@ -39,7 +39,9 @@ fn classify_request_error(
             DrafterErrorClass::Transient {
                 retry_safe: !matches!(
                     operation,
-                    DrafterOperation::PreviewFirstSend | DrafterOperation::Final
+                    DrafterOperation::PreviewFirstSend
+                        | DrafterOperation::SegmentCommit
+                        | DrafterOperation::Final
                 ),
             },
             DeliveryCertainty::Unknown,
@@ -1692,5 +1694,14 @@ mod tests {
         assert_eq!(capabilities.mode, DrafterMode::EditInPlace);
         assert!(capabilities.supports_rich_preview);
         assert!(!capabilities.supports_draft_thinking);
+    }
+
+    #[test]
+    fn segment_commit_network_failure_is_not_retry_safe() {
+        let error = RequestError::Io(std::io::Error::other("connection lost").into());
+        let disposition = classify_request_error(DrafterOperation::SegmentCommit, &error);
+
+        assert_eq!(disposition.delivery, DeliveryCertainty::Unknown);
+        assert_eq!(disposition.class, DrafterErrorClass::Transient { retry_safe: false });
     }
 }

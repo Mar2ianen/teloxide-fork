@@ -418,14 +418,18 @@ fn parse_llm_numeric(source: &str, index: usize, dialect: &'static str) -> Marke
     if !date_prefix {
         return MarkerScan::NoMatch;
     }
+    // An ISO date followed by ordinary prose is not an explicit marker. Only
+    // the local datetime prefix through `HH:::` establishes marker intent;
+    // after that prefix, an invalid minute or terminator is malformed.
+    let has_clock_prefix = bytes.get(index + 11..index + 16).is_some_and(|part| {
+        part[0].is_ascii_digit() && part[1].is_ascii_digit() && part[2..] == *b":::"
+    });
+    if !has_clock_prefix {
+        return MarkerScan::NoMatch;
+    }
     let marker_end = index + 19;
-    let has_clock_shape = bytes.get(index + 11..index + 19).is_some_and(|part| {
-        part[0].is_ascii_digit()
-            && part[1].is_ascii_digit()
-            && part[2..5] == *b":::"
-            && part[5].is_ascii_digit()
-            && part[6].is_ascii_digit()
-            && part[7] == b'/'
+    let has_clock_shape = bytes.get(index + 16..index + 19).is_some_and(|part| {
+        part[0].is_ascii_digit() && part[1].is_ascii_digit() && part[2] == b'/'
     });
     if !has_clock_shape {
         return malformed_llm(
@@ -650,6 +654,20 @@ mod tests {
             rendered.fallback_text,
             "У нас 2 встречи: первая в 14:00\nВерсия 2, запуск в 2026-08-03 14:00"
         );
+
+        for source in ["2026-08-03 release", "2026-08-03 в 14:00", "2026-08-03T14:00"] {
+            let rendered = formatter.render_at(source, instant()).unwrap();
+            assert_eq!(rendered.fallback_text, source);
+        }
+
+        for source in ["2026-08-03 14:::00/", "2026-08-03T14:::00/"] {
+            let rendered = formatter.render_at(source, instant()).unwrap();
+            assert_eq!(rendered.fallback_text, "2026-08-03 14:00");
+        }
+
+        for source in ["2026-08-03 14:::xx/", "2026-08-03 14::::00/"] {
+            assert!(formatter.render_at(source, instant()).is_err(), "{source}");
+        }
     }
 
     #[test]

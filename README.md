@@ -43,6 +43,43 @@
 [`structopt`]: https://github.com/TeXitoi/structopt
 [`serde-json`]: https://github.com/serde-rs/json
 
+## Optional runtime features
+
+This fork includes two opt-in application layers that stay outside the default Telegram transport:
+
+- `drafter` provides asynchronous latest-wins preview delivery, shared rate limiting, native-draft and edit-in-place backends, segment commits, finalization, abort cleanup and delivery certainty
+- `time-rendering` provides explicit Markdown and typed time rendering with timezone normalization, deterministic DST handling and Telegram fallback text
+
+Enable only the layer an application needs:
+
+```toml
+teloxide = { version = "0.18.0", features = ["macros", "drafter", "time-rendering"] }
+```
+
+The Drafter example requires the feature explicitly:
+
+```bash
+TELOXIDE_TOKEN=... TELOXIDE_USER_ID=... \
+cargo run -p teloxide --features drafter --example drafter
+```
+
+For the full public API and feature matrix see [`crates/teloxide/src/features.md`](crates/teloxide/src/features.md). The implementation-specific delivery contract is documented in the Drafter module rustdoc and the time renderer API docs.
+
+### Release checks for optional features
+
+Changes to `drafter` or `time-rendering` should be checked with the pinned formatter and with both feature combinations enabled and disabled:
+
+```bash
+cargo +nightly-2025-06-12 fmt --all -- --check
+cargo test -p teloxide --features "drafter,time-rendering"
+cargo test -p teloxide --no-default-features --features drafter --lib
+cargo test -p teloxide --no-default-features --features time-rendering --lib
+cargo clippy -p teloxide --all-targets --features "drafter,time-rendering" -- -D warnings
+cargo check -p teloxide --example drafter --features drafter
+```
+
+Applications consuming the fork must pin the full teloxide commit and refresh their lockfile before publishing a release.
+
 ## Setting up your environment
 
  1. [Download Rust](http://rustup.rs/).

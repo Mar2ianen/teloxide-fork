@@ -16,11 +16,11 @@ use tracing::Instrument;
 
 use super::observer::next_instance_id;
 use super::{
-    AccumulatorSource, CleanupFailure, DraftAbortError, DraftCommitError, DraftConfig,
-    DraftFinishError, DraftFlushError, DraftPushError, DraftRevision, DraftStartError,
-    DrafterBackend, DrafterCapabilities, DrafterErrorClass, DrafterEvent, DrafterEventKind,
-    DrafterObserver, DrafterOperation, DrafterPermit, DrafterPriority, DrafterRateLimiter,
-    PreviewAck, PreviewSource, ReplacePreview,
+    AccumulatorSource, CleanupFailure, DeliveryCertainty, DraftAbortError, DraftCommitError,
+    DraftConfig, DraftFinishError, DraftFlushError, DraftPushError, DraftRevision, DraftStartError,
+    DrafterBackend, DrafterCapabilities, DrafterErrorClass, DrafterErrorDisposition, DrafterEvent,
+    DrafterEventKind, DrafterObserver, DrafterOperation, DrafterPermit, DrafterPriority,
+    DrafterRateLimiter, PreviewAck, PreviewSource, ReplacePreview,
 };
 
 /// A cloneable synchronous producer handle.
@@ -383,7 +383,7 @@ where
                 self.complete_flushes();
             }
             Ok(Err(error)) => {
-                let class = self
+                let disposition = self
                     .backend
                     .as_ref()
                     .expect("backend exists after preview")
@@ -393,7 +393,7 @@ where
                     Some(snapshot.revision),
                     Some(operation),
                 );
-                self.handle_preview_error(class, operation);
+                self.handle_preview_error(disposition.class, operation);
             }
             Err(_) => {
                 let retry_safe = !matches!(
@@ -500,7 +500,9 @@ where
                     let _ = waiter.reply.send(Err(DraftFlushError::WorkerStopped));
                 });
                 let Some(backend) = self.backend.as_mut() else {
-                    let _ = reply.send(Err(DraftCommitError::WorkerStopped));
+                    let _ = reply.send(Err(DraftCommitError::WorkerStoppedAfterCommand {
+                        delivery: DeliveryCertainty::NotAttempted,
+                    }));
                     return false;
                 };
                 let key = backend.rate_limit_key();
@@ -509,14 +511,17 @@ where
                 let chat_id = self.rate_limit_key.chat_id;
                 let segment = self.segment;
                 let mut payload_invalid = false;
+                let mut failure_disposition = None;
                 let result = loop {
                     let _permit = self.limiter.acquire(key, DrafterPriority::SegmentCommit).await;
                     match backend.commit_segment(&final_payload).await {
                         Ok(output) => break Ok(output),
                         Err(error) => {
-                            let class =
+                            let disposition =
                                 backend.classify_error(DrafterOperation::SegmentCommit, &error);
-                            if let DrafterErrorClass::RetryAfter { delay, scope } = class {
+                            if let DrafterErrorClass::RetryAfter { delay, scope } =
+                                disposition.class
+                            {
                                 emit_event(
                                     &observer,
                                     DrafterEvent {
@@ -536,7 +541,9 @@ where
                                 self.limiter.penalize(scope, delay);
                                 continue;
                             }
-                            payload_invalid = matches!(class, DrafterErrorClass::InvalidPayload);
+                            payload_invalid =
+                                matches!(disposition.class, DrafterErrorClass::InvalidPayload);
+                            failure_disposition = Some(disposition);
                             break Err(error);
                         }
                     }
@@ -569,7 +576,13 @@ where
                         if !payload_invalid {
                             self.source.close();
                         }
-                        let _ = reply.send(Err(DraftCommitError::Backend(error)));
+                        let disposition = failure_disposition
+                            .expect("non-retry segment commit errors have a disposition");
+                        let _ = reply.send(Err(DraftCommitError::Backend {
+                            source: error,
+                            class: disposition.class,
+                            delivery: disposition.delivery,
+                        }));
                         payload_invalid
                     }
                 }
@@ -581,7 +594,9 @@ where
                     let _ = waiter.reply.send(Err(DraftFlushError::WorkerStopped));
                 });
                 let Some(backend) = self.backend.as_mut() else {
-                    let _ = reply.send(Err(DraftFinishError::WorkerStopped));
+                    let _ = reply.send(Err(DraftFinishError::WorkerStoppedAfterCommand {
+                        delivery: DeliveryCertainty::NotAttempted,
+                    }));
                     return false;
                 };
                 let key = backend.rate_limit_key();
@@ -589,13 +604,17 @@ where
                 let mode = self.capabilities.mode;
                 let chat_id = self.rate_limit_key.chat_id;
                 let segment = self.segment;
+                let mut failure_disposition = None;
                 let result = loop {
                     let _permit = self.limiter.acquire(key, DrafterPriority::Final).await;
                     match backend.finish(&final_payload).await {
                         Ok(output) => break Ok(output),
                         Err(error) => {
-                            let class = backend.classify_error(DrafterOperation::Final, &error);
-                            if let DrafterErrorClass::RetryAfter { delay, scope } = class {
+                            let disposition =
+                                backend.classify_error(DrafterOperation::Final, &error);
+                            if let DrafterErrorClass::RetryAfter { delay, scope } =
+                                disposition.class
+                            {
                                 emit_event(
                                     &observer,
                                     DrafterEvent {
@@ -615,6 +634,7 @@ where
                                 self.limiter.penalize(scope, delay);
                                 continue;
                             }
+                            failure_disposition = Some(disposition);
                             break Err(error);
                         }
                     }
@@ -633,7 +653,16 @@ where
                     self.record(DrafterEventKind::FinalError, None, Some(DrafterOperation::Final));
                 }
                 self.backend.take();
-                let _ = reply.send(result.map_err(DraftFinishError::Backend));
+                let result = result.map_err(|source| {
+                    let disposition =
+                        failure_disposition.expect("non-retry final errors have a disposition");
+                    DraftFinishError::Backend {
+                        source,
+                        class: disposition.class,
+                        delivery: disposition.delivery,
+                    }
+                });
+                let _ = reply.send(result);
                 false
             }
             Command::Abort { reply } => {
@@ -646,15 +675,19 @@ where
                     let _ = reply.send(Err(DraftAbortError::WorkerStopped));
                     return false;
                 };
-                let (result, error_class) = {
+                let (result, error_disposition) = {
                     let result = backend.abort().await;
-                    let error_class = result
+                    let error_disposition = result
                         .as_ref()
                         .err()
                         .map(|error| backend.classify_error(DrafterOperation::Cleanup, error));
-                    (result, error_class)
+                    (result, error_disposition)
                 };
-                if let Some(DrafterErrorClass::RetryAfter { delay, scope }) = error_class {
+                if let Some(DrafterErrorDisposition {
+                    class: DrafterErrorClass::RetryAfter { delay, scope },
+                    ..
+                }) = error_disposition
+                {
                     self.record(
                         DrafterEventKind::RetryAfter,
                         None,
@@ -692,12 +725,12 @@ where
     }
 
     fn observe_cleanup_failure(&mut self, failure: CleanupFailure<B::Error>) {
-        let class = self
+        let disposition = self
             .backend
             .as_ref()
             .expect("backend exists while observing cleanup")
             .classify_error(DrafterOperation::Cleanup, &failure.error);
-        if let DrafterErrorClass::RetryAfter { delay, scope } = class {
+        if let DrafterErrorClass::RetryAfter { delay, scope } = disposition.class {
             self.record_with_preview_message_id(
                 DrafterEventKind::RetryAfter,
                 None,
@@ -857,8 +890,10 @@ where
         self.commands
             .send(Command::Commit { final_payload, reply })
             .await
-            .map_err(|_| DraftCommitError::WorkerStopped)?;
-        receiver.await.map_err(|_| DraftCommitError::WorkerStopped)?
+            .map_err(|_| DraftCommitError::WorkerStoppedBeforeCommand)?;
+        receiver.await.map_err(|_| DraftCommitError::WorkerStoppedAfterCommand {
+            delivery: DeliveryCertainty::Unknown,
+        })?
     }
 
     /// Stops previews and sends the permanent final payload.
@@ -869,9 +904,11 @@ where
         self.source.close();
         let (reply, receiver) = oneshot::channel();
         if self.commands.send(Command::Finish { final_payload, reply }).await.is_err() {
-            return Err(DraftFinishError::WorkerStopped);
+            return Err(DraftFinishError::WorkerStoppedBeforeCommand);
         }
-        let result = receiver.await.map_err(|_| DraftFinishError::WorkerStopped)?;
+        let result = receiver.await.map_err(|_| DraftFinishError::WorkerStoppedAfterCommand {
+            delivery: DeliveryCertainty::Unknown,
+        })?;
         if let Some(worker) = self.worker.take() {
             let _ = worker.await;
         }
@@ -1069,6 +1106,14 @@ mod tests {
         async fn abort(&mut self) -> Result<(), Self::Error> {
             Ok(())
         }
+
+        fn classify_error(
+            &self,
+            _operation: DrafterOperation,
+            error: &Self::Error,
+        ) -> DrafterErrorDisposition {
+            match *error {}
+        }
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -1181,16 +1226,24 @@ mod tests {
             &self,
             _operation: DrafterOperation,
             error: &Self::Error,
-        ) -> DrafterErrorClass {
-            match error {
-                TestError::RetryAfter => DrafterErrorClass::RetryAfter {
-                    delay: Duration::from_millis(20),
-                    scope: DrafterRateLimitScope::Global,
-                },
-                TestError::Transient => DrafterErrorClass::Transient { retry_safe: true },
-                TestError::InvalidPayload => DrafterErrorClass::InvalidPayload,
-                TestError::Ambiguous => DrafterErrorClass::Ambiguous,
-            }
+        ) -> DrafterErrorDisposition {
+            let (class, delivery) = match error {
+                TestError::RetryAfter => (
+                    DrafterErrorClass::RetryAfter {
+                        delay: Duration::from_millis(20),
+                        scope: DrafterRateLimitScope::Global,
+                    },
+                    DeliveryCertainty::Rejected,
+                ),
+                TestError::Transient => {
+                    (DrafterErrorClass::Transient { retry_safe: true }, DeliveryCertainty::Unknown)
+                }
+                TestError::InvalidPayload => {
+                    (DrafterErrorClass::InvalidPayload, DeliveryCertainty::NotAttempted)
+                }
+                TestError::Ambiguous => (DrafterErrorClass::Ambiguous, DeliveryCertainty::Unknown),
+            };
+            DrafterErrorDisposition { class, delivery }
         }
     }
 
@@ -1725,7 +1778,14 @@ mod tests {
             Drafter::snapshots(backend, NoopLimiter, DraftConfig::default()).unwrap();
 
         let first = drafter.commit_segment("invalid".to_owned()).await;
-        assert!(matches!(first, Err(DraftCommitError::Backend(TestError::InvalidPayload))));
+        assert!(matches!(
+            first,
+            Err(DraftCommitError::Backend {
+                source: TestError::InvalidPayload,
+                class: DrafterErrorClass::InvalidPayload,
+                delivery: DeliveryCertainty::NotAttempted,
+            })
+        ));
         assert!(matches!(
             sink.update("must wait for corrected commit".to_owned()),
             Err(DraftPushError::ClosedForTransition)
@@ -1758,7 +1818,14 @@ mod tests {
             Drafter::snapshots(backend, NoopLimiter, DraftConfig::default()).unwrap();
         let result = drafter.finish("final".to_owned()).await;
 
-        assert!(matches!(result, Err(DraftFinishError::Backend(TestError::Ambiguous))));
+        assert!(matches!(
+            result,
+            Err(DraftFinishError::Backend {
+                source: TestError::Ambiguous,
+                class: DrafterErrorClass::Ambiguous,
+                delivery: DeliveryCertainty::Unknown,
+            })
+        ));
         assert_eq!(*final_attempts.lock().unwrap(), 1);
     }
 

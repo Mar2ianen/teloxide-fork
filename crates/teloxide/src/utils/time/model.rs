@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use jiff::civil::{Date, DateTime, Time};
 
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DateTimeFormat {
     Time,

@@ -2,8 +2,8 @@ use jiff::Timestamp;
 use teloxide_core::types::InputRichMessage;
 
 use super::{
-    DateTimeFormat, DateTimeNode, RenderError, RichNode, TimeBindings, TimeContext, TimeExpression,
-    model::parse_expression,
+    model::parse_expression, DateTimeFormat, DateTimeNode, RenderError, RichNode, TimeBindings,
+    TimeContext, TimeExpression,
 };
 
 #[derive(Clone)]
@@ -171,10 +171,16 @@ fn scan_llm(source: &str) -> Result<Vec<RichNode>, RenderError> {
     scan(source, "llm", scan_llm_marker)
 }
 
+enum MarkerScan {
+    NoMatch,
+    Parsed(DateTimeNode, usize),
+    MalformedIntent(RenderError),
+}
+
 fn scan(
     source: &str,
     dialect: &'static str,
-    marker: impl Fn(&str, usize, &'static str) -> Result<Option<(DateTimeNode, usize)>, RenderError>,
+    marker: impl Fn(&str, usize, &'static str) -> MarkerScan,
 ) -> Result<Vec<RichNode>, RenderError> {
     let mut nodes = Vec::new();
     let mut text_start = 0;
@@ -192,18 +198,26 @@ fn scan(
             index = skip_escaped(source, index);
             continue;
         }
+        if let Some(end) = skip_uri(source, index) {
+            index = end;
+            continue;
+        }
         if source.as_bytes()[index] == b']' && source[index..].starts_with("](") {
             if let Some(end) = source[index + 2..].find(')') {
                 index += 2 + end + 1;
                 continue;
             }
         }
-        if let Some((node, end)) = marker(source, index, dialect)? {
-            push_text(&mut nodes, &source[text_start..index]);
-            nodes.push(RichNode::DateTime(node));
-            index = end;
-            text_start = end;
-            continue;
+        match marker(source, index, dialect) {
+            MarkerScan::NoMatch => {}
+            MarkerScan::Parsed(node, end) => {
+                push_text(&mut nodes, &source[text_start..index]);
+                nodes.push(RichNode::DateTime(node));
+                index = end;
+                text_start = end;
+                continue;
+            }
+            MarkerScan::MalformedIntent(error) => return Err(error),
         }
         index = next_char_boundary(source, index);
     }
@@ -211,13 +225,9 @@ fn scan(
     Ok(nodes)
 }
 
-fn scan_main_marker(
-    source: &str,
-    index: usize,
-    dialect: &'static str,
-) -> Result<Option<(DateTimeNode, usize)>, RenderError> {
+fn scan_main_marker(source: &str, index: usize, dialect: &'static str) -> MarkerScan {
     if !is_boundary_before(source, index) {
-        return Ok(None);
+        return MarkerScan::NoMatch;
     }
     let directives = [
         ("@time(", DateTimeFormat::Time),
@@ -228,11 +238,11 @@ fn scan_main_marker(
     let Some((literal, format)) =
         directives.iter().find(|(literal, _)| source[index..].starts_with(literal))
     else {
-        return Ok(None);
+        return MarkerScan::NoMatch;
     };
     let content_start = index + literal.len();
     let Some(close_offset) = source[content_start..].find(')') else {
-        return Err(RenderError::invalid(
+        return MarkerScan::MalformedIntent(RenderError::invalid(
             dialect,
             source,
             index,
@@ -242,13 +252,22 @@ fn scan_main_marker(
     };
     let content_end = content_start + close_offset;
     let content = &source[content_start..content_end];
-    let expression = parse_expression(content).map_err(|message| {
-        RenderError::invalid(dialect, source, index, &source[index..=content_end], message)
-    })?;
+    let expression = match parse_expression(content) {
+        Ok(expression) => expression,
+        Err(message) => {
+            return MarkerScan::MalformedIntent(RenderError::invalid(
+                dialect,
+                source,
+                index,
+                &source[index..=content_end],
+                message,
+            ));
+        }
+    };
     if matches!(format, DateTimeFormat::Relative)
         && !matches!(expression, TimeExpression::Now { .. } | TimeExpression::Variable { .. })
     {
-        return Err(RenderError::invalid(
+        return MarkerScan::MalformedIntent(RenderError::invalid(
             dialect,
             source,
             index,
@@ -256,115 +275,207 @@ fn scan_main_marker(
             "@relative accepts only `now` or a typed binding",
         ));
     }
-    Ok(Some((
+    MarkerScan::Parsed(
         DateTimeNode { expression, format: *format, source_range: index..content_end + 1 },
         content_end + 1,
-    )))
+    )
 }
 
-fn scan_llm_marker(
-    source: &str,
-    index: usize,
-    dialect: &'static str,
-) -> Result<Option<(DateTimeNode, usize)>, RenderError> {
+fn scan_llm_marker(source: &str, index: usize, dialect: &'static str) -> MarkerScan {
     if !is_boundary_before(source, index) {
-        return Ok(None);
-    }
-    if source[index..].starts_with(":::") {
-        return Err(RenderError::invalid(
-            dialect,
-            source,
-            index,
-            ":::",
-            "a literal `:::` must be escaped as `\\:::`",
-        ));
+        return MarkerScan::NoMatch;
     }
     if source[index..].starts_with("now") {
         return parse_llm_now(source, index, dialect);
     }
     if !source.as_bytes()[index].is_ascii_digit() {
-        return Ok(None);
+        return MarkerScan::NoMatch;
     }
-    let Some(slash_offset) = source[index..].find('/') else {
-        return Ok(None);
+    parse_llm_numeric(source, index, dialect)
+}
+
+fn parse_llm_now(source: &str, index: usize, dialect: &'static str) -> MarkerScan {
+    let after_now = index + 3;
+    let Some(next) = source.as_bytes().get(after_now).copied() else {
+        return MarkerScan::NoMatch;
     };
-    let end = index + slash_offset + 1;
-    let literal = &source[index..end];
-    let Some(marker_offset) = literal.find(":::") else {
-        return Ok(None);
-    };
-    let before = &literal[..marker_offset];
-    let after = &literal[marker_offset + 3..literal.len() - 1];
-    if after.contains(":::") || before.is_empty() || after.is_empty() {
-        return Err(RenderError::invalid(
-            dialect,
-            source,
-            index,
-            literal,
-            "malformed LLM time marker",
-        ));
+    if next != b'/' && next != b'+' && next != b'-' {
+        return MarkerScan::NoMatch;
     }
-    if after.len() != 2 || !after.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(RenderError::invalid(
-            dialect,
-            source,
-            index,
-            literal,
-            "minutes must contain exactly two digits",
-        ));
-    }
-    let expression_text = if before.len() == 2 {
-        format!("{before}:{after}")
-    } else if before.len() == 13 && matches!(before.as_bytes().get(10), Some(b' ' | b'T')) {
-        format!("{}T{}:{}", &before[..10], &before[11..], after)
+    let end = if next == b'/' {
+        after_now + 1
     } else {
-        format!("{before}:{after}")
+        let mut cursor = after_now + 1;
+        let mut pairs = 0;
+        while cursor < source.len() {
+            let digits_start = cursor;
+            while source.as_bytes().get(cursor).is_some_and(u8::is_ascii_digit) {
+                cursor += 1;
+            }
+            if cursor == digits_start {
+                return malformed_llm(
+                    source,
+                    index,
+                    cursor,
+                    dialect,
+                    "relative offset needs a number",
+                );
+            }
+            let Some(unit) = source.as_bytes().get(cursor).copied() else {
+                return malformed_llm(
+                    source,
+                    index,
+                    cursor,
+                    dialect,
+                    "relative marker is missing `/`",
+                );
+            };
+            if !matches!(unit, b's' | b'm' | b'h' | b'd' | b'w') {
+                return malformed_llm(
+                    source,
+                    index,
+                    cursor + 1,
+                    dialect,
+                    "unknown relative offset unit",
+                );
+            }
+            cursor += 1;
+            pairs += 1;
+            if source.as_bytes().get(cursor) == Some(&b'/') {
+                break;
+            }
+            if pairs >= 16 {
+                return malformed_llm(
+                    source,
+                    index,
+                    cursor,
+                    dialect,
+                    "relative offset is too long",
+                );
+            }
+        }
+        if source.as_bytes().get(cursor) != Some(&b'/') {
+            return malformed_llm(source, index, cursor, dialect, "relative marker is missing `/`");
+        }
+        cursor + 1
     };
-    let expression_text = expression_text.replace(' ', "T");
-    let expression = parse_expression(&expression_text)
-        .map_err(|message| RenderError::invalid(dialect, source, index, literal, message))?;
-    if !matches!(expression, TimeExpression::Clock(_) | TimeExpression::CivilDateTime(_)) {
-        return Err(RenderError::invalid(
-            dialect,
+    let literal = &source[index..end];
+    let expression = match parse_expression(&literal[..literal.len() - 1]) {
+        Ok(expression) => expression,
+        Err(message) => {
+            return MarkerScan::MalformedIntent(RenderError::invalid(
+                dialect, source, index, literal, message,
+            ));
+        }
+    };
+    MarkerScan::Parsed(
+        DateTimeNode { expression, format: DateTimeFormat::Time, source_range: index..end },
+        end,
+    )
+}
+
+fn parse_llm_numeric(source: &str, index: usize, dialect: &'static str) -> MarkerScan {
+    let bytes = source.as_bytes();
+    let clock = bytes.get(index..index + 5).is_some_and(|part| {
+        part[0].is_ascii_digit() && part[1].is_ascii_digit() && part[2..] == *b":::"
+    });
+    if clock {
+        let end = index + 8;
+        if bytes
+            .get(index + 5..index + 7)
+            .is_none_or(|part| part.len() != 2 || !part.iter().all(u8::is_ascii_digit))
+            || bytes.get(index + 7) != Some(&b'/')
+        {
+            return malformed_llm(
+                source,
+                index,
+                end.min(source.len()),
+                dialect,
+                "malformed clock marker",
+            );
+        }
+        let literal = &source[index..end];
+        return parsed_llm_time(
             source,
             index,
+            end,
             literal,
-            "LLM marker must be a clock or local datetime",
-        ));
+            format!("{}:{}", &literal[..2], &literal[5..7]),
+            dialect,
+        );
     }
+
+    let date_prefix = bytes.get(index..index + 10).is_some_and(|part| {
+        part[0..4].iter().all(|byte| byte.is_ascii_digit())
+            && part[4] == b'-'
+            && part[5..7].iter().all(|byte| byte.is_ascii_digit())
+            && part[7] == b'-'
+            && part[8..10].iter().all(|byte| byte.is_ascii_digit())
+    });
+    let Some(separator @ (b' ' | b'T')) = bytes.get(index + 10).copied() else {
+        return MarkerScan::NoMatch;
+    };
+    if !date_prefix {
+        return MarkerScan::NoMatch;
+    }
+    let marker_end = index + 19;
+    let has_clock_shape = bytes.get(index + 11..index + 19).is_some_and(|part| {
+        part[0].is_ascii_digit()
+            && part[1].is_ascii_digit()
+            && part[2..5] == *b":::"
+            && part[5].is_ascii_digit()
+            && part[6].is_ascii_digit()
+            && part[7] == b'/'
+    });
+    if !has_clock_shape {
+        return malformed_llm(
+            source,
+            index,
+            marker_end.min(source.len()),
+            dialect,
+            "malformed local datetime marker",
+        );
+    }
+    let literal = &source[index..marker_end];
+    let expression_text = format!("{}T{}:{}", &literal[..10], &literal[11..13], &literal[16..18]);
+    let _ = separator;
+    parsed_llm_time(source, index, marker_end, literal, expression_text, dialect)
+}
+
+fn parsed_llm_time(
+    source: &str,
+    index: usize,
+    end: usize,
+    _literal: &str,
+    expression_text: String,
+    dialect: &'static str,
+) -> MarkerScan {
+    let expression = match parse_expression(&expression_text) {
+        Ok(expression) => expression,
+        Err(message) => return malformed_llm(source, index, end, dialect, &message),
+    };
     let format = if matches!(expression, TimeExpression::Clock(_)) {
         DateTimeFormat::Time
     } else {
         DateTimeFormat::DateTime
     };
-    Ok(Some((DateTimeNode { expression, format, source_range: index..end }, end)))
+    MarkerScan::Parsed(DateTimeNode { expression, format, source_range: index..end }, end)
 }
 
-fn parse_llm_now(
+fn malformed_llm(
     source: &str,
     index: usize,
+    end: usize,
     dialect: &'static str,
-) -> Result<Option<(DateTimeNode, usize)>, RenderError> {
-    let Some(slash_offset) = source[index..].find('/') else {
-        return Ok(None);
-    };
-    let end = index + slash_offset + 1;
-    let literal = &source[index..end];
-    let expression = parse_expression(&literal[..literal.len() - 1])
-        .map_err(|message| RenderError::invalid(dialect, source, index, literal, message))?;
-    if !matches!(expression, TimeExpression::Now { .. }) {
-        return Err(RenderError::invalid(
-            dialect,
-            source,
-            index,
-            literal,
-            "invalid LLM relative time marker",
-        ));
-    }
-    Ok(Some((
-        DateTimeNode { expression, format: DateTimeFormat::Time, source_range: index..end },
-        end,
-    )))
+    message: &str,
+) -> MarkerScan {
+    MarkerScan::MalformedIntent(RenderError::invalid(
+        dialect,
+        source,
+        index,
+        &source[index..end.min(source.len())],
+        message,
+    ))
 }
 
 fn push_text(nodes: &mut Vec<RichNode>, text: &str) {
@@ -390,9 +501,43 @@ fn skip_inline_code(source: &str, index: usize) -> usize {
     source[index + run..].find(delimiter).map_or(source.len(), |offset| index + run + offset + run)
 }
 
+fn skip_uri(source: &str, index: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let (start, autolink) = if source[index..].starts_with("http://")
+        || source[index..].starts_with("https://")
+        || source[index..].starts_with("tg://")
+    {
+        (index, false)
+    } else if bytes.get(index) == Some(&b'<')
+        && (source[index + 1..].starts_with("http://")
+            || source[index + 1..].starts_with("https://")
+            || source[index + 1..].starts_with("tg://"))
+    {
+        (index + 1, true)
+    } else {
+        return None;
+    };
+    let mut cursor = start;
+    while cursor < source.len() {
+        let byte = bytes[cursor];
+        if byte.is_ascii_whitespace() || (!autolink && matches!(byte, b')' | b']')) {
+            break;
+        }
+        if autolink && byte == b'>' {
+            return Some(cursor + 1);
+        }
+        cursor += 1;
+    }
+    Some(cursor)
+}
+
 fn skip_escaped(source: &str, index: usize) -> usize {
     let next = next_char_boundary(source, index);
-    if next < source.len() { next_char_boundary(source, next) } else { next }
+    if next < source.len() {
+        next_char_boundary(source, next)
+    } else {
+        next
+    }
 }
 
 fn next_char_boundary(source: &str, index: usize) -> usize {
@@ -451,8 +596,10 @@ mod tests {
     #[test]
     fn llm_formatter_maps_clock_and_now() {
         let formatter = LlmMarkdownFormatter::new(context());
-        let rendered = formatter.render_at("14:::00/ and now+3h/.", instant()).unwrap();
-        assert_eq!(rendered.fallback_text, "14:00 and 16:00.");
+        let rendered = formatter
+            .render_at("14:::00/ and now/ now-15m/ now+2h30m/.", instant())
+            .unwrap();
+        assert_eq!(rendered.fallback_text, "14:00 and 13:00 12:45 15:30.");
     }
 
     #[test]
@@ -478,6 +625,35 @@ mod tests {
     }
 
     #[test]
+    fn llm_scanner_is_bounded_and_url_aware() {
+        let formatter = LlmMarkdownFormatter::new(context());
+        for source in [
+            "now we continue / later",
+            "nowadays/path",
+            "::: section",
+            "https://example.org/now/latest",
+            "https://example.org/archive/14:::00/path",
+            "<https://example.org/14:::00/path>",
+            "[link](https://example.org/now/latest)",
+        ] {
+            let rendered = formatter.render_at(source, instant()).unwrap();
+            assert_eq!(rendered.fallback_text, source);
+            assert!(!rendered.markdown.contains("tg://time"), "unexpected marker in {source}");
+        }
+
+        let rendered = formatter
+            .render_at(
+                "У нас 2 встречи: первая в 14:::00/\nВерсия 2, запуск в 2026-08-03 14:::00/",
+                instant(),
+            )
+            .unwrap();
+        assert_eq!(
+            rendered.fallback_text,
+            "У нас 2 встречи: первая в 14:00\nВерсия 2, запуск в 2026-08-03 14:00"
+        );
+    }
+
+    #[test]
     fn llm_formatter_rejects_malformed_marker() {
         let formatter = LlmMarkdownFormatter::new(context());
         assert!(formatter.render_at("24:::00/", instant()).is_err());
@@ -488,12 +664,12 @@ mod tests {
     #[test]
     fn main_formatter_rejects_missing_binding_and_invalid_relative_value() {
         let formatter = MainMarkdownFormatter::new(context());
-        assert!(
-            formatter.render_at("@time($missing)", &TimeBindings::default(), instant()).is_err()
-        );
-        assert!(
-            formatter.render_at("@relative(14:00)", &TimeBindings::default(), instant()).is_err()
-        );
+        assert!(formatter
+            .render_at("@time($missing)", &TimeBindings::default(), instant())
+            .is_err());
+        assert!(formatter
+            .render_at("@relative(14:00)", &TimeBindings::default(), instant())
+            .is_err());
     }
 
     #[test]

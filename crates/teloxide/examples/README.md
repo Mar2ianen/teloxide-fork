@@ -11,3 +11,5 @@ The `drafter` example demonstrates a native private-chat draft, explicit
 `TELOXIDE_USER_ID` to a real private-chat user ID when running it. Production
 applications should share one `InProcessRateLimiter` across all drafters using
 the same bot token.
+
+Run it with `cargo run -p teloxide --features drafter --example drafter`.

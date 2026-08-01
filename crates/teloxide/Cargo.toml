@@ -22,7 +22,7 @@ default = ["native-tls", "ctrlc_handler", "teloxide-core/default"]
 
 # Optional runtime layers that are useful to applications but are not part of
 # the core Telegram transport.
-drafter = []
+drafter = ["tokio/sync", "tokio/time", "tokio/macros"]
 time-rendering = ["dep:jiff"]
 
 webhooks = ["rand"]
@@ -100,7 +100,7 @@ serde = { version = "1.0", features = ["derive"] }
 
 dptree = "0.5.1"
 
-tokio = { version = "1.39", features = ["fs", "rt-multi-thread", "macros"] }
+tokio = { version = "1.39", features = ["fs", "rt-multi-thread"] }
 tokio-util = "0.7"
 tokio-stream = "0.1.8"
 
@@ -195,6 +195,10 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 [[example]]
 name = "admin"
 required-features = ["macros", "ctrlc_handler"]
+
+[[example]]
+name = "drafter"
+required-features = ["drafter"]
 
 # This is required due to some stuff with dev-dependencies,
 # backwards compatability and cargo:

@@ -29,8 +29,9 @@ pub use backend::{
 };
 pub use config::{DraftConfig, DraftSchedule};
 pub use error::{
-    DraftAbortError, DraftCommitError, DraftConfigError, DraftFinishError, DraftFlushError,
-    DraftPushError, DraftRevision, DraftStartError, DrafterErrorClass, DrafterOperation,
+    DeliveryCertainty, DraftAbortError, DraftCommitError, DraftConfigError, DraftFinishError,
+    DraftFlushError, DraftPushError, DraftRevision, DraftStartError, DrafterErrorClass,
+    DrafterErrorDisposition, DrafterOperation,
 };
 pub use limiter::{
     DrafterPermit, DrafterPriority, DrafterRateLimitKey, DrafterRateLimitScope, DrafterRateLimiter,

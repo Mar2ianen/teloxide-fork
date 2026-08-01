@@ -10,6 +10,7 @@ mod config;
 mod error;
 mod limiter;
 mod machine;
+mod observer;
 mod source;
 mod telegram;
 
@@ -24,6 +25,12 @@ pub use limiter::{
     InProcessRateLimiter,
 };
 pub use machine::{DraftSink, Drafter};
+#[cfg(feature = "tracing")]
+pub use observer::TracingDrafterObserver;
+pub use observer::{
+    DrafterEvent, DrafterEventKind, DrafterMetricsCollector, DrafterMetricsSnapshot,
+    DrafterObserver, NoopDrafterObserver,
+};
 pub use source::{
     AccumulatorSource, DraftAccumulator, PreviewSnapshot, PreviewSource, ReplacePreview,
 };
@@ -31,5 +38,6 @@ pub use telegram::{
     EditAbortPolicy, EditInPlaceBackend, NativeRichBackend, NativeRichDrafterBackend,
     NativeTextBackend, NativeTextDrafterBackend, RichEditInPlaceBackend, SnapshotDrafter,
     StatusCleanup, StatusEditThenSendFinalBackend, StatusTextDrafterBackend, StatusThenRichBackend,
-    StatusThenTextBackend, TelegramDrafter, TelegramDrafterPolicy,
+    StatusThenTextBackend, TelegramDraftOptions, TelegramDrafter, TelegramDrafterPolicy,
+    TelegramEditOptions, TelegramSendOptions,
 };

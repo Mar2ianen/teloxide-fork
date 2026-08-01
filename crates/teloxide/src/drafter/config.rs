@@ -17,7 +17,8 @@ pub struct DraftConfig {
     pub retry_initial: Duration,
     /// Maximum delay used for retryable preview failures.
     pub retry_max: Duration,
-    /// Number of consecutive preview failures after which previews are disabled.
+    /// Number of consecutive preview failures after which previews are
+    /// disabled.
     pub max_consecutive_preview_failures: Option<u32>,
 }
 

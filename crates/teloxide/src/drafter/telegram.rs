@@ -1259,15 +1259,15 @@ where
     }
 }
 
-/// Edit-in-place backend that keeps a plain preview and replaces it with a
-/// rich final message. Rich editing is currently exposed for the concrete
-/// `Bot`, whose multipart request factory is available as an inherent method.
+/// Edit-in-place backend that keeps one rich message from preview to final.
+/// Rich editing is currently exposed for the concrete `Bot`, whose multipart
+/// request factory is available as an inherent method.
 pub struct RichEditInPlaceBackend {
     bot: Bot,
     chat_id: ChatId,
     message_id: Option<MessageId>,
     last_message: Option<Message>,
-    last_fingerprint: Option<u64>,
+    last_preview: Option<InputRichMessage>,
     send_options: TelegramSendOptions,
     edit_options: TelegramEditOptions,
     abort_policy: EditAbortPolicy,
@@ -1281,7 +1281,7 @@ impl RichEditInPlaceBackend {
             chat_id,
             message_id: None,
             last_message: None,
-            last_fingerprint: None,
+            last_preview: None,
             send_options: TelegramSendOptions::default(),
             edit_options: TelegramEditOptions::default(),
             abort_policy: EditAbortPolicy::KeepPreview,
@@ -1320,7 +1320,7 @@ impl RichEditInPlaceBackend {
 }
 
 impl DrafterBackend for RichEditInPlaceBackend {
-    type Preview = String;
+    type Preview = InputRichMessage;
     type Final = InputRichMessage;
     type SegmentOutput = Message;
     type Output = Message;
@@ -1331,7 +1331,7 @@ impl DrafterBackend for RichEditInPlaceBackend {
             mode: DrafterMode::EditInPlace,
             expires_without_refresh: false,
             supports_draft_thinking: false,
-            supports_rich_preview: false,
+            supports_rich_preview: true,
         }
     }
 
@@ -1343,30 +1343,30 @@ impl DrafterBackend for RichEditInPlaceBackend {
         self.message_id
     }
 
-    async fn update(&mut self, preview: String) -> Result<PreviewAck, RequestError> {
-        let current_fingerprint = fingerprint(&preview);
-        if self.last_fingerprint == Some(current_fingerprint) {
+    async fn update(&mut self, preview: InputRichMessage) -> Result<PreviewAck, RequestError> {
+        if self.last_preview.as_ref() == Some(&preview) {
             return Ok(PreviewAck);
         }
         let result = if let Some(message_id) = self.message_id {
             apply_edit_options(
-                self.bot.edit_message_text(self.chat_id, message_id, preview),
+                self.bot.edit_message_rich_text(self.chat_id, message_id, preview.clone()),
                 &self.edit_options,
             )
             .await
         } else {
-            let message = send_text(&self.bot, self.chat_id, preview, &self.send_options).await?;
+            let message =
+                send_rich(&self.bot, self.chat_id, preview.clone(), &self.send_options).await?;
             self.message_id = Some(message.id);
             Ok(message)
         };
         match result {
             Ok(message) => {
                 self.last_message = Some(message);
-                self.last_fingerprint = Some(current_fingerprint);
+                self.last_preview = Some(preview);
                 Ok(PreviewAck)
             }
             Err(error) if is_message_not_modified(&error) => {
-                self.last_fingerprint = Some(current_fingerprint);
+                self.last_preview = Some(preview);
                 Ok(PreviewAck)
             }
             Err(error) => Err(error),
@@ -1396,7 +1396,7 @@ impl DrafterBackend for RichEditInPlaceBackend {
         if result.is_ok() {
             self.message_id = None;
             self.last_message = None;
-            self.last_fingerprint = None;
+            self.last_preview = None;
         }
         result
     }
@@ -1529,7 +1529,7 @@ impl TelegramDrafter {
         chat_id: ChatId,
         config: DraftConfig,
         limiter: L,
-    ) -> Result<SnapshotDrafter<String, RichEditInPlaceBackend, L>, DraftStartError>
+    ) -> Result<SnapshotDrafter<InputRichMessage, RichEditInPlaceBackend, L>, DraftStartError>
     where
         L: super::DrafterRateLimiter,
     {
@@ -1670,5 +1670,15 @@ mod tests {
             &edit_options,
         );
         assert_eq!(edit.parse_mode, Some(ParseMode::Html));
+    }
+
+    #[test]
+    fn rich_edit_backend_keeps_one_rich_message() {
+        let backend = RichEditInPlaceBackend::new(Bot::new("token"), ChatId(1));
+        let capabilities = backend.capabilities();
+
+        assert_eq!(capabilities.mode, DrafterMode::EditInPlace);
+        assert!(capabilities.supports_rich_preview);
+        assert!(!capabilities.supports_draft_thinking);
     }
 }

@@ -34,6 +34,12 @@ pub trait PreviewSource: Send + Sync + 'static {
     type Preview: Send + 'static;
 
     fn apply(&self, update: Self::Update) -> Result<DraftRevision, DraftPushError>;
+    /// Builds a preview while the source mutex is held.
+    ///
+    /// Accumulators must keep this operation bounded and non-blocking. Heavy
+    /// rendering here stalls every producer calling `push`, so expensive
+    /// rendering belongs after `snapshot` has returned, outside the source
+    /// lock.
     fn snapshot(&self) -> Option<PreviewSnapshot<Self::Preview>>;
     fn current_revision(&self) -> DraftRevision;
     fn dirty_since(&self) -> Option<Instant>;

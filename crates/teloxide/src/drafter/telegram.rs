@@ -37,9 +37,8 @@ fn classify_request_error(operation: DrafterOperation, error: &RequestError) -> 
                 ),
             }
         }
-        RequestError::Validation(_) | RequestError::Api(_) | RequestError::MigrateToChatId(_) => {
-            DrafterErrorClass::Permanent
-        }
+        RequestError::Validation(_) => DrafterErrorClass::InvalidPayload,
+        RequestError::Api(_) | RequestError::MigrateToChatId(_) => DrafterErrorClass::Permanent,
     }
 }
 

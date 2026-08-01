@@ -85,6 +85,24 @@ pub enum DrafterErrorClass {
     Ambiguous,
 }
 
+/// Certainty about whether an external side effect was applied.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeliveryCertainty {
+    /// The request was rejected locally and never reached the external API.
+    NotAttempted,
+    /// The remote API explicitly rejected the request.
+    Rejected,
+    /// The request may have been applied, but confirmation was lost.
+    Unknown,
+}
+
+/// Retry classification together with the delivery certainty of the failure.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrafterErrorDisposition {
+    pub class: DrafterErrorClass,
+    pub delivery: DeliveryCertainty,
+}
+
 /// Error returned by `flush` when the worker cannot deliver the target.
 #[derive(Debug)]
 pub enum DraftFlushError {
@@ -106,15 +124,23 @@ impl std::error::Error for DraftFlushError {}
 /// Error returned by `commit_segment`.
 #[derive(Debug)]
 pub enum DraftCommitError<E> {
-    WorkerStopped,
-    Backend(E),
+    WorkerStoppedBeforeCommand,
+    WorkerStoppedAfterCommand { delivery: DeliveryCertainty },
+    Backend { source: E, class: DrafterErrorClass, delivery: DeliveryCertainty },
 }
 
 impl<E: fmt::Display> fmt::Display for DraftCommitError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::WorkerStopped => f.write_str("drafter worker stopped"),
-            Self::Backend(error) => write!(f, "segment commit failed: {error}"),
+            Self::WorkerStoppedBeforeCommand => {
+                f.write_str("drafter worker stopped before segment commit command")
+            }
+            Self::WorkerStoppedAfterCommand { delivery } => {
+                write!(f, "drafter worker stopped after segment commit command ({delivery:?})")
+            }
+            Self::Backend { source, class, delivery } => {
+                write!(f, "segment commit failed ({class:?}, {delivery:?}): {source}")
+            }
         }
     }
 }
@@ -124,15 +150,23 @@ impl<E: std::error::Error + 'static> std::error::Error for DraftCommitError<E> {
 /// Error returned by `finish`.
 #[derive(Debug)]
 pub enum DraftFinishError<E> {
-    WorkerStopped,
-    Backend(E),
+    WorkerStoppedBeforeCommand,
+    WorkerStoppedAfterCommand { delivery: DeliveryCertainty },
+    Backend { source: E, class: DrafterErrorClass, delivery: DeliveryCertainty },
 }
 
 impl<E: fmt::Display> fmt::Display for DraftFinishError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::WorkerStopped => f.write_str("drafter worker stopped"),
-            Self::Backend(error) => write!(f, "final delivery failed: {error}"),
+            Self::WorkerStoppedBeforeCommand => {
+                f.write_str("drafter worker stopped before final command")
+            }
+            Self::WorkerStoppedAfterCommand { delivery } => {
+                write!(f, "drafter worker stopped after final command ({delivery:?})")
+            }
+            Self::Backend { source, class, delivery } => {
+                write!(f, "final delivery failed ({class:?}, {delivery:?}): {source}")
+            }
         }
     }
 }

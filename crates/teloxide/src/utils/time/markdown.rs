@@ -596,9 +596,8 @@ mod tests {
     #[test]
     fn llm_formatter_maps_clock_and_now() {
         let formatter = LlmMarkdownFormatter::new(context());
-        let rendered = formatter
-            .render_at("14:::00/ and now/ now-15m/ now+2h30m/.", instant())
-            .unwrap();
+        let rendered =
+            formatter.render_at("14:::00/ and now/ now-15m/ now+2h30m/.", instant()).unwrap();
         assert_eq!(rendered.fallback_text, "14:00 and 13:00 12:45 15:30.");
     }
 

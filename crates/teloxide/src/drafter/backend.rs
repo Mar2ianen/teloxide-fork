@@ -50,12 +50,12 @@ pub trait DrafterBackend: Send + 'static {
 
     fn commit_segment(
         &mut self,
-        final_payload: Self::Final,
+        final_payload: &Self::Final,
     ) -> impl Future<Output = Result<Self::SegmentOutput, Self::Error>> + Send;
 
     fn finish(
-        self,
-        final_payload: Self::Final,
+        &mut self,
+        final_payload: &Self::Final,
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send;
 
     fn abort(self) -> impl Future<Output = Result<(), Self::Error>> + Send;

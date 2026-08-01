@@ -170,6 +170,7 @@ impl DrafterRateLimiter for InProcessRateLimiter {
                     other.id != current.id
                         && (other.priority > current.priority
                             || (other.priority == current.priority && other.id < current.id))
+                        && state.availability_deadline(other.key, now) <= now
                 });
                 if !has_priority_waiter && own_deadline <= now {
                     state.waiters.retain(|waiter| waiter.id != id);
@@ -178,19 +179,10 @@ impl DrafterRateLimiter for InProcessRateLimiter {
                     waiter.active = false;
                     self.notify.notify_waiters();
                     None
+                } else if has_priority_waiter && own_deadline <= now {
+                    Some(now)
                 } else {
-                    let blocker_deadline = state
-                        .waiters
-                        .iter()
-                        .filter(|other| {
-                            other.id != current.id
-                                && (other.priority > current.priority
-                                    || (other.priority == current.priority
-                                        && other.id < current.id))
-                        })
-                        .map(|other| state.availability_deadline(other.key, now))
-                        .min();
-                    Some(own_deadline.max(blocker_deadline.unwrap_or(own_deadline)))
+                    Some(own_deadline)
                 }
             };
 
@@ -292,5 +284,33 @@ mod tests {
         tokio::time::advance(Duration::from_secs(5)).await;
         tokio::task::yield_now().await;
         waiter.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn penalized_final_does_not_block_other_chat() {
+        let limiter = InProcessRateLimiter::new(Duration::ZERO, Duration::ZERO);
+        let chat_a = DrafterRateLimitKey { chat_id: ChatId(1) };
+        let chat_b = DrafterRateLimitKey { chat_id: ChatId(2) };
+        limiter.penalize(DrafterRateLimitScope::Chat(chat_a.chat_id), Duration::from_secs(60));
+
+        let final_waiter = {
+            let limiter = limiter.clone();
+            tokio::spawn(async move {
+                limiter.acquire(chat_a, DrafterPriority::Final).await;
+            })
+        };
+        tokio::task::yield_now().await;
+
+        let other_chat = {
+            let limiter = limiter.clone();
+            tokio::spawn(async move {
+                limiter.acquire(chat_b, DrafterPriority::ChangedPreview).await;
+            })
+        };
+        tokio::task::yield_now().await;
+        assert!(other_chat.is_finished());
+        other_chat.await.unwrap();
+        assert!(!final_waiter.is_finished());
+        final_waiter.abort();
     }
 }

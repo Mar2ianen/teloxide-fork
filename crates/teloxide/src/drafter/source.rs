@@ -11,6 +11,7 @@ pub trait DraftAccumulator: Send + 'static {
 
     fn apply(&mut self, update: Self::Update);
     fn snapshot(&self) -> Option<Self::Preview>;
+    fn reset_segment(&mut self);
 }
 
 /// An owned snapshot produced by a source after a permit was acquired.
@@ -212,6 +213,7 @@ impl<A: DraftAccumulator> PreviewSource for AccumulatorSource<A> {
 
     fn reopen_segment(&self) {
         let mut state = self.state.lock().expect("drafter accumulator mutex poisoned");
+        state.accumulator.reset_segment();
         state.gate = SourceGate::Running;
         state.revision = DraftRevision::default();
         state.dirty_since = None;

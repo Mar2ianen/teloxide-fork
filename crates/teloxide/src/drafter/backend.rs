@@ -4,7 +4,7 @@ use std::{
     sync::atomic::{AtomicI32, Ordering},
 };
 
-use teloxide_core::types::ChatId;
+use teloxide_core::types::{ChatId, MessageId};
 
 use super::{DrafterErrorClass, DrafterOperation, DrafterRateLimitKey};
 
@@ -43,6 +43,16 @@ pub trait DrafterBackend: Send + 'static {
         DrafterRateLimitKey { chat_id: ChatId(0) }
     }
 
+    /// Native draft identifier, when the backend owns one.
+    fn draft_id(&self) -> Option<DraftId> {
+        None
+    }
+
+    /// Current preview message identifier for message-based backends.
+    fn preview_message_id(&self) -> Option<MessageId> {
+        None
+    }
+
     fn update(
         &mut self,
         preview: Self::Preview,
@@ -66,6 +76,14 @@ pub trait DrafterBackend: Send + 'static {
         _error: &Self::Error,
     ) -> DrafterErrorClass {
         DrafterErrorClass::Transient { retry_safe: true }
+    }
+
+    /// Takes a best-effort cleanup error observed after a successful delivery.
+    ///
+    /// Cleanup must not turn an already confirmed final delivery into a retry,
+    /// but schedulers can still expose the failure through observability.
+    fn take_cleanup_error(&mut self) -> Option<Self::Error> {
+        None
     }
 }
 

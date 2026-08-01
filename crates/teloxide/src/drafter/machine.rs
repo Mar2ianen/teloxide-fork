@@ -9,8 +9,9 @@ use tracing::Instrument;
 use super::{
     AccumulatorSource, DraftAbortError, DraftCommitError, DraftConfig, DraftFinishError,
     DraftFlushError, DraftPushError, DraftRevision, DraftStartError, DrafterBackend,
-    DrafterCapabilities, DrafterErrorClass, DrafterOperation, DrafterPermit, DrafterPriority,
-    DrafterRateLimiter, PreviewAck, PreviewSource, ReplacePreview,
+    DrafterCapabilities, DrafterErrorClass, DrafterEvent, DrafterEventKind, DrafterObserver,
+    DrafterOperation, DrafterPermit, DrafterPriority, DrafterRateLimiter, PreviewAck,
+    PreviewSource, ReplacePreview,
 };
 
 /// A cloneable synchronous producer handle.
@@ -92,6 +93,23 @@ where
     consecutive_preview_failures: u32,
     preview_disabled: bool,
     flush_waiters: Vec<FlushWaiter<B::Error>>,
+    observer: Arc<dyn DrafterObserver>,
+    rate_limit_key: super::DrafterRateLimitKey,
+    segment: u64,
+    last_observed_revision: DraftRevision,
+    last_coalesced_revision: DraftRevision,
+}
+
+fn emit_event(
+    observer: &Arc<dyn DrafterObserver>,
+    mode: super::DrafterMode,
+    chat_id: teloxide_core::types::ChatId,
+    segment: u64,
+    kind: DrafterEventKind,
+    revision: Option<DraftRevision>,
+    operation: Option<DrafterOperation>,
+) {
+    observer.record(DrafterEvent { kind, mode, chat_id, segment, revision, operation });
 }
 
 impl<S, B, L> Worker<S, B, L>
@@ -106,12 +124,14 @@ where
                 PreviewRunResult::Continue => continue,
                 PreviewRunResult::Command(Some(command)) => {
                     if !self.handle_command(command).await {
+                        self.record(DrafterEventKind::WorkerStop, None, None);
                         return;
                     }
                     continue;
                 }
                 PreviewRunResult::Command(None) => {
                     self.source.close();
+                    self.record(DrafterEventKind::WorkerStop, None, None);
                     return;
                 }
                 PreviewRunResult::Idle => {}
@@ -123,11 +143,13 @@ where
                 command = self.command_rx.recv() => match command {
                     Some(command) => {
                         if !self.handle_command(command).await {
+                            self.record(DrafterEventKind::WorkerStop, None, None);
                             return;
                         }
                     }
                     None => {
                         self.source.close();
+                        self.record(DrafterEventKind::WorkerStop, None, None);
                         return;
                     }
                 },
@@ -141,6 +163,23 @@ where
                 } => {},
             }
         }
+    }
+
+    fn record(
+        &self,
+        kind: DrafterEventKind,
+        revision: Option<DraftRevision>,
+        operation: Option<DrafterOperation>,
+    ) {
+        emit_event(
+            &self.observer,
+            self.capabilities.mode,
+            self.rate_limit_key.chat_id,
+            self.segment,
+            kind,
+            revision,
+            operation,
+        );
     }
 
     fn next_deadline(&self) -> Option<Instant> {
@@ -190,6 +229,10 @@ where
 
         let now = Instant::now();
         let current_revision = self.source.current_revision();
+        if current_revision > self.last_observed_revision {
+            self.last_observed_revision = current_revision;
+            self.record(DrafterEventKind::Update, Some(current_revision), None);
+        }
         let changed = current_revision > self.last_delivered;
         let flush_requested =
             self.flush_waiters.iter().any(|waiter| waiter.target > self.last_delivered);
@@ -211,6 +254,10 @@ where
                 .is_none_or(|last_attempt| now >= last_attempt + self.config.min_update_interval)
             && self.retry_not_before.is_none_or(|deadline| now >= deadline);
         if !changed_due && !refresh_due {
+            if changed && current_revision > self.last_coalesced_revision {
+                self.last_coalesced_revision = current_revision;
+                self.record(DrafterEventKind::Coalesced, Some(current_revision), None);
+            }
             self.complete_flushes();
             return PreviewRunResult::Idle;
         }
@@ -222,6 +269,9 @@ where
         } else {
             DrafterPriority::RefreshPreview
         };
+        if refresh_due {
+            self.record(DrafterEventKind::Refresh, Some(current_revision), Some(reason));
+        }
 
         let Some(backend) = self.backend.as_ref() else {
             return PreviewRunResult::Idle;
@@ -250,6 +300,7 @@ where
         self.last_attempt = Some(Instant::now());
         self.retry_not_before = None;
         let operation = if refresh_due { DrafterOperation::Refresh } else { reason };
+        self.record(DrafterEventKind::PreviewStart, Some(snapshot.revision), Some(operation));
         let result = {
             let backend = self.backend.as_mut().expect("backend exists before preview");
             tokio::time::timeout(self.config.request_timeout, backend.update(snapshot.preview))
@@ -267,6 +318,11 @@ where
                     .capabilities
                     .expires_without_refresh
                     .then_some(Instant::now() + self.config.refresh_interval);
+                self.record(
+                    DrafterEventKind::PreviewSuccess,
+                    Some(snapshot.revision),
+                    Some(operation),
+                );
                 self.complete_flushes();
             }
             Ok(Err(error)) => {
@@ -275,6 +331,11 @@ where
                     .as_ref()
                     .expect("backend exists after preview")
                     .classify_error(operation, &error);
+                self.record(
+                    DrafterEventKind::PreviewError,
+                    Some(snapshot.revision),
+                    Some(operation),
+                );
                 self.handle_preview_error(class);
             }
             Err(_) => {
@@ -282,6 +343,11 @@ where
                     self.capabilities.mode,
                     super::DrafterMode::EditInPlace | super::DrafterMode::StatusEditThenSendFinal
                 ) || self.last_delivered > DraftRevision::default();
+                self.record(
+                    DrafterEventKind::PreviewTimeout,
+                    Some(snapshot.revision),
+                    Some(operation),
+                );
                 self.handle_preview_error(DrafterErrorClass::Transient { retry_safe });
             }
         }
@@ -292,6 +358,7 @@ where
         self.consecutive_preview_failures = self.consecutive_preview_failures.saturating_add(1);
         match class {
             DrafterErrorClass::RetryAfter { delay, scope } => {
+                self.record(DrafterEventKind::RetryAfter, None, None);
                 self.limiter.penalize(scope, delay);
                 self.retry_not_before = Some(Instant::now() + delay);
             }
@@ -318,10 +385,23 @@ where
     fn complete_flushes(&mut self) {
         let last_delivered = self.last_delivered;
         let preview_disabled = self.preview_disabled;
+        let observer = Arc::clone(&self.observer);
+        let mode = self.capabilities.mode;
+        let chat_id = self.rate_limit_key.chat_id;
+        let segment = self.segment;
         let mut remaining = Vec::with_capacity(self.flush_waiters.len());
         for waiter in self.flush_waiters.drain(..) {
             if waiter.target <= last_delivered {
                 let _ = waiter.reply.send(Ok(last_delivered));
+                emit_event(
+                    &observer,
+                    mode,
+                    chat_id,
+                    segment,
+                    DrafterEventKind::FlushComplete,
+                    Some(last_delivered),
+                    None,
+                );
             } else if preview_disabled {
                 let _ = waiter.reply.send(Err(DraftFlushError::PreviewDisabled));
             } else {
@@ -334,8 +414,10 @@ where
     async fn handle_command(&mut self, command: Command<B>) -> bool {
         match command {
             Command::Flush { target, reply } => {
+                self.record(DrafterEventKind::FlushStart, Some(target), None);
                 if target <= self.last_delivered {
                     let _ = reply.send(Ok(self.last_delivered));
+                    self.record(DrafterEventKind::FlushComplete, Some(self.last_delivered), None);
                 } else if self.preview_disabled {
                     let _ = reply.send(Err(DraftFlushError::PreviewDisabled));
                 } else {
@@ -353,6 +435,10 @@ where
                     return false;
                 };
                 let key = backend.rate_limit_key();
+                let observer = Arc::clone(&self.observer);
+                let mode = self.capabilities.mode;
+                let chat_id = self.rate_limit_key.chat_id;
+                let segment = self.segment;
                 let result = loop {
                     let _permit = self.limiter.acquire(key, DrafterPriority::SegmentCommit).await;
                     match backend.commit_segment(&final_payload).await {
@@ -361,6 +447,15 @@ where
                             let class =
                                 backend.classify_error(DrafterOperation::SegmentCommit, &error);
                             if let DrafterErrorClass::RetryAfter { delay, scope } = class {
+                                emit_event(
+                                    &observer,
+                                    mode,
+                                    chat_id,
+                                    segment,
+                                    DrafterEventKind::RetryAfter,
+                                    None,
+                                    Some(DrafterOperation::SegmentCommit),
+                                );
                                 self.limiter.penalize(scope, delay);
                                 continue;
                             }
@@ -368,14 +463,34 @@ where
                         }
                     }
                 };
+                let cleanup_failed = backend.take_cleanup_error().is_some();
                 match result {
                     Ok(output) => {
+                        if cleanup_failed {
+                            self.record(
+                                DrafterEventKind::CleanupError,
+                                None,
+                                Some(DrafterOperation::Cleanup),
+                            );
+                        }
+                        self.record(
+                            DrafterEventKind::SegmentCommit,
+                            None,
+                            Some(DrafterOperation::SegmentCommit),
+                        );
                         self.source.reopen_segment();
                         self.reset_segment_state();
+                        self.segment = self.segment.saturating_add(1);
+                        self.record(DrafterEventKind::SegmentRotate, None, None);
                         let _ = reply.send(Ok(output));
                         true
                     }
                     Err(error) => {
+                        self.record(
+                            DrafterEventKind::SegmentCommitError,
+                            None,
+                            Some(DrafterOperation::SegmentCommit),
+                        );
                         self.source.close();
                         let _ = reply.send(Err(DraftCommitError::Backend(error)));
                         false
@@ -383,6 +498,7 @@ where
                 }
             }
             Command::Finish { final_payload, reply } => {
+                self.record(DrafterEventKind::FinishStart, None, Some(DrafterOperation::Final));
                 self.source.close();
                 self.flush_waiters.drain(..).for_each(|waiter| {
                     let _ = waiter.reply.send(Err(DraftFlushError::WorkerStopped));
@@ -392,6 +508,10 @@ where
                     return false;
                 };
                 let key = backend.rate_limit_key();
+                let observer = Arc::clone(&self.observer);
+                let mode = self.capabilities.mode;
+                let chat_id = self.rate_limit_key.chat_id;
+                let segment = self.segment;
                 let result = loop {
                     let _permit = self.limiter.acquire(key, DrafterPriority::Final).await;
                     match backend.finish(&final_payload).await {
@@ -399,6 +519,15 @@ where
                         Err(error) => {
                             let class = backend.classify_error(DrafterOperation::Final, &error);
                             if let DrafterErrorClass::RetryAfter { delay, scope } = class {
+                                emit_event(
+                                    &observer,
+                                    mode,
+                                    chat_id,
+                                    segment,
+                                    DrafterEventKind::RetryAfter,
+                                    None,
+                                    Some(DrafterOperation::Final),
+                                );
                                 self.limiter.penalize(scope, delay);
                                 continue;
                             }
@@ -406,11 +535,29 @@ where
                         }
                     }
                 };
+                let cleanup_failed = backend.take_cleanup_error().is_some();
                 self.backend.take();
+                if cleanup_failed {
+                    self.record(
+                        DrafterEventKind::CleanupError,
+                        None,
+                        Some(DrafterOperation::Cleanup),
+                    );
+                }
+                if result.is_ok() {
+                    self.record(
+                        DrafterEventKind::FinalSuccess,
+                        None,
+                        Some(DrafterOperation::Final),
+                    );
+                } else {
+                    self.record(DrafterEventKind::FinalError, None, Some(DrafterOperation::Final));
+                }
                 let _ = reply.send(result.map_err(DraftFinishError::Backend));
                 false
             }
             Command::Abort { reply } => {
+                self.record(DrafterEventKind::Abort, None, Some(DrafterOperation::Cleanup));
                 self.source.close();
                 self.flush_waiters.drain(..).for_each(|waiter| {
                     let _ = waiter.reply.send(Err(DraftFlushError::WorkerStopped));
@@ -420,6 +567,18 @@ where
                     return false;
                 };
                 let result = backend.abort().await;
+                if result.is_err() {
+                    self.record(
+                        DrafterEventKind::CleanupError,
+                        None,
+                        Some(DrafterOperation::Cleanup),
+                    );
+                    self.record(
+                        DrafterEventKind::AbortError,
+                        None,
+                        Some(DrafterOperation::Cleanup),
+                    );
+                }
                 let _ = reply.send(result.map_err(DraftAbortError::Backend));
                 false
             }
@@ -434,6 +593,8 @@ where
         self.retry_delay = self.config.retry_initial;
         self.consecutive_preview_failures = 0;
         self.preview_disabled = false;
+        self.last_observed_revision = DraftRevision::default();
+        self.last_coalesced_revision = DraftRevision::default();
     }
 }
 
@@ -461,14 +622,26 @@ where
         backend: B,
         limiter: L,
         config: DraftConfig,
+        observer: Arc<dyn DrafterObserver>,
     ) -> Result<(Self, DraftSink<S::Update>), DraftStartError> {
         let capabilities = backend.capabilities();
         config.validate(capabilities).map_err(DraftStartError::InvalidConfig)?;
+        let rate_limit_key = backend.rate_limit_key();
+        #[cfg(feature = "tracing")]
+        let draft_id = backend.draft_id().map(super::DraftId::get);
+        #[cfg(feature = "tracing")]
+        let preview_message_id = backend.preview_message_id().map(|id| id.0);
+        observer.record(DrafterEvent {
+            kind: DrafterEventKind::Spawn,
+            mode: capabilities.mode,
+            chat_id: rate_limit_key.chat_id,
+            segment: 0,
+            revision: None,
+            operation: None,
+        });
         let source = Arc::new(source);
         let notify = Arc::new(Notify::new());
         let (commands, command_rx) = mpsc::channel(16);
-        #[cfg(feature = "tracing")]
-        let rate_limit_key = backend.rate_limit_key();
         let worker = Worker {
             source: Arc::clone(&source),
             notify: Arc::clone(&notify),
@@ -485,12 +658,19 @@ where
             consecutive_preview_failures: 0,
             preview_disabled: false,
             flush_waiters: Vec::new(),
+            observer,
+            rate_limit_key,
+            segment: 0,
+            last_observed_revision: DraftRevision::default(),
+            last_coalesced_revision: DraftRevision::default(),
         };
         #[cfg(feature = "tracing")]
         let worker_span = tracing::info_span!(
             "teloxide.drafter",
             mode = ?capabilities.mode,
             chat_id = rate_limit_key.chat_id.0,
+            draft_id = ?draft_id,
+            preview_message_id = ?preview_message_id,
         );
         #[cfg(feature = "tracing")]
         let worker = tokio::spawn(worker.run().instrument(worker_span));
@@ -589,7 +769,17 @@ where
         limiter: L,
         config: DraftConfig,
     ) -> Result<(Self, DraftSink<P>), DraftStartError> {
-        Self::spawn(ReplacePreview::new(), backend, limiter, config)
+        Self::snapshots_with_observer(backend, limiter, config, super::observer::default_observer())
+    }
+
+    /// Creates a snapshot drafter with a lifecycle observer.
+    pub fn snapshots_with_observer(
+        backend: B,
+        limiter: L,
+        config: DraftConfig,
+        observer: Arc<dyn DrafterObserver>,
+    ) -> Result<(Self, DraftSink<P>), DraftStartError> {
+        Self::spawn(ReplacePreview::new(), backend, limiter, config, observer)
     }
 }
 
@@ -606,7 +796,24 @@ where
         limiter: L,
         config: DraftConfig,
     ) -> Result<(Self, DraftSink<A::Update>), DraftStartError> {
-        Self::spawn(AccumulatorSource::new(accumulator), backend, limiter, config)
+        Self::accumulating_with_observer(
+            accumulator,
+            backend,
+            limiter,
+            config,
+            super::observer::default_observer(),
+        )
+    }
+
+    /// Creates an accumulator drafter with a lifecycle observer.
+    pub fn accumulating_with_observer(
+        accumulator: A,
+        backend: B,
+        limiter: L,
+        config: DraftConfig,
+        observer: Arc<dyn DrafterObserver>,
+    ) -> Result<(Self, DraftSink<A::Update>), DraftStartError> {
+        Self::spawn(AccumulatorSource::new(accumulator), backend, limiter, config, observer)
     }
 }
 
@@ -688,6 +895,7 @@ mod tests {
     enum TestError {
         RetryAfter,
         Transient,
+        Ambiguous,
     }
 
     impl fmt::Display for TestError {
@@ -704,6 +912,9 @@ mod tests {
         fail_update_at: Option<usize>,
         final_attempts: Arc<Mutex<usize>>,
         retry_final_once: bool,
+        ambiguous_final: bool,
+        commit_attempts: Arc<Mutex<usize>>,
+        retry_commit_once: bool,
         expires_without_refresh: bool,
     }
 
@@ -734,12 +945,20 @@ mod tests {
         }
 
         async fn commit_segment(&mut self, final_payload: &String) -> Result<String, Self::Error> {
-            Ok(final_payload.clone())
+            *self.commit_attempts.lock().unwrap() += 1;
+            if self.retry_commit_once {
+                self.retry_commit_once = false;
+                Err(TestError::RetryAfter)
+            } else {
+                Ok(final_payload.clone())
+            }
         }
 
         async fn finish(&mut self, final_payload: &String) -> Result<String, Self::Error> {
             *self.final_attempts.lock().unwrap() += 1;
-            if self.retry_final_once {
+            if self.ambiguous_final {
+                Err(TestError::Ambiguous)
+            } else if self.retry_final_once {
                 self.retry_final_once = false;
                 Err(TestError::RetryAfter)
             } else {
@@ -762,6 +981,7 @@ mod tests {
                     scope: DrafterRateLimitScope::Global,
                 },
                 TestError::Transient => DrafterErrorClass::Transient { retry_safe: true },
+                TestError::Ambiguous => DrafterErrorClass::Ambiguous,
             }
         }
     }
@@ -821,11 +1041,12 @@ mod tests {
             DraftConfig { min_update_interval: Duration::from_millis(1), ..DraftConfig::default() },
         )
         .unwrap();
-        sink.update("a".to_owned()).unwrap();
-        sink.update("b".to_owned()).unwrap();
+        for value in 0..100 {
+            sink.update(value.to_string()).unwrap();
+        }
         tokio::time::advance(Duration::from_millis(100)).await;
         drafter.flush().await.unwrap();
-        assert_eq!(&*previews.lock().unwrap(), &["b"]);
+        assert_eq!(&*previews.lock().unwrap(), &["99"]);
         let _ = drafter.abort().await;
     }
 
@@ -899,6 +1120,38 @@ mod tests {
         let result = drafter.finish("final".to_owned()).await.unwrap();
         assert_eq!(result, "final");
         assert!(previews.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn snapshot_is_built_after_permit_and_uses_latest_revision() {
+        let previews = Arc::new(Mutex::new(Vec::new()));
+        let permit_started = Arc::new(tokio::sync::Notify::new());
+        let release_permit = Arc::new(tokio::sync::Notify::new());
+        let backend = FakeBackend { previews: Arc::clone(&previews), ..FakeBackend::default() };
+        let limiter = PermitGateLimiter {
+            permit_started: Arc::clone(&permit_started),
+            release_permit: Arc::clone(&release_permit),
+        };
+        let (drafter, sink) = Drafter::snapshots(
+            backend,
+            limiter,
+            DraftConfig {
+                coalesce_window: Duration::from_millis(1),
+                min_update_interval: Duration::from_millis(1),
+                ..DraftConfig::default()
+            },
+        )
+        .unwrap();
+
+        sink.update("old".to_owned()).unwrap();
+        tokio::time::advance(Duration::from_millis(2)).await;
+        permit_started.notified().await;
+        sink.update("latest".to_owned()).unwrap();
+        release_permit.notify_one();
+        drafter.flush().await.unwrap();
+
+        assert_eq!(&*previews.lock().unwrap(), &["latest"]);
+        let _ = drafter.abort().await;
     }
 
     struct TextAccumulator(String);
@@ -1008,6 +1261,9 @@ mod tests {
             fail_update_at: Some(2),
             final_attempts: Arc::new(Mutex::new(0)),
             retry_final_once: false,
+            ambiguous_final: false,
+            commit_attempts: Arc::new(Mutex::new(0)),
+            retry_commit_once: false,
             expires_without_refresh: true,
         };
         let limiter = InProcessRateLimiter::new(Duration::ZERO, Duration::ZERO);
@@ -1057,6 +1313,9 @@ mod tests {
             fail_update_at: None,
             final_attempts: Arc::clone(&final_attempts),
             retry_final_once: true,
+            ambiguous_final: false,
+            commit_attempts: Arc::new(Mutex::new(0)),
+            retry_commit_once: false,
             expires_without_refresh: false,
         };
         let limiter = InProcessRateLimiter::new(Duration::ZERO, Duration::ZERO);
@@ -1073,5 +1332,81 @@ mod tests {
 
         assert_eq!(result, "final");
         assert_eq!(*final_attempts.lock().unwrap(), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn segment_commit_retries_explicit_retry_after() {
+        let commit_attempts = Arc::new(Mutex::new(0));
+        let backend = ClassifiedBackend {
+            previews: Arc::new(Mutex::new(Vec::new())),
+            update_calls: 0,
+            fail_update_at: None,
+            final_attempts: Arc::new(Mutex::new(0)),
+            retry_final_once: false,
+            ambiguous_final: false,
+            commit_attempts: Arc::clone(&commit_attempts),
+            retry_commit_once: true,
+            expires_without_refresh: false,
+        };
+        let limiter = InProcessRateLimiter::new(Duration::ZERO, Duration::ZERO);
+        let (mut drafter, _sink) =
+            Drafter::snapshots(backend, limiter, DraftConfig::default()).unwrap();
+        let commit =
+            tokio::spawn(async move { drafter.commit_segment("segment".to_owned()).await });
+
+        for _ in 0..3 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(*commit_attempts.lock().unwrap(), 1);
+        tokio::time::advance(Duration::from_millis(20)).await;
+        assert_eq!(commit.await.unwrap().unwrap(), "segment");
+        assert_eq!(*commit_attempts.lock().unwrap(), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ambiguous_final_is_not_retried() {
+        let final_attempts = Arc::new(Mutex::new(0));
+        let backend = ClassifiedBackend {
+            previews: Arc::new(Mutex::new(Vec::new())),
+            update_calls: 0,
+            fail_update_at: None,
+            final_attempts: Arc::clone(&final_attempts),
+            retry_final_once: false,
+            ambiguous_final: true,
+            commit_attempts: Arc::new(Mutex::new(0)),
+            retry_commit_once: false,
+            expires_without_refresh: false,
+        };
+        let (drafter, _sink) =
+            Drafter::snapshots(backend, NoopLimiter, DraftConfig::default()).unwrap();
+        let result = drafter.finish("final".to_owned()).await;
+
+        assert!(matches!(result, Err(DraftFinishError::Backend(TestError::Ambiguous))));
+        assert_eq!(*final_attempts.lock().unwrap(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn metrics_observer_records_scheduler_lifecycle() {
+        let collector = Arc::new(super::super::DrafterMetricsCollector::default());
+        let (drafter, sink) = Drafter::snapshots_with_observer(
+            FakeBackend::default(),
+            NoopLimiter,
+            DraftConfig {
+                coalesce_window: Duration::from_millis(1),
+                min_update_interval: Duration::from_millis(1),
+                ..DraftConfig::default()
+            },
+            Arc::clone(&collector) as Arc<dyn DrafterObserver>,
+        )
+        .unwrap();
+
+        sink.update("preview".to_owned()).unwrap();
+        tokio::time::advance(Duration::from_millis(2)).await;
+        drafter.flush().await.unwrap();
+        let _ = drafter.finish("final".to_owned()).await;
+
+        let snapshot = collector.snapshot();
+        assert_eq!(snapshot.received_updates, 1);
+        assert_eq!(snapshot.sent_previews, 1);
     }
 }

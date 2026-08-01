@@ -534,11 +534,11 @@ where
                             None,
                             Some(DrafterOperation::SegmentCommit),
                         );
-                        self.source.reopen_segment();
                         self.reset_segment_state();
                         self.segment = self.segment.saturating_add(1);
-                        self.segment_counter.store(self.segment, Ordering::Relaxed);
+                        self.segment_counter.store(self.segment, Ordering::Release);
                         self.record(DrafterEventKind::SegmentRotate, None, None);
+                        self.source.reopen_segment();
                         let _ = reply.send(Ok(output));
                         true
                     }
@@ -622,11 +622,26 @@ where
                 self.flush_waiters.drain(..).for_each(|waiter| {
                     let _ = waiter.reply.send(Err(DraftFlushError::WorkerStopped));
                 });
-                let Some(backend) = self.backend.take() else {
+                let Some(backend) = self.backend.as_mut() else {
                     let _ = reply.send(Err(DraftAbortError::WorkerStopped));
                     return false;
                 };
-                let result = backend.abort().await;
+                let (result, error_class) = {
+                    let result = backend.abort().await;
+                    let error_class = result
+                        .as_ref()
+                        .err()
+                        .map(|error| backend.classify_error(DrafterOperation::Cleanup, error));
+                    (result, error_class)
+                };
+                if let Some(DrafterErrorClass::RetryAfter { delay, scope }) = error_class {
+                    self.record(
+                        DrafterEventKind::RetryAfter,
+                        None,
+                        Some(DrafterOperation::Cleanup),
+                    );
+                    self.limiter.penalize(scope, delay);
+                }
                 if result.is_err() {
                     self.record(
                         DrafterEventKind::CleanupError,
@@ -639,6 +654,7 @@ where
                         Some(DrafterOperation::Cleanup),
                     );
                 }
+                self.backend.take();
                 let _ = reply.send(result.map_err(DraftAbortError::Backend));
                 false
             }
@@ -764,7 +780,7 @@ where
                     kind: DrafterEventKind::Update,
                     mode: sink_mode,
                     chat_id: sink_chat_id,
-                    segment: sink_segment_counter.load(Ordering::Relaxed),
+                    segment: sink_segment_counter.load(Ordering::Acquire),
                     revision: Some(revision),
                     from_revision: None,
                     to_revision: None,
@@ -1009,7 +1025,7 @@ mod tests {
             Ok(final_payload.clone())
         }
 
-        async fn abort(self) -> Result<(), Self::Error> {
+        async fn abort(&mut self) -> Result<(), Self::Error> {
             Ok(())
         }
     }
@@ -1039,6 +1055,8 @@ mod tests {
         commit_attempts: Arc<Mutex<usize>>,
         retry_commit_once: bool,
         cleanup_retry_once: bool,
+        abort_cleanup_retry_once: bool,
+        preview_message_id: Option<teloxide_core::types::MessageId>,
         expires_without_refresh: bool,
     }
 
@@ -1090,8 +1108,17 @@ mod tests {
             }
         }
 
-        async fn abort(self) -> Result<(), Self::Error> {
-            Ok(())
+        async fn abort(&mut self) -> Result<(), Self::Error> {
+            if self.abort_cleanup_retry_once {
+                self.abort_cleanup_retry_once = false;
+                Err(TestError::RetryAfter)
+            } else {
+                Ok(())
+            }
+        }
+
+        fn preview_message_id(&self) -> Option<teloxide_core::types::MessageId> {
+            self.preview_message_id
         }
 
         fn take_cleanup_error(&mut self) -> Option<Self::Error> {
@@ -1398,6 +1425,8 @@ mod tests {
             commit_attempts: Arc::new(Mutex::new(0)),
             retry_commit_once: false,
             cleanup_retry_once: false,
+            abort_cleanup_retry_once: false,
+            preview_message_id: None,
             expires_without_refresh: true,
         };
         let limiter = InProcessRateLimiter::new(Duration::ZERO, Duration::ZERO);
@@ -1451,6 +1480,8 @@ mod tests {
             commit_attempts: Arc::new(Mutex::new(0)),
             retry_commit_once: false,
             cleanup_retry_once: false,
+            abort_cleanup_retry_once: false,
+            preview_message_id: None,
             expires_without_refresh: false,
         };
         let limiter = InProcessRateLimiter::new(Duration::ZERO, Duration::ZERO);
@@ -1483,13 +1514,59 @@ mod tests {
             commit_attempts: Arc::new(Mutex::new(0)),
             retry_commit_once: false,
             cleanup_retry_once: true,
+            abort_cleanup_retry_once: false,
+            preview_message_id: Some(teloxide_core::types::MessageId(77)),
+            expires_without_refresh: false,
+        };
+        let observer = RecordingObserver::default();
+        let observer_ref = Arc::new(observer.clone());
+        let (drafter, _sink) = Drafter::snapshots_with_observer(
+            backend,
+            limiter,
+            DraftConfig::default(),
+            Arc::clone(&observer_ref) as Arc<dyn DrafterObserver>,
+        )
+        .unwrap();
+
+        drafter.finish("final".to_owned()).await.unwrap();
+
+        assert_eq!(
+            penalties.lock().unwrap().as_slice(),
+            &[(DrafterRateLimitScope::Global, Duration::from_millis(20))]
+        );
+        let events = observer.events.lock().unwrap();
+        let cleanup_event = events
+            .iter()
+            .find(|event| event.kind == DrafterEventKind::CleanupError)
+            .expect("cleanup event");
+        assert_eq!(cleanup_event.preview_message_id, Some(teloxide_core::types::MessageId(77)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn abort_cleanup_retry_after_penalizes_shared_limiter() {
+        let penalties = Arc::new(Mutex::new(Vec::new()));
+        let limiter = RecordingLimiter { penalties: Arc::clone(&penalties) };
+        let backend = ClassifiedBackend {
+            previews: Arc::new(Mutex::new(Vec::new())),
+            update_calls: 0,
+            fail_update_at: None,
+            final_attempts: Arc::new(Mutex::new(0)),
+            retry_final_once: false,
+            ambiguous_final: false,
+            commit_attempts: Arc::new(Mutex::new(0)),
+            retry_commit_once: false,
+            cleanup_retry_once: false,
+            abort_cleanup_retry_once: true,
+            preview_message_id: Some(teloxide_core::types::MessageId(88)),
             expires_without_refresh: false,
         };
         let (drafter, _sink) =
             Drafter::snapshots(backend, limiter, DraftConfig::default()).unwrap();
 
-        drafter.finish("final".to_owned()).await.unwrap();
-
+        assert!(matches!(
+            drafter.abort().await,
+            Err(DraftAbortError::Backend(TestError::RetryAfter))
+        ));
         assert_eq!(
             penalties.lock().unwrap().as_slice(),
             &[(DrafterRateLimitScope::Global, Duration::from_millis(20))]
@@ -1509,6 +1586,8 @@ mod tests {
             commit_attempts: Arc::clone(&commit_attempts),
             retry_commit_once: true,
             cleanup_retry_once: false,
+            abort_cleanup_retry_once: false,
+            preview_message_id: None,
             expires_without_refresh: false,
         };
         let limiter = InProcessRateLimiter::new(Duration::ZERO, Duration::ZERO);
@@ -1539,6 +1618,8 @@ mod tests {
             commit_attempts: Arc::new(Mutex::new(0)),
             retry_commit_once: false,
             cleanup_retry_once: false,
+            abort_cleanup_retry_once: false,
+            preview_message_id: None,
             expires_without_refresh: false,
         };
         let (drafter, _sink) =
@@ -1608,5 +1689,33 @@ mod tests {
         assert_ne!(spawn_ids[0], spawn_ids[1]);
         drafter_a.finish("a".to_owned()).await.unwrap();
         drafter_b.finish("b".to_owned()).await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn update_after_segment_commit_has_new_segment_id() {
+        let observer = RecordingObserver::default();
+        let observer_ref = Arc::new(observer.clone());
+        let (mut drafter, sink) = Drafter::snapshots_with_observer(
+            FakeBackend::default(),
+            NoopLimiter,
+            DraftConfig::default(),
+            observer_ref,
+        )
+        .unwrap();
+
+        drafter.commit_segment("segment".to_owned()).await.unwrap();
+        sink.update("new segment".to_owned()).unwrap();
+
+        let update_segment = {
+            let events = observer.events.lock().unwrap();
+            events
+                .iter()
+                .rev()
+                .find(|event| event.kind == DrafterEventKind::Update)
+                .expect("update event")
+                .segment
+        };
+        assert_eq!(update_segment, 1);
+        drafter.finish("final".to_owned()).await.unwrap();
     }
 }

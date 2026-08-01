@@ -68,7 +68,7 @@ pub trait DrafterBackend: Send + 'static {
         final_payload: &Self::Final,
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send;
 
-    fn abort(self) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    fn abort(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     fn classify_error(
         &self,

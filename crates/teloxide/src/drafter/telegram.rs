@@ -47,6 +47,11 @@ fn is_message_not_modified(error: &RequestError) -> bool {
     matches!(error, RequestError::Api(ApiError::MessageNotModified))
 }
 
+struct CleanupFailure<E> {
+    message_id: MessageId,
+    error: E,
+}
+
 /// Options for permanent text and rich-message requests.
 ///
 /// Status backends copy only the preview-safe subset into their temporary
@@ -500,7 +505,7 @@ where
         send_text(&self.bot, self.chat_id.into(), final_payload.clone(), &self.send_options).await
     }
 
-    async fn abort(self) -> Result<(), RequestError> {
+    async fn abort(&mut self) -> Result<(), RequestError> {
         Ok(())
     }
 
@@ -621,7 +626,7 @@ where
         send_rich(&self.bot, self.chat_id.into(), final_payload.clone(), &self.send_options).await
     }
 
-    async fn abort(self) -> Result<(), RequestError> {
+    async fn abort(&mut self) -> Result<(), RequestError> {
         Ok(())
     }
 
@@ -643,7 +648,7 @@ pub struct StatusThenRichBackend<R> {
     final_send_options: TelegramSendOptions,
     edit_options: TelegramEditOptions,
     cleanup: StatusCleanup,
-    cleanup_error: Option<RequestError>,
+    cleanup_error: Option<CleanupFailure<RequestError>>,
 }
 
 /// Whether the status message is removed after final delivery.
@@ -670,6 +675,7 @@ impl<R> StatusThenRichBackend<R> {
 
     #[must_use]
     pub fn reply_parameters(mut self, reply_parameters: ReplyParameters) -> Self {
+        self.preview_send_options.reply_parameters = Some(reply_parameters.clone());
         self.final_send_options.reply_parameters = Some(reply_parameters);
         self
     }
@@ -785,16 +791,18 @@ where
             send_rich(&self.bot, self.chat_id, final_payload.clone(), &self.final_send_options)
                 .await;
         if result.is_ok() && self.cleanup == StatusCleanup::DeleteAfterFinalSuccess {
-            if let Some(message_id) = self.preview_message_id.take() {
+            if let Some(message_id) = self.preview_message_id {
                 if let Err(error) = self.bot.delete_message(self.chat_id, message_id).await {
-                    self.cleanup_error = Some(error);
+                    self.cleanup_error = Some(CleanupFailure { message_id, error });
+                } else {
+                    self.preview_message_id = None;
                 }
             }
         }
         result
     }
 
-    async fn abort(self) -> Result<(), RequestError> {
+    async fn abort(&mut self) -> Result<(), RequestError> {
         if self.cleanup != StatusCleanup::DeleteAfterFinalSuccess {
             return Ok(());
         }
@@ -820,7 +828,10 @@ where
     }
 
     fn take_cleanup_error(&mut self) -> Option<Self::Error> {
-        self.cleanup_error.take()
+        self.cleanup_error.take().map(|failure| {
+            debug_assert_eq!(self.preview_message_id, Some(failure.message_id));
+            failure.error
+        })
     }
 }
 
@@ -835,9 +846,11 @@ where
         if self.cleanup == StatusCleanup::Keep {
             return;
         }
-        if let Some(message_id) = self.preview_message_id.take() {
+        if let Some(message_id) = self.preview_message_id {
             if let Err(error) = self.bot.delete_message(self.chat_id, message_id).await {
-                self.cleanup_error = Some(error);
+                self.cleanup_error = Some(CleanupFailure { message_id, error });
+            } else {
+                self.preview_message_id = None;
             }
         }
     }
@@ -852,7 +865,7 @@ pub struct StatusThenTextBackend<R> {
     final_send_options: TelegramSendOptions,
     edit_options: TelegramEditOptions,
     cleanup: StatusCleanup,
-    cleanup_error: Option<RequestError>,
+    cleanup_error: Option<CleanupFailure<RequestError>>,
 }
 
 impl<R> StatusThenTextBackend<R> {
@@ -872,6 +885,7 @@ impl<R> StatusThenTextBackend<R> {
 
     #[must_use]
     pub fn reply_parameters(mut self, reply_parameters: ReplyParameters) -> Self {
+        self.preview_send_options.reply_parameters = Some(reply_parameters.clone());
         self.final_send_options.reply_parameters = Some(reply_parameters);
         self
     }
@@ -986,16 +1000,18 @@ where
             send_text(&self.bot, self.chat_id, final_payload.clone(), &self.final_send_options)
                 .await;
         if result.is_ok() && self.cleanup == StatusCleanup::DeleteAfterFinalSuccess {
-            if let Some(message_id) = self.preview_message_id.take() {
+            if let Some(message_id) = self.preview_message_id {
                 if let Err(error) = self.bot.delete_message(self.chat_id, message_id).await {
-                    self.cleanup_error = Some(error);
+                    self.cleanup_error = Some(CleanupFailure { message_id, error });
+                } else {
+                    self.preview_message_id = None;
                 }
             }
         }
         result
     }
 
-    async fn abort(self) -> Result<(), RequestError> {
+    async fn abort(&mut self) -> Result<(), RequestError> {
         if self.cleanup == StatusCleanup::DeleteAfterFinalSuccess {
             if let Some(message_id) = self.preview_message_id {
                 self.bot.delete_message(self.chat_id, message_id).await?;
@@ -1020,7 +1036,10 @@ where
     }
 
     fn take_cleanup_error(&mut self) -> Option<Self::Error> {
-        self.cleanup_error.take()
+        self.cleanup_error.take().map(|failure| {
+            debug_assert_eq!(self.preview_message_id, Some(failure.message_id));
+            failure.error
+        })
     }
 }
 
@@ -1033,9 +1052,11 @@ where
         if self.cleanup == StatusCleanup::Keep {
             return;
         }
-        if let Some(message_id) = self.preview_message_id.take() {
+        if let Some(message_id) = self.preview_message_id {
             if let Err(error) = self.bot.delete_message(self.chat_id, message_id).await {
-                self.cleanup_error = Some(error);
+                self.cleanup_error = Some(CleanupFailure { message_id, error });
+            } else {
+                self.preview_message_id = None;
             }
         }
     }
@@ -1222,7 +1243,7 @@ where
         }
     }
 
-    async fn abort(self) -> Result<(), RequestError> {
+    async fn abort(&mut self) -> Result<(), RequestError> {
         if self.abort_policy == EditAbortPolicy::DeletePreviewBestEffort {
             if let Some(message_id) = self.message_id {
                 let _ = self.bot.delete_message(self.chat_id, message_id).await;
@@ -1407,7 +1428,7 @@ impl DrafterBackend for RichEditInPlaceBackend {
         }
     }
 
-    async fn abort(self) -> Result<(), RequestError> {
+    async fn abort(&mut self) -> Result<(), RequestError> {
         if self.abort_policy == EditAbortPolicy::DeletePreviewBestEffort {
             if let Some(message_id) = self.message_id {
                 let _ = self.bot.delete_message(self.chat_id, message_id).await;
@@ -1614,6 +1635,29 @@ mod tests {
         assert_eq!(preview_options.message_effect_id, None);
         assert_eq!(preview_options.suggested_post_parameters, None);
         assert_eq!(preview_options.reply_markup, None);
+    }
+
+    #[test]
+    fn status_reply_parameters_are_shared_by_preview_and_final() {
+        let reply_parameters = ReplyParameters::new(MessageId(7));
+        let text_backend = StatusThenTextBackend::new(Bot::new("token"), ChatId(1))
+            .reply_parameters(reply_parameters.clone());
+        let rich_backend = StatusThenRichBackend::new(Bot::new("token"), ChatId(1))
+            .reply_parameters(reply_parameters.clone());
+
+        assert_eq!(
+            text_backend.preview_send_options.reply_parameters,
+            Some(reply_parameters.clone())
+        );
+        assert_eq!(
+            text_backend.final_send_options.reply_parameters,
+            Some(reply_parameters.clone())
+        );
+        assert_eq!(
+            rich_backend.preview_send_options.reply_parameters,
+            Some(reply_parameters.clone())
+        );
+        assert_eq!(rich_backend.final_send_options.reply_parameters, Some(reply_parameters));
     }
 
     #[test]

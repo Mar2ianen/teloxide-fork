@@ -24,7 +24,9 @@ mod observer;
 mod source;
 mod telegram;
 
-pub use backend::{DraftId, DrafterBackend, DrafterCapabilities, DrafterMode, PreviewAck};
+pub use backend::{
+    CleanupFailure, DraftId, DrafterBackend, DrafterCapabilities, DrafterMode, PreviewAck,
+};
 pub use config::{DraftConfig, DraftSchedule};
 pub use error::{
     DraftAbortError, DraftCommitError, DraftConfigError, DraftFinishError, DraftFlushError,

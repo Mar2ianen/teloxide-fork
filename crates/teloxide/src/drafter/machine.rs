@@ -15,11 +15,11 @@ use tracing::Instrument;
 
 use super::observer::next_instance_id;
 use super::{
-    AccumulatorSource, DraftAbortError, DraftCommitError, DraftConfig, DraftFinishError,
-    DraftFlushError, DraftPushError, DraftRevision, DraftStartError, DrafterBackend,
-    DrafterCapabilities, DrafterErrorClass, DrafterEvent, DrafterEventKind, DrafterObserver,
-    DrafterOperation, DrafterPermit, DrafterPriority, DrafterRateLimiter, PreviewAck,
-    PreviewSource, ReplacePreview,
+    AccumulatorSource, CleanupFailure, DraftAbortError, DraftCommitError, DraftConfig,
+    DraftFinishError, DraftFlushError, DraftPushError, DraftRevision, DraftStartError,
+    DrafterBackend, DrafterCapabilities, DrafterErrorClass, DrafterEvent, DrafterEventKind,
+    DrafterObserver, DrafterOperation, DrafterPermit, DrafterPriority, DrafterRateLimiter,
+    PreviewAck, PreviewSource, ReplacePreview,
 };
 
 /// A cloneable synchronous producer handle.
@@ -171,6 +171,17 @@ where
         revision: Option<DraftRevision>,
         operation: Option<DrafterOperation>,
     ) {
+        let preview_message_id = self.backend.as_ref().and_then(DrafterBackend::preview_message_id);
+        self.record_with_preview_message_id(kind, revision, operation, preview_message_id);
+    }
+
+    fn record_with_preview_message_id(
+        &self,
+        kind: DrafterEventKind,
+        revision: Option<DraftRevision>,
+        operation: Option<DrafterOperation>,
+        preview_message_id: Option<teloxide_core::types::MessageId>,
+    ) {
         emit_event(
             &self.observer,
             DrafterEvent {
@@ -184,10 +195,7 @@ where
                 to_revision: None,
                 operation,
                 draft_id: self.backend.as_ref().and_then(DrafterBackend::draft_id),
-                preview_message_id: self
-                    .backend
-                    .as_ref()
-                    .and_then(DrafterBackend::preview_message_id),
+                preview_message_id,
             },
         );
     }
@@ -523,11 +531,11 @@ where
                         }
                     }
                 };
-                let cleanup_error = backend.take_cleanup_error();
+                let cleanup_failure = backend.take_cleanup_failure();
                 match result {
                     Ok(output) => {
-                        if let Some(error) = cleanup_error {
-                            self.observe_cleanup_error(error);
+                        if let Some(failure) = cleanup_failure {
+                            self.observe_cleanup_failure(failure);
                         }
                         self.record(
                             DrafterEventKind::SegmentCommit,
@@ -599,9 +607,9 @@ where
                         }
                     }
                 };
-                let cleanup_error = backend.take_cleanup_error();
-                if let Some(error) = cleanup_error {
-                    self.observe_cleanup_error(error);
+                let cleanup_failure = backend.take_cleanup_failure();
+                if let Some(failure) = cleanup_failure {
+                    self.observe_cleanup_failure(failure);
                 }
                 if result.is_ok() {
                     self.record(
@@ -671,17 +679,27 @@ where
         self.preview_disabled = false;
     }
 
-    fn observe_cleanup_error(&mut self, error: B::Error) {
+    fn observe_cleanup_failure(&mut self, failure: CleanupFailure<B::Error>) {
         let class = self
             .backend
             .as_ref()
             .expect("backend exists while observing cleanup")
-            .classify_error(DrafterOperation::Cleanup, &error);
+            .classify_error(DrafterOperation::Cleanup, &failure.error);
         if let DrafterErrorClass::RetryAfter { delay, scope } = class {
-            self.record(DrafterEventKind::RetryAfter, None, Some(DrafterOperation::Cleanup));
+            self.record_with_preview_message_id(
+                DrafterEventKind::RetryAfter,
+                None,
+                Some(DrafterOperation::Cleanup),
+                Some(failure.message_id),
+            );
             self.limiter.penalize(scope, delay);
         }
-        self.record(DrafterEventKind::CleanupError, None, Some(DrafterOperation::Cleanup));
+        self.record_with_preview_message_id(
+            DrafterEventKind::CleanupError,
+            None,
+            Some(DrafterOperation::Cleanup),
+            Some(failure.message_id),
+        );
     }
 }
 
@@ -1121,10 +1139,11 @@ mod tests {
             self.preview_message_id
         }
 
-        fn take_cleanup_error(&mut self) -> Option<Self::Error> {
+        fn take_cleanup_failure(&mut self) -> Option<CleanupFailure<Self::Error>> {
             if self.cleanup_retry_once {
                 self.cleanup_retry_once = false;
-                Some(TestError::RetryAfter)
+                let message_id = self.preview_message_id.take().expect("cleanup preview id");
+                Some(CleanupFailure { message_id, error: TestError::RetryAfter })
             } else {
                 None
             }
@@ -1540,6 +1559,50 @@ mod tests {
             .find(|event| event.kind == DrafterEventKind::CleanupError)
             .expect("cleanup event");
         assert_eq!(cleanup_event.preview_message_id, Some(teloxide_core::types::MessageId(77)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cleanup_failure_detaches_old_preview_before_next_segment() {
+        let observer = RecordingObserver::default();
+        let observer_ref = Arc::new(observer.clone());
+        let backend = ClassifiedBackend {
+            previews: Arc::new(Mutex::new(Vec::new())),
+            update_calls: 0,
+            fail_update_at: None,
+            final_attempts: Arc::new(Mutex::new(0)),
+            retry_final_once: false,
+            ambiguous_final: false,
+            commit_attempts: Arc::new(Mutex::new(0)),
+            retry_commit_once: false,
+            cleanup_retry_once: true,
+            abort_cleanup_retry_once: false,
+            preview_message_id: Some(teloxide_core::types::MessageId(77)),
+            expires_without_refresh: false,
+        };
+        let (mut drafter, sink) = Drafter::snapshots_with_observer(
+            backend,
+            NoopLimiter,
+            DraftConfig::default(),
+            Arc::clone(&observer_ref) as Arc<dyn DrafterObserver>,
+        )
+        .unwrap();
+
+        drafter.commit_segment("segment".to_owned()).await.unwrap();
+        sink.update("next segment".to_owned()).unwrap();
+        drafter.flush().await.unwrap();
+
+        let events = observer.events.lock().unwrap();
+        let cleanup_event = events
+            .iter()
+            .find(|event| event.kind == DrafterEventKind::CleanupError)
+            .expect("cleanup event");
+        assert_eq!(cleanup_event.preview_message_id, Some(teloxide_core::types::MessageId(77)));
+        let preview_start = events
+            .iter()
+            .rev()
+            .find(|event| event.kind == DrafterEventKind::PreviewStart)
+            .expect("next segment preview");
+        assert_eq!(preview_start.preview_message_id, None);
     }
 
     #[tokio::test(start_paused = true)]

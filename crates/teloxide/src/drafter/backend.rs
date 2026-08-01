@@ -12,6 +12,16 @@ use super::{DrafterErrorClass, DrafterOperation, DrafterRateLimitKey};
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PreviewAck;
 
+/// Cleanup failure together with the preview message it targeted.
+///
+/// The message identifier is kept separately from the backend's active
+/// preview state because a failed delete may have succeeded remotely.
+#[derive(Debug)]
+pub struct CleanupFailure<E> {
+    pub message_id: MessageId,
+    pub error: E,
+}
+
 /// Capabilities declared by a delivery backend.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DrafterCapabilities {
@@ -78,11 +88,11 @@ pub trait DrafterBackend: Send + 'static {
         DrafterErrorClass::Transient { retry_safe: true }
     }
 
-    /// Takes a best-effort cleanup error observed after a successful delivery.
+    /// Takes a best-effort cleanup failure observed after a successful delivery.
     ///
     /// Cleanup must not turn an already confirmed final delivery into a retry,
     /// but schedulers can still expose the failure through observability.
-    fn take_cleanup_error(&mut self) -> Option<Self::Error> {
+    fn take_cleanup_failure(&mut self) -> Option<CleanupFailure<Self::Error>> {
         None
     }
 }

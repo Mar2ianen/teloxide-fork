@@ -18,9 +18,9 @@ use teloxide_core::{
 };
 
 use super::{
-    DraftConfig, DraftId, DraftSink, DraftStartError, Drafter, DrafterBackend, DrafterCapabilities,
-    DrafterErrorClass, DrafterMode, DrafterOperation, DrafterRateLimitKey, InProcessRateLimiter,
-    PreviewAck, ReplacePreview,
+    CleanupFailure, DraftConfig, DraftId, DraftSink, DraftStartError, Drafter, DrafterBackend,
+    DrafterCapabilities, DrafterErrorClass, DrafterMode, DrafterOperation, DrafterRateLimitKey,
+    InProcessRateLimiter, PreviewAck, ReplacePreview,
 };
 
 fn classify_request_error(operation: DrafterOperation, error: &RequestError) -> DrafterErrorClass {
@@ -45,11 +45,6 @@ fn classify_request_error(operation: DrafterOperation, error: &RequestError) -> 
 
 fn is_message_not_modified(error: &RequestError) -> bool {
     matches!(error, RequestError::Api(ApiError::MessageNotModified))
-}
-
-struct CleanupFailure<E> {
-    message_id: MessageId,
-    error: E,
 }
 
 /// Options for permanent text and rich-message requests.
@@ -648,7 +643,7 @@ pub struct StatusThenRichBackend<R> {
     final_send_options: TelegramSendOptions,
     edit_options: TelegramEditOptions,
     cleanup: StatusCleanup,
-    cleanup_error: Option<CleanupFailure<RequestError>>,
+    cleanup_failure: Option<CleanupFailure<RequestError>>,
 }
 
 /// Whether the status message is removed after final delivery.
@@ -669,7 +664,7 @@ impl<R> StatusThenRichBackend<R> {
             final_send_options: TelegramSendOptions::default(),
             edit_options: TelegramEditOptions::default(),
             cleanup: StatusCleanup::DeleteAfterFinalSuccess,
-            cleanup_error: None,
+            cleanup_failure: None,
         }
     }
 
@@ -793,7 +788,8 @@ where
         if result.is_ok() && self.cleanup == StatusCleanup::DeleteAfterFinalSuccess {
             if let Some(message_id) = self.preview_message_id {
                 if let Err(error) = self.bot.delete_message(self.chat_id, message_id).await {
-                    self.cleanup_error = Some(CleanupFailure { message_id, error });
+                    self.cleanup_failure = Some(CleanupFailure { message_id, error });
+                    self.preview_message_id = None;
                 } else {
                     self.preview_message_id = None;
                 }
@@ -827,11 +823,8 @@ where
         classify_request_error(operation, error)
     }
 
-    fn take_cleanup_error(&mut self) -> Option<Self::Error> {
-        self.cleanup_error.take().map(|failure| {
-            debug_assert_eq!(self.preview_message_id, Some(failure.message_id));
-            failure.error
-        })
+    fn take_cleanup_failure(&mut self) -> Option<CleanupFailure<Self::Error>> {
+        self.cleanup_failure.take()
     }
 }
 
@@ -848,7 +841,8 @@ where
         }
         if let Some(message_id) = self.preview_message_id {
             if let Err(error) = self.bot.delete_message(self.chat_id, message_id).await {
-                self.cleanup_error = Some(CleanupFailure { message_id, error });
+                self.cleanup_failure = Some(CleanupFailure { message_id, error });
+                self.preview_message_id = None;
             } else {
                 self.preview_message_id = None;
             }
@@ -865,7 +859,7 @@ pub struct StatusThenTextBackend<R> {
     final_send_options: TelegramSendOptions,
     edit_options: TelegramEditOptions,
     cleanup: StatusCleanup,
-    cleanup_error: Option<CleanupFailure<RequestError>>,
+    cleanup_failure: Option<CleanupFailure<RequestError>>,
 }
 
 impl<R> StatusThenTextBackend<R> {
@@ -879,7 +873,7 @@ impl<R> StatusThenTextBackend<R> {
             final_send_options: TelegramSendOptions::default(),
             edit_options: TelegramEditOptions::default(),
             cleanup: StatusCleanup::DeleteAfterFinalSuccess,
-            cleanup_error: None,
+            cleanup_failure: None,
         }
     }
 
@@ -1002,7 +996,8 @@ where
         if result.is_ok() && self.cleanup == StatusCleanup::DeleteAfterFinalSuccess {
             if let Some(message_id) = self.preview_message_id {
                 if let Err(error) = self.bot.delete_message(self.chat_id, message_id).await {
-                    self.cleanup_error = Some(CleanupFailure { message_id, error });
+                    self.cleanup_failure = Some(CleanupFailure { message_id, error });
+                    self.preview_message_id = None;
                 } else {
                     self.preview_message_id = None;
                 }
@@ -1035,11 +1030,8 @@ where
         classify_request_error(operation, error)
     }
 
-    fn take_cleanup_error(&mut self) -> Option<Self::Error> {
-        self.cleanup_error.take().map(|failure| {
-            debug_assert_eq!(self.preview_message_id, Some(failure.message_id));
-            failure.error
-        })
+    fn take_cleanup_failure(&mut self) -> Option<CleanupFailure<Self::Error>> {
+        self.cleanup_failure.take()
     }
 }
 
@@ -1054,7 +1046,8 @@ where
         }
         if let Some(message_id) = self.preview_message_id {
             if let Err(error) = self.bot.delete_message(self.chat_id, message_id).await {
-                self.cleanup_error = Some(CleanupFailure { message_id, error });
+                self.cleanup_failure = Some(CleanupFailure { message_id, error });
+                self.preview_message_id = None;
             } else {
                 self.preview_message_id = None;
             }

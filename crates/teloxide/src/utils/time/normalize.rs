@@ -92,7 +92,7 @@ impl TimeContext {
         // Around DST transitions, a local civil time may be missing or
         // ambiguous. Compatible disambiguation is intentional best-effort
         // rendering. Scheduled events that require an exact instant must use
-        // an Instant or a complete civil date-time value instead.
+        // an Instant instead.
         let anchor = captured_now.to_zoned(self.zone.clone()).date();
         self.zone
             .to_zoned(anchor.to_datetime(time))

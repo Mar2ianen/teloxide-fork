@@ -91,6 +91,12 @@ struct WaiterGuard {
     active: bool,
 }
 
+enum AcquireWait {
+    Until(Instant),
+    YieldToPriority,
+    Acquired,
+}
+
 impl Drop for WaiterGuard {
     fn drop(&mut self) {
         if !self.active {
@@ -159,7 +165,7 @@ impl DrafterRateLimiter for InProcessRateLimiter {
 
         loop {
             let now = Instant::now();
-            let deadline = {
+            let wait = {
                 let mut state = self.state.lock().expect("drafter limiter mutex poisoned");
                 let Some(current) = state.waiters.iter().find(|waiter| waiter.id == id).copied()
                 else {
@@ -178,22 +184,26 @@ impl DrafterRateLimiter for InProcessRateLimiter {
                     state.global_next = Some(now + self.global_interval);
                     waiter.active = false;
                     self.notify.notify_waiters();
-                    None
+                    AcquireWait::Acquired
                 } else if has_priority_waiter && own_deadline <= now {
-                    Some(now)
+                    AcquireWait::YieldToPriority
                 } else {
-                    Some(own_deadline)
+                    AcquireWait::Until(own_deadline)
                 }
             };
 
-            if let Some(deadline) = deadline {
-                tokio::select! {
-                    _ = tokio::time::sleep_until(deadline) => {},
-                    _ = self.notify.notified() => {},
+            match wait {
+                AcquireWait::Until(deadline) => {
+                    tokio::select! {
+                        _ = tokio::time::sleep_until(deadline) => {},
+                        _ = self.notify.notified() => {},
+                    }
                 }
-                continue;
+                AcquireWait::YieldToPriority => {
+                    tokio::task::yield_now().await;
+                }
+                AcquireWait::Acquired => return DrafterPermit::new(),
             }
-            return DrafterPermit::new();
         }
     }
 
@@ -312,5 +322,47 @@ mod tests {
         other_chat.await.unwrap();
         assert!(!final_waiter.is_finished());
         final_waiter.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn low_priority_waiter_yields_to_registered_high_priority_waiter() {
+        let limiter = InProcessRateLimiter::new(Duration::ZERO, Duration::ZERO);
+        let low_key = DrafterRateLimitKey { chat_id: ChatId(1) };
+        let high_key = DrafterRateLimitKey { chat_id: ChatId(2) };
+        {
+            let mut state = limiter.state.lock().unwrap();
+            state.next_waiter_id = 1;
+            state.waiters.push(LimiterWaiter {
+                id: 0,
+                key: high_key,
+                priority: DrafterPriority::Final,
+            });
+        }
+
+        let low_waiter = {
+            let limiter = limiter.clone();
+            tokio::spawn(async move {
+                limiter.acquire(low_key, DrafterPriority::ChangedPreview).await;
+            })
+        };
+        tokio::task::yield_now().await;
+        assert!(limiter
+            .state
+            .lock()
+            .unwrap()
+            .waiters
+            .iter()
+            .any(|waiter| waiter.priority == DrafterPriority::ChangedPreview));
+
+        let release_high = {
+            let limiter = limiter.clone();
+            tokio::spawn(async move {
+                let mut state = limiter.state.lock().unwrap();
+                state.waiters.retain(|waiter| waiter.id != 0);
+                limiter.notify.notify_waiters();
+            })
+        };
+        low_waiter.await.unwrap();
+        release_high.await.unwrap();
     }
 }

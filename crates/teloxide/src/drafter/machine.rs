@@ -911,10 +911,13 @@ where
                         .await
                         {
                             Ok(Ok(Ok(()))) => (None, false),
-                            Ok(Ok(Err(error))) => (Some((
-                                backend.classify_error(DrafterOperation::Cleanup, &error),
-                                backend.preview_message_id(),
-                            )), false),
+                            Ok(Ok(Err(error))) => (
+                                Some((
+                                    backend.classify_error(DrafterOperation::Cleanup, &error),
+                                    backend.preview_message_id(),
+                                )),
+                                false,
+                            ),
                             Ok(Err(_)) | Err(_) => (None, true),
                         }
                     } else {

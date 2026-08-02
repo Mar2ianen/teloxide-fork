@@ -46,4 +46,8 @@ pub const LLM_DIALECT_VERSION: &str = "llm-v1";
 /// Explicit revision of the renderer implementation used in audit records.
 /// Update this whenever the parser, normalizer, or transport representation
 /// changes in a way that affects rendered Telegram payloads.
-pub const TIME_RENDERER_VERSION: &str = "time-rendering-v2";
+pub const RICH_TEXT_RENDERER_VERSION: &str = "rich-text-v1";
+
+/// Compatibility alias for audit integrations that predate the general Rich
+/// Text namespace.
+pub const TIME_RENDERER_VERSION: &str = RICH_TEXT_RENDERER_VERSION;

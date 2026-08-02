@@ -149,13 +149,21 @@ pub struct DateTimeNode {
 pub enum RichNode {
     Text(String),
     DateTime(DateTimeNode),
+    /// A syntactically signalled but malformed time token. LLM rendering can
+    /// keep it literal according to `InvalidTimePolicy`.
+    InvalidTime {
+        literal: String,
+        source_range: std::ops::Range<usize>,
+    },
     Link {
         label: Vec<RichNode>,
         target: LinkTarget,
+        source_range: std::ops::Range<usize>,
     },
     /// A named emoji is resolved after parsing through render bindings.
     CustomEmoji {
         alias: String,
+        source_range: std::ops::Range<usize>,
     },
 }
 

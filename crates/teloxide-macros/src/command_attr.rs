@@ -136,70 +136,69 @@ impl CommandAttr {
 
         let outermost_key = key.pop().unwrap(); // `Attr`'s invariants ensure `key.len() > 0`
 
-        let kind = match &*outermost_key.to_string() {
-            "doc" => {
-                if let Some(unexpected_key) = key.last() {
-                    return Err(compile_error_at(
-                        "`doc` can't have nested attributes",
-                        unexpected_key.span(),
-                    ));
-                }
-
-                Description(value.expect_string()?, true)
-            }
-
-            "command" => {
-                let Some(attr) = key.pop() else {
-                    return Err(compile_error_at(
-                        "expected an attribute name",
-                        outermost_key.span(),
-                    ));
-                };
-
-                if let Some(unexpected_key) = key.last() {
-                    return Err(compile_error_at(
-                        &format!("{attr} can't have nested attributes"),
-                        unexpected_key.span(),
-                    ));
-                }
-
-                match &*attr.to_string() {
-                    "prefix" => Prefix(value.expect_string()?),
-                    "description" => Description(value.expect_string()?, false),
-                    "rename_rule" => {
-                        RenameRule(value.expect_string().and_then(|r| self::RenameRule::parse(&r))?)
-                    }
-                    "rename" => Rename(value.expect_string()?),
-                    "parse_with" => ParseWith(ParserType::parse(value)?),
-                    "separator" => Separator(value.expect_string()?),
-                    "command_separator" => CommandSeparator(value.expect_string()?),
-                    "hide" => value.expect_none("hide").map(|_| Hide)?,
-                    "hide_aliases" => value.expect_none("hide_aliases").map(|_| HideAliases)?,
-                    "alias" => Aliases(vec![value.expect_string()?]),
-                    "aliases" => Aliases(
-                        value
-                            .expect_array()?
-                            .into_iter()
-                            .map(AttrValue::expect_string)
-                            .collect::<Result<_>>()?,
-                    ),
-                    _ => {
+        let kind =
+            match &*outermost_key.to_string() {
+                "doc" => {
+                    if let Some(unexpected_key) = key.last() {
                         return Err(compile_error_at(
+                            "`doc` can't have nested attributes",
+                            unexpected_key.span(),
+                        ));
+                    }
+
+                    Description(value.expect_string()?, true)
+                }
+
+                "command" => {
+                    let Some(attr) = key.pop() else {
+                        return Err(compile_error_at(
+                            "expected an attribute name",
+                            outermost_key.span(),
+                        ));
+                    };
+
+                    if let Some(unexpected_key) = key.last() {
+                        return Err(compile_error_at(
+                            &format!("{attr} can't have nested attributes"),
+                            unexpected_key.span(),
+                        ));
+                    }
+
+                    match &*attr.to_string() {
+                        "prefix" => Prefix(value.expect_string()?),
+                        "description" => Description(value.expect_string()?, false),
+                        "rename_rule" => RenameRule(
+                            value.expect_string().and_then(|r| self::RenameRule::parse(&r))?,
+                        ),
+                        "rename" => Rename(value.expect_string()?),
+                        "parse_with" => ParseWith(ParserType::parse(value)?),
+                        "separator" => Separator(value.expect_string()?),
+                        "command_separator" => CommandSeparator(value.expect_string()?),
+                        "hide" => value.expect_none("hide").map(|_| Hide)?,
+                        "hide_aliases" => value.expect_none("hide_aliases").map(|_| HideAliases)?,
+                        "alias" => Aliases(vec![value.expect_string()?]),
+                        "aliases" => Aliases(
+                            value
+                                .expect_array()?
+                                .into_iter()
+                                .map(AttrValue::expect_string)
+                                .collect::<Result<_>>()?,
+                        ),
+                        _ => return Err(compile_error_at(
                             "unexpected attribute name (expected one of `prefix`, `description`, \
                              `rename`, `parse_with`, `separator`, `hide`, `alias` and `aliases`",
                             attr.span(),
-                        ))
+                        )),
                     }
                 }
-            }
 
-            _ => {
-                return Err(compile_error_at(
-                    "unexpected attribute (expected `command` or `doc`)",
-                    outermost_key.span(),
-                ))
-            }
-        };
+                _ => {
+                    return Err(compile_error_at(
+                        "unexpected attribute (expected `command` or `doc`)",
+                        outermost_key.span(),
+                    ))
+                }
+            };
 
         Ok(Self { kind, sp })
     }

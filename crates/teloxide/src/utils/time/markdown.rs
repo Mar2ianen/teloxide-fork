@@ -1884,8 +1884,7 @@ fn scan_host_like(source: &str, index: usize) -> Option<(usize, Option<String>)>
     }
     let url_end = trim_uri_end(source, index, cursor);
     let candidate = source.get(index..url_end)?;
-    let authority_end =
-        candidate.find(|character| matches!(character, '/' | '?' | '#')).unwrap_or(candidate.len());
+    let authority_end = candidate.find(['/', '?', '#']).unwrap_or(candidate.len());
     let authority = &candidate[..authority_end];
     let host = authority.split_once(':').map_or(authority, |(host, _)| host);
     if !is_dotted_host(host) || Url::parse(&format!("https://{candidate}")).is_err() {

@@ -20,8 +20,8 @@
 | `cbor-serializer`    | Enables the [CBOR] serializer for dialogues. |
 | `bincode-serializer` | Enables the [Bincode] serializer for dialogues. |
 | `drafter`            | Enables asynchronous latest-wins preview/final delivery with Telegram Drafter backends. |
-| `time-rendering`     | Enables the compatibility explicit Markdown and typed time API with timezone and DST normalization. |
-| `rich-text`          | Opts into the semantic Rich Text pipeline with HTML, developer Markdown and LLM Markdown frontends, shared time/link/emoji bindings and policies. |
+| `rich-text`          | Opts into the semantic Rich Text pipeline with HTML, developer Markdown and LLM Markdown frontends, shared time/link/emoji bindings and policies. The canonical API is under `utils::rich_text`. |
+| `time-rendering`     | Compatibility alias for `rich-text`; it also preserves the former formatter imports under `utils::time`. |
 
 [Redis]: https://redis.io/
 [Sqlite]: https://www.sqlite.org/

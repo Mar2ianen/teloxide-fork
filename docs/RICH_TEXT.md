@@ -17,10 +17,11 @@ The same `RichTextRenderContext` supplies the timezone, trusted link
 bindings, custom-emoji bindings and error policies to every frontend.
 
 ```rust
-use teloxide::utils::time::{
+use teloxide::utils::rich_text::{
     CustomEmojiBinding, LlmMarkdownFormatter, RichTextBindings,
-    RichTextRenderContext, TimeBindings, TimeContext,
+    RichTextRenderContext,
 };
+use teloxide::utils::time::{TimeBindings, TimeContext};
 use teloxide::types::CustomEmojiId;
 use url::Url;
 
@@ -59,7 +60,8 @@ an arbitrary landmark. An unfinished time marker, emoji alias, link or HTML
 semantic tag is retained as pending input.
 
 The old `MainMarkdownFormatter` and `LlmMarkdownFormatter` time-only methods
-remain available as compatibility wrappers. New code should pass one explicit
+remain available as compatibility wrappers under `utils::time` when the
+`time-rendering` feature is enabled. New code should pass one explicit
 `RichTextRenderContext` (including `TimeBindings`) and one captured `Timestamp`
 through the complete render call. `RichTextRenderContext::for_developer` uses
 strict policies; `for_llm` uses readable fallback policies.

@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional `rich-text` feature with one semantic Rich Text pipeline and explicit HTML, Developer Markdown, LLM Markdown and Standard Markdown frontends
 - Shared Rich Text bindings and render context for localized time, trusted link aliases and bound custom emoji, with common Telegram/fallback rendering
 - Parsed Rich Text APIs expose aliases, literal destinations and bare URL spans so applications can enforce URL provenance before delivery
+- `DispatcherBuilder::worker_error_handler` to handle updates that cannot be delivered because the dispatcher workers are gone
 - `ParticipantIdInvalid` and `ChatAdminRequired` variants to `ApiError` ([#1349](https://github.com/teloxide/teloxide/issues/1349))
 - Support for TBA 10.0
   - Add request methods introduced in TBA 9.3 through 10.0, including live photos, message drafts, guest queries, managed bots, prepared keyboard buttons, chat gifts, profile photos, story reposting and reaction deletion
@@ -32,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Make sure `postgres-storage-rustls` feature actually enables rustls-based postgres storage ([#1400](https://github.com/teloxide/teloxide/pull/1400))
 - Escape `@` mentions in `markdown::user_mention_or_link` ([#1411](https://github.com/teloxide/teloxide/pull/1411))
 - Add local TBA file downloading support in `crate::net::download` ([#1173](https://github.com/teloxide/teloxide/pull/1173))
+- Do not panic when a dispatcher worker task dies: the dispatcher now removes the dead worker, spawns a fresh one and retries the dispatch once, reporting undeliverable updates through `DispatcherBuilder::worker_error_handler`
 
 - Added schema and rust types checking ([#1396](https://github.com/teloxide/teloxide/pull/1396)) [**BC**]
   - `delete_chat_photo` method now returns `True`, not `String`

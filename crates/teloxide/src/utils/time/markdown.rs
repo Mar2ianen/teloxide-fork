@@ -1838,6 +1838,8 @@ fn scan_uri(source: &str, index: usize) -> Option<(usize, Option<String>)> {
             || source.get(index + 1..)?.starts_with("ftp://"))
     {
         (index + 1, true)
+    } else if let Some(host_like) = scan_host_like(source, index) {
+        return Some(host_like);
     } else {
         let rest = source.get(index..)?;
         let scheme = uri_scheme(rest)?;
@@ -1866,6 +1868,47 @@ fn scan_uri(source: &str, index: usize) -> Option<(usize, Option<String>)> {
     let url_end = if autolink { cursor } else { trim_uri_end(source, start, cursor) };
     let url = source.get(start..url_end).filter(|value| !value.is_empty()).map(str::to_owned);
     Some((cursor, url))
+}
+
+fn scan_host_like(source: &str, index: usize) -> Option<(usize, Option<String>)> {
+    if !is_boundary_before(source, index) {
+        return None;
+    }
+    let mut cursor = index;
+    while cursor < source.len() {
+        let character = source[cursor..].chars().next()?;
+        if character.is_whitespace() || matches!(character, ')' | ']') {
+            break;
+        }
+        cursor += character.len_utf8();
+    }
+    let url_end = trim_uri_end(source, index, cursor);
+    let candidate = source.get(index..url_end)?;
+    let authority_end =
+        candidate.find(|character| matches!(character, '/' | '?' | '#')).unwrap_or(candidate.len());
+    let authority = &candidate[..authority_end];
+    let host = authority.split_once(':').map_or(authority, |(host, _)| host);
+    if !is_dotted_host(host) || Url::parse(&format!("https://{candidate}")).is_err() {
+        return None;
+    }
+    Some((cursor, Some(candidate.to_owned())))
+}
+
+fn is_dotted_host(host: &str) -> bool {
+    let mut labels = host.split('.');
+    let Some(first) = labels.next() else {
+        return false;
+    };
+    if labels.next().is_none() || first.is_empty() {
+        return false;
+    }
+    let valid_label = |label: &str| {
+        !label.is_empty()
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    };
+    valid_label(first) && labels.all(valid_label)
 }
 
 fn skip_escaped(source: &str, index: usize) -> usize {
@@ -2295,7 +2338,8 @@ mod tests {
         let parsed = LlmMarkdownFormatter::new()
             .parse(
                 "https://example.org/raw, <https://example.org/auto> `https://example.org/code` \
-                 [link](https://example.org/destination) mailto:test@example.org ftp://example.org/file",
+                 [link](https://example.org/destination) mailto:test@example.org ftp://example.org/file \
+                 invented.example/report, www.invented.example",
             )
             .unwrap();
         assert_eq!(
@@ -2305,8 +2349,18 @@ mod tests {
                 "https://example.org/auto".to_owned(),
                 "mailto:test@example.org".to_owned(),
                 "ftp://example.org/file".to_owned(),
+                "invented.example/report".to_owned(),
+                "www.invented.example".to_owned(),
             ]
         );
+    }
+
+    #[test]
+    fn dotted_bare_urls_are_ignored_in_code_and_escaped_fragments() {
+        let parsed = LlmMarkdownFormatter::new()
+            .parse("`invented.example/report` \\invented.example/report")
+            .unwrap();
+        assert!(parsed.bare_urls().is_empty());
     }
 
     #[test]

@@ -34,6 +34,10 @@ pub enum DrafterEventKind {
     PreviewError,
     PreviewTimeout,
     RetryAfter,
+    RetryExhausted,
+    OperationDeadlineExceeded,
+    BackendTimeout,
+    CallerCancelled,
     TransientRetry,
     Refresh,
     FlushStart,
@@ -190,6 +194,10 @@ impl DrafterObserver for DrafterMetricsCollector {
             DrafterEventKind::CleanupError => Some(&self.counters.cleanup_failures),
             DrafterEventKind::Spawn
             | DrafterEventKind::PreviewStart
+            | DrafterEventKind::RetryExhausted
+            | DrafterEventKind::OperationDeadlineExceeded
+            | DrafterEventKind::BackendTimeout
+            | DrafterEventKind::CallerCancelled
             | DrafterEventKind::FlushStart
             | DrafterEventKind::FlushComplete
             | DrafterEventKind::SegmentRotate

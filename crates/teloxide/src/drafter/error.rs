@@ -126,6 +126,8 @@ impl std::error::Error for DraftFlushError {}
 pub enum DraftCommitError<E> {
     WorkerStoppedBeforeCommand,
     WorkerStoppedAfterCommand { delivery: DeliveryCertainty },
+    RequestTimeout { delivery: DeliveryCertainty },
+    DeadlineExceeded { delivery: DeliveryCertainty },
     Backend { source: E, class: DrafterErrorClass, delivery: DeliveryCertainty },
 }
 
@@ -137,6 +139,12 @@ impl<E: fmt::Display> fmt::Display for DraftCommitError<E> {
             }
             Self::WorkerStoppedAfterCommand { delivery } => {
                 write!(f, "drafter worker stopped after segment commit command ({delivery:?})")
+            }
+            Self::RequestTimeout { delivery } => {
+                write!(f, "segment commit request timed out ({delivery:?})")
+            }
+            Self::DeadlineExceeded { delivery } => {
+                write!(f, "segment commit deadline exceeded ({delivery:?})")
             }
             Self::Backend { source, class, delivery } => {
                 write!(f, "segment commit failed ({class:?}, {delivery:?}): {source}")
@@ -152,6 +160,8 @@ impl<E: std::error::Error + 'static> std::error::Error for DraftCommitError<E> {
 pub enum DraftFinishError<E> {
     WorkerStoppedBeforeCommand,
     WorkerStoppedAfterCommand { delivery: DeliveryCertainty },
+    RequestTimeout { delivery: DeliveryCertainty },
+    DeadlineExceeded { delivery: DeliveryCertainty },
     Backend { source: E, class: DrafterErrorClass, delivery: DeliveryCertainty },
 }
 
@@ -163,6 +173,12 @@ impl<E: fmt::Display> fmt::Display for DraftFinishError<E> {
             }
             Self::WorkerStoppedAfterCommand { delivery } => {
                 write!(f, "drafter worker stopped after final command ({delivery:?})")
+            }
+            Self::RequestTimeout { delivery } => {
+                write!(f, "final delivery request timed out ({delivery:?})")
+            }
+            Self::DeadlineExceeded { delivery } => {
+                write!(f, "final delivery deadline exceeded ({delivery:?})")
             }
             Self::Backend { source, class, delivery } => {
                 write!(f, "final delivery failed ({class:?}, {delivery:?}): {source}")

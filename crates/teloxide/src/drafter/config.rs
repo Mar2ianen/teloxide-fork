@@ -17,6 +17,10 @@ pub struct DraftConfig {
     pub retry_initial: Duration,
     /// Maximum delay used for retryable preview failures.
     pub retry_max: Duration,
+    /// Maximum number of additional terminal attempts after the first one.
+    pub terminal_retry_budget: u32,
+    /// Overall deadline for one segment-commit or final-delivery operation.
+    pub terminal_timeout: Duration,
     /// Number of consecutive preview failures after which previews are
     /// disabled.
     pub max_consecutive_preview_failures: Option<u32>,
@@ -31,6 +35,8 @@ impl Default for DraftConfig {
             request_timeout: Duration::from_secs(8),
             retry_initial: Duration::from_secs(1),
             retry_max: Duration::from_secs(15),
+            terminal_retry_budget: 3,
+            terminal_timeout: Duration::from_secs(30),
             max_consecutive_preview_failures: Some(5),
         }
     }
@@ -52,6 +58,9 @@ impl DraftConfig {
         }
         if self.retry_initial.is_zero() {
             return Err(DraftConfigError::ZeroDuration("retry_initial"));
+        }
+        if self.terminal_timeout.is_zero() {
+            return Err(DraftConfigError::ZeroDuration("terminal_timeout"));
         }
         if self.retry_initial > self.retry_max {
             return Err(DraftConfigError::RetryRange);

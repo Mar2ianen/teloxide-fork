@@ -718,16 +718,54 @@ where
                         }
                     }
                 };
+                let cleanup_delivery =
+                    terminal_delivery_certainty(&result, failure_disposition.as_ref());
+                let should_cleanup = matches!(
+                    cleanup_delivery,
+                    Some(DeliveryCertainty::NotAttempted | DeliveryCertainty::Rejected)
+                ) && !payload_invalid;
+                let (failed_delivery_cleanup, cleanup_timed_out) = if should_cleanup {
+                    let backend = self.backend.as_mut().expect("backend exists for cleanup");
+                    let cleanup_deadline = Instant::now() + self.config.request_timeout;
+                    match tokio::time::timeout_at(
+                        cleanup_deadline,
+                        tokio::time::timeout(self.config.request_timeout, backend.abort()),
+                    )
+                    .await
+                    {
+                        Ok(Ok(Ok(()))) => (None, false),
+                        Ok(Ok(Err(error))) => (
+                            Some((
+                                backend.classify_error(DrafterOperation::Cleanup, &error),
+                                backend.preview_message_id(),
+                            )),
+                            false,
+                        ),
+                        Ok(Err(_)) | Err(_) => (None, true),
+                    }
+                } else {
+                    (None, false)
+                };
+                if cleanup_timed_out {
+                    self.record(
+                        DrafterEventKind::BackendTimeout,
+                        None,
+                        Some(DrafterOperation::Cleanup),
+                    );
+                }
                 let cleanup_failure = self
                     .backend
                     .as_mut()
                     .expect("backend exists after commit")
                     .take_cleanup_failure();
+                if let Some((disposition, preview_message_id)) = failed_delivery_cleanup {
+                    self.observe_cleanup_disposition(disposition, preview_message_id);
+                }
+                if let Some(failure) = cleanup_failure {
+                    self.observe_cleanup_failure(failure);
+                }
                 match result {
                     TerminalOutcome::Success(output) => {
-                        if let Some(failure) = cleanup_failure {
-                            self.observe_cleanup_failure(failure);
-                        }
                         self.record(
                             DrafterEventKind::SegmentCommit,
                             None,
@@ -2247,6 +2285,40 @@ mod tests {
         assert!(matches!(
             result,
             Err(DraftFinishError::DeadlineExceeded { delivery: DeliveryCertainty::Rejected })
+        ));
+        assert_eq!(*abort_calls.lock().unwrap(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn segment_retry_after_beyond_terminal_deadline_preserves_rejected_cleanup() {
+        let abort_calls = Arc::new(Mutex::new(0));
+        let backend = AlwaysRetryAfterBackend {
+            commit_attempts: Arc::new(Mutex::new(0)),
+            finish_attempts: Arc::new(Mutex::new(0)),
+            abort_calls: Arc::clone(&abort_calls),
+        };
+        let (mut drafter, _sink) = Drafter::snapshots(
+            backend,
+            NoopLimiter,
+            DraftConfig {
+                request_timeout: Duration::from_secs(1),
+                terminal_timeout: Duration::from_millis(10),
+                ..DraftConfig::default()
+            },
+        )
+        .unwrap();
+
+        let commit =
+            tokio::spawn(async move { drafter.commit_segment("segment".to_owned()).await });
+        for _ in 0..3 {
+            tokio::task::yield_now().await;
+        }
+        tokio::time::advance(Duration::from_millis(10)).await;
+        let result = commit.await.unwrap();
+
+        assert!(matches!(
+            result,
+            Err(DraftCommitError::DeadlineExceeded { delivery: DeliveryCertainty::Rejected })
         ));
         assert_eq!(*abort_calls.lock().unwrap(), 1);
     }

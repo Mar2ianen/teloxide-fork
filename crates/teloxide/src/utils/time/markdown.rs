@@ -241,6 +241,10 @@ impl ParsedMainMarkdown {
         collect_link_aliases(&self.nodes)
     }
 
+    pub fn link_destinations(&self) -> Vec<String> {
+        collect_link_destinations(&self.nodes)
+    }
+
     pub fn render_at(
         &self,
         time: &TimeContext,
@@ -286,6 +290,10 @@ impl ParsedLlmMarkdown {
         collect_link_aliases(&self.nodes)
     }
 
+    pub fn link_destinations(&self) -> Vec<String> {
+        collect_link_destinations(&self.nodes)
+    }
+
     pub fn render_at(
         &self,
         time: &TimeContext,
@@ -329,6 +337,10 @@ impl ParsedHtml {
 
     pub fn link_aliases(&self) -> Vec<String> {
         collect_link_aliases(&self.nodes)
+    }
+
+    pub fn link_destinations(&self) -> Vec<String> {
+        collect_link_destinations(&self.nodes)
     }
 
     pub fn render_at(
@@ -389,6 +401,28 @@ fn collect_link_aliases(nodes: &[RichNode]) -> Vec<String> {
         }
     }
     aliases
+}
+
+fn collect_link_destinations(nodes: &[RichNode]) -> Vec<String> {
+    let mut destinations = Vec::new();
+    for node in nodes {
+        match node {
+            RichNode::Link { label, target } => {
+                if let LinkTarget::Literal(destination) = target {
+                    if !destinations.contains(destination) {
+                        destinations.push(destination.clone());
+                    }
+                }
+                for destination in collect_link_destinations(label) {
+                    if !destinations.contains(&destination) {
+                        destinations.push(destination);
+                    }
+                }
+            }
+            RichNode::Text(_) | RichNode::DateTime(_) | RichNode::CustomEmoji { .. } => {}
+        }
+    }
+    destinations
 }
 
 fn render_nodes(
@@ -1902,6 +1936,15 @@ mod tests {
         assert!(formatter
             .render_with_context_at("[ok](https://example.com/path)", &context, instant())
             .is_ok());
+    }
+
+    #[test]
+    fn parsed_links_expose_aliases_and_literal_destinations() {
+        let parsed = LlmMarkdownFormatter::new()
+            .parse("[сообщение](message_42) [сайт](https://example.com)")
+            .unwrap();
+        assert_eq!(parsed.link_aliases(), vec!["message_42"]);
+        assert_eq!(parsed.link_destinations(), vec!["https://example.com"]);
     }
 
     #[test]

@@ -6,7 +6,7 @@ use crate::{
     error_handlers::{ErrorHandler, LoggingErrorHandler},
     requests::{Request, Requester},
     stop::StopToken,
-    types::{Update, UpdateKind},
+    types::{Update, UpdateId, UpdateKind},
     update_listeners::{self, UpdateListener},
 };
 
@@ -21,11 +21,13 @@ use tokio::sync::mpsc::error::SendError;
 use tokio_stream::wrappers::ReceiverStream;
 
 use std::{
+    any::Any,
     collections::HashMap,
     fmt::Debug,
     future::Future,
     hash::Hash,
     ops::{ControlFlow, Deref},
+    panic::AssertUnwindSafe,
     pin::pin,
     sync::{
         atomic::{AtomicBool, AtomicU32, Ordering},
@@ -43,7 +45,7 @@ pub struct DispatcherBuilder<R, Err, Key> {
     handler: Arc<UpdateHandler<Err>>,
     default_handler: DefaultHandler,
     error_handler: Arc<dyn ErrorHandler<Err> + Send + Sync>,
-    worker_error_handler: Arc<dyn ErrorHandler<WorkerDispatchError> + Send + Sync>,
+    worker_error_handler: Arc<dyn ErrorHandler<WorkerError> + Send + Sync>,
     ctrlc_handler: bool,
     distribution_f: fn(&Update) -> Option<Key>,
     worker_queue_size: usize,
@@ -51,7 +53,7 @@ pub struct DispatcherBuilder<R, Err, Key> {
 
 impl<R, Err, Key> DispatcherBuilder<R, Err, Key>
 where
-    R: Clone + Requester + Clone + Send + Sync + 'static,
+    R: Clone + Requester + Send + Sync + 'static,
     Err: Debug + Send + Sync + 'static,
 {
     /// Specifies a handler that will be called for an unhandled update.
@@ -82,19 +84,18 @@ where
         Self { error_handler: handler, ..self }
     }
 
-    /// Specifies a handler that will be called when the dispatcher cannot
-    /// deliver an update to a worker.
+    /// Specifies a handler that will be called when the dispatcher detects an
+    /// abnormal event in its worker infrastructure.
     ///
-    /// This happens when a worker task dies, the dispatcher spawns a fresh
-    /// worker and retries the dispatch once, but the replacement worker also
-    /// stops before accepting the update. The update is dropped after the
-    /// handler is called.
+    /// The following events are reported: a handler panic contained inside a
+    /// worker, an abnormal termination of a worker task, and an update that
+    /// could not be delivered to any worker.
     ///
     /// By default, it is [`LoggingErrorHandler`].
     #[must_use]
     pub fn worker_error_handler(
         self,
-        handler: Arc<dyn ErrorHandler<WorkerDispatchError> + Send + Sync>,
+        handler: Arc<dyn ErrorHandler<WorkerError> + Send + Sync>,
     ) -> Self {
         Self { worker_error_handler: handler, ..self }
     }
@@ -311,7 +312,7 @@ pub struct Dispatcher<R, Err, Key> {
     default_worker: Option<Worker>,
 
     error_handler: Arc<dyn ErrorHandler<Err> + Send + Sync>,
-    worker_error_handler: Arc<dyn ErrorHandler<WorkerDispatchError> + Send + Sync>,
+    worker_error_handler: Arc<dyn ErrorHandler<WorkerError> + Send + Sync>,
 
     state: ShutdownToken,
 }
@@ -482,15 +483,7 @@ where
             }
         }
 
-        self.workers
-            .drain()
-            .map(|(_chat_id, worker)| worker.handle)
-            .chain(self.default_worker.take().map(|worker| worker.handle))
-            .collect::<FuturesUnordered<_>>()
-            .for_each(|res| async {
-                res.expect("Failed to wait for a worker.");
-            })
-            .await;
+        self.await_workers_shutdown().await;
 
         self.state.done();
     }
@@ -523,22 +516,33 @@ where
 
         match self.try_dispatch_update(key.clone(), upd).await {
             Ok(()) => {}
-            Err((update, termination)) => {
-                // The worker task died; retry the dispatch with a fresh worker
-                // once before reporting the failure.
-                log::warn!(
-                    "A worker task died while dispatching an update ({termination}); retrying the \
-                     dispatch with a fresh worker once"
-                );
-
-                if let Err((update, termination)) = self.try_dispatch_update(key, update).await {
-                    // The replacement worker also stopped before accepting the
-                    // update. Report the undeliverable update through the
-                    // dispatcher error policy instead of panicking.
-                    self.worker_error_handler
-                        .clone()
-                        .handle_error(WorkerDispatchError { update, termination })
-                        .await;
+            Err((update, first_termination)) => {
+                // The worker task died; the retry below spawns a fresh worker.
+                match self.try_dispatch_update(key, update).await {
+                    Ok(()) => {
+                        // The fresh worker accepted the update; report the
+                        // death of the original worker through the dispatcher
+                        // error policy.
+                        self.worker_error_handler
+                            .clone()
+                            .handle_error(WorkerError::WorkerTerminated {
+                                termination: first_termination,
+                            })
+                            .await;
+                    }
+                    Err((update, retry_termination)) => {
+                        // The replacement worker also stopped before accepting
+                        // the update. Report the undeliverable update through
+                        // the dispatcher error policy instead of panicking.
+                        self.worker_error_handler
+                            .clone()
+                            .handle_error(WorkerError::UpdateUndeliverable {
+                                update: Box::new(update),
+                                first_termination,
+                                retry_termination,
+                            })
+                            .await;
+                    }
                 }
             }
         }
@@ -547,53 +551,48 @@ where
     /// Sends an update to the worker responsible for `key`, spawning the worker
     /// on demand.
     ///
-    /// If the worker task died (its channel is closed), the dead worker is
-    /// removed from the dispatcher and the update is returned back along with
-    /// the reason the task stopped, so that the caller can spawn a fresh
-    /// worker and retry the dispatch.
+    /// If the worker task died (its channel is closed), the update is returned
+    /// back along with the reason the task stopped, so that the caller can
+    /// spawn a fresh worker and retry the dispatch.
     async fn try_dispatch_update(
         &mut self,
         key: Option<Key>,
         update: Update,
     ) -> Result<(), (Update, WorkerTermination)> {
-        let send_result = {
-            let worker = match key {
-                Some(ref key) => {
-                    if !self.workers.contains_key(key) {
-                        self.workers.insert(key.clone(), self.new_worker());
-                    }
-                    self.workers.get_mut(key).expect("worker was inserted just above")
+        let worker = match key {
+            Some(ref key) => {
+                if !self.workers.contains_key(key) {
+                    self.workers.insert(key.clone(), self.new_worker());
                 }
-                None => {
-                    if self.default_worker.is_none() {
-                        self.default_worker = Some(self.new_default_worker());
-                    }
-                    self.default_worker.as_mut().expect("worker was inserted just above")
+                self.workers.remove(key).expect("worker was inserted just above")
+            }
+            None => {
+                if self.default_worker.is_none() {
+                    self.default_worker = Some(self.new_default_worker());
                 }
-            };
-
-            worker.tx.send(update).await
+                self.default_worker.take().expect("worker was inserted just above")
+            }
         };
 
-        match send_result {
-            Ok(()) => Ok(()),
+        match worker.tx.send(update).await {
+            Ok(()) => {
+                // Put the worker back so that updates for the same key keep
+                // their order.
+                match key {
+                    Some(key) => {
+                        self.workers.insert(key, worker);
+                    }
+                    None => {
+                        self.default_worker = Some(worker);
+                    }
+                }
+                Ok(())
+            }
             Err(SendError(update)) => {
                 // The channel is closed, which means the worker task has
-                // terminated. Remove it from the dispatcher and learn why it
-                // stopped so that the caller can spawn a replacement.
-                let dead_worker = match key {
-                    Some(key) => self.workers.remove(&key),
-                    None => self.default_worker.take(),
-                };
-
-                let termination = match dead_worker {
-                    Some(worker) => await_worker_termination(worker.handle).await,
-                    None => {
-                        log::error!("The worker task is missing while its channel is closed");
-                        WorkerTermination::Finished
-                    }
-                };
-
+                // terminated. Learn why it stopped so that the caller can
+                // spawn a fresh worker and retry the dispatch.
+                let termination = await_worker_termination(worker.handle).await;
                 Err((update, termination))
             }
         }
@@ -601,10 +600,7 @@ where
 
     fn new_worker(&self) -> Worker {
         spawn_worker(
-            self.dependencies.clone(),
-            Arc::clone(&self.handler),
-            Arc::clone(&self.default_handler),
-            Arc::clone(&self.error_handler),
+            self.worker_deps(),
             Arc::clone(&self.current_number_of_active_workers),
             Arc::clone(&self.max_number_of_active_workers),
             self.worker_queue_size,
@@ -612,13 +608,17 @@ where
     }
 
     fn new_default_worker(&self) -> Worker {
-        spawn_default_worker(
-            self.dependencies.clone(),
-            Arc::clone(&self.handler),
-            Arc::clone(&self.default_handler),
-            Arc::clone(&self.error_handler),
-            self.worker_queue_size,
-        )
+        spawn_default_worker(self.worker_deps(), self.worker_queue_size)
+    }
+
+    fn worker_deps(&self) -> WorkerDeps<Err> {
+        WorkerDeps {
+            dependencies: Arc::new(self.dependencies.clone()),
+            handler: Arc::clone(&self.handler),
+            default_handler: Arc::clone(&self.default_handler),
+            error_handler: Arc::clone(&self.error_handler),
+            worker_error_handler: Arc::clone(&self.worker_error_handler),
+        }
     }
 
     async fn remove_inactive_workers_if_needed(&mut self) {
@@ -663,6 +663,30 @@ where
         }
     }
 
+    /// Awaits the termination of all workers, logging abnormal terminations
+    /// instead of panicking.
+    async fn await_workers_shutdown(&mut self) {
+        let handles = self
+            .workers
+            .drain()
+            .map(|(_chat_id, worker)| worker.handle)
+            .chain(self.default_worker.take().map(|worker| worker.handle))
+            .collect::<FuturesUnordered<_>>();
+
+        handles
+            .for_each(|result| async {
+                match worker_termination_from_result(result) {
+                    WorkerTermination::Finished => {}
+                    termination => {
+                        log::error!(
+                            "A worker task ended abnormally during shutdown: {termination}"
+                        );
+                    }
+                }
+            })
+            .await;
+    }
+
     /// Returns a shutdown token, which can later be used to
     /// [`ShutdownToken::shutdown`].
     pub fn shutdown_token(&self) -> ShutdownToken {
@@ -693,11 +717,17 @@ impl<R, Err, Key> Dispatcher<R, Err, Key> {
     }
 }
 
-fn spawn_worker<Err>(
-    deps: DependencyMap,
+/// The handler-related dependencies shared by dispatcher workers.
+struct WorkerDeps<Err> {
+    dependencies: Arc<DependencyMap>,
     handler: Arc<UpdateHandler<Err>>,
     default_handler: DefaultHandler,
     error_handler: Arc<dyn ErrorHandler<Err> + Send + Sync>,
+    worker_error_handler: Arc<dyn ErrorHandler<WorkerError> + Send + Sync>,
+}
+
+fn spawn_worker<Err>(
+    deps: WorkerDeps<Err>,
     current_number_of_active_workers: Arc<AtomicU32>,
     max_number_of_active_workers: Arc<AtomicU32>,
     queue_size: usize,
@@ -714,19 +744,29 @@ where
     let handle = tokio::spawn(async move {
         while let Some(update) = rx.recv().await {
             is_waiting_local.store(false, Ordering::Relaxed);
-            {
-                let current = current_number_of_active_workers.fetch_add(1, Ordering::Relaxed) + 1;
-                max_number_of_active_workers.fetch_max(current, Ordering::Relaxed);
-            }
+            let _active_worker = ActiveWorkerGuard::new(
+                &current_number_of_active_workers,
+                &max_number_of_active_workers,
+            );
 
             let deps = Arc::clone(&deps);
-            let handler = Arc::clone(&handler);
-            let default_handler = Arc::clone(&default_handler);
-            let error_handler = Arc::clone(&error_handler);
+            let handler = Arc::clone(&deps.handler);
+            let default_handler = Arc::clone(&deps.default_handler);
+            let error_handler = Arc::clone(&deps.error_handler);
+            let worker_error_handler = Arc::clone(&deps.worker_error_handler);
 
-            handle_update(update, deps, handler, default_handler, error_handler).await;
+            // Catch panics per update so that a panicking handler cannot
+            // terminate the worker task together with the queued updates.
+            handle_update_catching_panics(
+                update,
+                Arc::clone(&deps.dependencies),
+                handler,
+                default_handler,
+                error_handler,
+                worker_error_handler,
+            )
+            .await;
 
-            current_number_of_active_workers.fetch_sub(1, Ordering::Relaxed);
             is_waiting_local.store(true, Ordering::Relaxed);
         }
     });
@@ -734,13 +774,7 @@ where
     Worker { tx, handle, is_waiting }
 }
 
-fn spawn_default_worker<Err>(
-    deps: DependencyMap,
-    handler: Arc<UpdateHandler<Err>>,
-    default_handler: DefaultHandler,
-    error_handler: Arc<dyn ErrorHandler<Err> + Send + Sync>,
-    queue_size: usize,
-) -> Worker
+fn spawn_default_worker<Err>(deps: WorkerDeps<Err>, queue_size: usize) -> Worker
 where
     Err: Send + Sync + 'static,
 {
@@ -750,11 +784,25 @@ where
 
     let handle = tokio::spawn(ReceiverStream::new(rx).for_each_concurrent(None, move |update| {
         let deps = Arc::clone(&deps);
-        let handler = Arc::clone(&handler);
-        let default_handler = Arc::clone(&default_handler);
-        let error_handler = Arc::clone(&error_handler);
+        let handler = Arc::clone(&deps.handler);
+        let default_handler = Arc::clone(&deps.default_handler);
+        let error_handler = Arc::clone(&deps.error_handler);
+        let worker_error_handler = Arc::clone(&deps.worker_error_handler);
 
-        handle_update(update, deps, handler, default_handler, error_handler)
+        async move {
+            // Catch panics per update so that a panicking handler cannot
+            // cancel the sibling updates processed concurrently by this
+            // worker.
+            handle_update_catching_panics(
+                update,
+                Arc::clone(&deps.dependencies),
+                handler,
+                default_handler,
+                error_handler,
+                worker_error_handler,
+            )
+            .await;
+        }
     }));
 
     Worker { tx, handle, is_waiting: Arc::new(AtomicBool::new(true)) }
@@ -782,6 +830,62 @@ async fn handle_update<Err>(
     }
 }
 
+/// Runs [`handle_update`], containing any handler panic inside the worker
+/// task and reporting it through the dispatcher error policy.
+async fn handle_update_catching_panics<Err>(
+    update: Update,
+    deps: Arc<DependencyMap>,
+    handler: Arc<UpdateHandler<Err>>,
+    default_handler: DefaultHandler,
+    error_handler: Arc<dyn ErrorHandler<Err> + Send + Sync>,
+    worker_error_handler: Arc<dyn ErrorHandler<WorkerError> + Send + Sync>,
+) where
+    Err: Send + Sync + 'static,
+{
+    let update_id = update.id;
+
+    let result =
+        AssertUnwindSafe(handle_update(update, deps, handler, default_handler, error_handler))
+            .catch_unwind()
+            .await;
+
+    if let Err(payload) = result {
+        let message = panic_message(&*payload);
+        worker_error_handler
+            .clone()
+            .handle_error(WorkerError::HandlerPanicked { update_id, message })
+            .await;
+    }
+}
+
+/// An RAII guard tracking the number of worker tasks currently processing an
+/// update. The counter is decremented on drop, including during unwinding.
+struct ActiveWorkerGuard {
+    current: Arc<AtomicU32>,
+}
+
+impl ActiveWorkerGuard {
+    fn new(current: &Arc<AtomicU32>, max: &Arc<AtomicU32>) -> Self {
+        let count = current.fetch_add(1, Ordering::Relaxed) + 1;
+        max.fetch_max(count, Ordering::Relaxed);
+        Self { current: Arc::clone(current) }
+    }
+}
+
+impl Drop for ActiveWorkerGuard {
+    fn drop(&mut self) {
+        self.current.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+/// Extracts the message of a panic payload.
+fn panic_message(payload: &(dyn Any + Send)) -> Option<String> {
+    payload
+        .downcast_ref::<&'static str>()
+        .map(|message| (*message).to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+}
+
 /// The reason a dispatcher worker task stopped.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum WorkerTermination {
@@ -805,28 +909,71 @@ impl std::fmt::Display for WorkerTermination {
     }
 }
 
-/// An error reported by the dispatcher when an update cannot be delivered to
-/// a worker: the original worker task died, a fresh worker was spawned, but
-/// it also stopped before accepting the update.
+/// An abnormal event detected by the dispatcher around its worker
+/// infrastructure.
 #[derive(Clone, Debug, PartialEq)]
-pub struct WorkerDispatchError {
-    /// The update that could not be delivered and was dropped.
-    pub update: Update,
-    /// The reason the worker task stopped.
-    pub termination: WorkerTermination,
+pub enum WorkerError {
+    /// A handler panic was contained inside a worker; the worker keeps
+    /// processing the queued updates.
+    HandlerPanicked {
+        /// The update whose handler panicked.
+        update_id: UpdateId,
+        /// The panic message, if it could be extracted from the payload.
+        message: Option<String>,
+    },
+    /// A worker task terminated abnormally; the dispatcher spawned a fresh
+    /// worker to keep dispatching.
+    WorkerTerminated {
+        /// The reason the worker task stopped.
+        termination: WorkerTermination,
+    },
+    /// An update could not be delivered to any worker: the original worker
+    /// task died and the freshly spawned replacement also stopped before
+    /// accepting the update.
+    UpdateUndeliverable {
+        /// The update that could not be delivered and was dropped.
+        update: Box<Update>,
+        /// The reason the original worker task stopped.
+        first_termination: WorkerTermination,
+        /// The reason the replacement worker task stopped.
+        retry_termination: WorkerTermination,
+    },
 }
+
+impl std::fmt::Display for WorkerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::HandlerPanicked { update_id, message } => write!(
+                f,
+                "a handler panicked while processing update {update_id:?}: {}",
+                message.as_deref().unwrap_or("unknown panic payload")
+            ),
+            Self::WorkerTerminated { termination } => {
+                write!(f, "a worker task terminated abnormally: {termination}")
+            }
+            Self::UpdateUndeliverable { update, first_termination, retry_termination } => write!(
+                f,
+                "cannot deliver update {update_id:?}: the worker task {first_termination} and the \
+                 replacement {retry_termination}",
+                update_id = update.id,
+            ),
+        }
+    }
+}
+
+impl std::error::Error for WorkerError {}
 
 /// Awaits a terminated worker task and returns the reason it stopped.
 async fn await_worker_termination(handle: tokio::task::JoinHandle<()>) -> WorkerTermination {
-    match handle.await {
+    worker_termination_from_result(handle.await)
+}
+
+/// Classifies the outcome of an awaited worker task.
+fn worker_termination_from_result(result: Result<(), tokio::task::JoinError>) -> WorkerTermination {
+    match result {
         Ok(()) => WorkerTermination::Finished,
         Err(err) if err.is_panic() => {
-            let payload = err.into_panic();
-            let message = payload
-                .downcast_ref::<&'static str>()
-                .map(|message| (*message).to_string())
-                .or_else(|| payload.downcast_ref::<String>().cloned());
-            WorkerTermination::Panicked { message }
+            WorkerTermination::Panicked { message: panic_message(&*err.into_panic()) }
         }
         Err(_) => WorkerTermination::Cancelled,
     }
@@ -843,6 +990,7 @@ mod tests {
     use std::{convert::Infallible, sync::Mutex};
 
     use teloxide_core::Bot;
+    use tokio::sync::Notify;
 
     use crate::types::UpdateId;
 
@@ -862,8 +1010,7 @@ mod tests {
         .expect("the fixture update must deserialize")
     }
 
-    /// A handler that records every incoming update and then panics, which
-    /// kills the worker task that processed the update.
+    /// A handler that records every incoming update and then panics.
     fn panicking_handler(seen_updates: Arc<Mutex<Vec<UpdateId>>>) -> UpdateHandler<Infallible> {
         dptree::entry().endpoint(dptree::di::Asyncify({
             let seen_updates = Arc::clone(&seen_updates);
@@ -874,6 +1021,77 @@ mod tests {
         }))
     }
 
+    /// A handler that records every incoming update and completes normally.
+    fn recording_handler(seen_updates: Arc<Mutex<Vec<UpdateId>>>) -> UpdateHandler<Infallible> {
+        dptree::entry().endpoint(dptree::di::Asyncify({
+            let seen_updates = Arc::clone(&seen_updates);
+            move |update: Update| -> Result<(), Infallible> {
+                seen_updates.lock().expect("test mutex is not poisoned").push(update.id);
+                Ok(())
+            }
+        }))
+    }
+
+    /// A handler whose first invocation waits on `release` (signalling
+    /// `started` first) and then panics; the rest of the invocations record
+    /// the update and complete normally.
+    fn blocking_then_panicking_handler(
+        seen_updates: Arc<Mutex<Vec<UpdateId>>>,
+        started: Arc<AtomicBool>,
+        release: Arc<Notify>,
+    ) -> UpdateHandler<Infallible> {
+        let first_call = Arc::new(AtomicBool::new(true));
+        dptree::entry().endpoint(move |update: Update| {
+            let first_call = Arc::clone(&first_call);
+            let seen_updates = Arc::clone(&seen_updates);
+            let started = Arc::clone(&started);
+            let release = Arc::clone(&release);
+            async move {
+                if first_call.swap(false, Ordering::Relaxed) {
+                    started.store(true, Ordering::Relaxed);
+                    release.notified().await;
+                    seen_updates.lock().expect("test mutex is not poisoned").push(update.id);
+                    panic!("test: worker task panic");
+                }
+                seen_updates.lock().expect("test mutex is not poisoned").push(update.id);
+                Ok(())
+            }
+        })
+    }
+
+    /// A handler that blocks update 1 on `release` (signalling `started`
+    /// first), makes update 2 panic and completes update 3, exercising the
+    /// concurrent processing of the default worker.
+    fn concurrent_handler(
+        seen_updates: Arc<Mutex<Vec<UpdateId>>>,
+        started: Arc<AtomicBool>,
+        release: Arc<Notify>,
+    ) -> UpdateHandler<Infallible> {
+        dptree::entry().endpoint(move |update: Update| {
+            let seen_updates = Arc::clone(&seen_updates);
+            let started = Arc::clone(&started);
+            let release = Arc::clone(&release);
+            async move {
+                match update.id.0 {
+                    1 => {
+                        started.store(true, Ordering::Relaxed);
+                        release.notified().await;
+                        seen_updates.lock().expect("test mutex is not poisoned").push(update.id);
+                        Ok(())
+                    }
+                    2 => {
+                        seen_updates.lock().expect("test mutex is not poisoned").push(update.id);
+                        panic!("test: default worker sibling panic");
+                    }
+                    _ => {
+                        seen_updates.lock().expect("test mutex is not poisoned").push(update.id);
+                        Ok(())
+                    }
+                }
+            }
+        })
+    }
+
     async fn wait_until(mut condition: impl FnMut() -> bool) {
         for _ in 0..1000 {
             if condition() {
@@ -882,6 +1100,17 @@ mod tests {
             tokio::task::yield_now().await;
         }
         panic!("the condition was not satisfied in time");
+    }
+
+    /// A policy that records the reported errors.
+    fn test_policy(
+        policy_errors: &Arc<Mutex<Vec<WorkerError>>>,
+    ) -> Arc<dyn ErrorHandler<WorkerError> + Send + Sync> {
+        let policy_errors = Arc::clone(policy_errors);
+        Arc::new(move |error: WorkerError| {
+            let policy_errors = Arc::clone(&policy_errors);
+            async move { policy_errors.lock().expect("test mutex is not poisoned").push(error) }
+        })
     }
 
     #[tokio::test]
@@ -900,57 +1129,198 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn worker_panic_is_contained_worker_is_respawned_and_dispatch_is_retried() {
+    async fn handler_panic_is_contained_and_worker_keeps_processing() {
         let seen_updates = Arc::new(Mutex::new(Vec::new()));
         let policy_errors = Arc::new(Mutex::new(Vec::new()));
 
-        let policy: Arc<dyn ErrorHandler<WorkerDispatchError> + Send + Sync> = {
-            let policy_errors = Arc::clone(&policy_errors);
-            Arc::new(move |error: WorkerDispatchError| {
-                let policy_errors = Arc::clone(&policy_errors);
-                async move { policy_errors.lock().expect("test mutex is not poisoned").push(error) }
-            })
-        };
-
         let mut dispatcher =
             Dispatcher::builder(Bot::new("test"), panicking_handler(Arc::clone(&seen_updates)))
-                .worker_error_handler(policy)
+                .worker_error_handler(test_policy(&policy_errors))
                 .build();
 
         let listener_error_handler = Arc::new(|error: Infallible| async move { match error {} });
 
         let update_1 = update(1);
         let key = default_distribution_function(&update_1).expect("the fixture has a chat");
-        dispatcher
-            .process_update::<Infallible, _>(Ok(update_1.clone()), &listener_error_handler)
+        dispatcher.process_update::<Infallible, _>(Ok(update_1), &listener_error_handler).await;
+
+        let worker_id = dispatcher.workers.get(&key).expect("worker exists").handle.id();
+
+        for id in [2, 3] {
+            dispatcher
+                .process_update::<Infallible, _>(Ok(update(id)), &listener_error_handler)
+                .await;
+        }
+
+        wait_until(|| seen_updates.lock().expect("test mutex is not poisoned").len() == 3).await;
+        wait_until(|| policy_errors.lock().expect("test mutex is not poisoned").len() == 3).await;
+        wait_until(|| dispatcher.current_number_of_active_workers.load(Ordering::Relaxed) == 0)
             .await;
 
-        // The update was accepted and the worker task died while processing it.
+        // The same worker processed all three updates: the panics were
+        // contained instead of terminating the worker task.
+        assert_eq!(dispatcher.workers.get(&key).expect("worker exists").handle.id(), worker_id);
+        assert_eq!(
+            *seen_updates.lock().expect("test mutex is not poisoned"),
+            vec![UpdateId(1), UpdateId(2), UpdateId(3)]
+        );
+        // Every panic was reported through the dispatcher error policy.
+        let policy_errors = policy_errors.lock().expect("test mutex is not poisoned");
+        assert_eq!(policy_errors.len(), 3);
+        assert!(policy_errors
+            .iter()
+            .all(|error| matches!(error, WorkerError::HandlerPanicked { .. })));
+    }
+
+    #[tokio::test]
+    async fn dead_worker_is_respawned_and_dispatch_is_retried() {
+        let seen_updates = Arc::new(Mutex::new(Vec::new()));
+        let policy_errors = Arc::new(Mutex::new(Vec::new()));
+
+        let mut dispatcher =
+            Dispatcher::builder(Bot::new("test"), recording_handler(Arc::clone(&seen_updates)))
+                .worker_error_handler(test_policy(&policy_errors))
+                .build();
+
+        let listener_error_handler = Arc::new(|error: Infallible| async move { match error {} });
+
+        let update_1 = update(1);
+        let key = default_distribution_function(&update_1).expect("the fixture has a chat");
+        dispatcher.process_update::<Infallible, _>(Ok(update_1), &listener_error_handler).await;
+
         wait_until(|| seen_updates.lock().expect("test mutex is not poisoned").len() == 1).await;
-        wait_until(|| {
-            dispatcher
-                .workers
-                .get(&key)
-                .expect("the dead worker is still in the map")
-                .handle
-                .is_finished()
-        })
-        .await;
-        assert!(policy_errors.lock().expect("test mutex is not poisoned").is_empty());
+        let dead_worker_id = dispatcher.workers.get(&key).expect("worker exists").handle.id();
 
-        let dead_worker_id =
-            dispatcher.workers.get(&key).expect("the dead worker is still in the map").handle.id();
+        // Kill the worker task; the channel becomes closed.
+        dispatcher.workers.get(&key).expect("worker exists").handle.abort();
+        wait_until(|| dispatcher.workers.get(&key).expect("worker exists").handle.is_finished())
+            .await;
 
-        // The next update hits the closed channel: the dispatcher must respawn
-        // the worker and retry the dispatch once instead of panicking.
+        // The next update hits the closed channel: the dispatcher respawns
+        // the worker and retries the dispatch once.
         dispatcher.process_update::<Infallible, _>(Ok(update(2)), &listener_error_handler).await;
 
         wait_until(|| seen_updates.lock().expect("test mutex is not poisoned").len() == 2).await;
-        assert!(policy_errors.lock().expect("test mutex is not poisoned").is_empty());
 
-        let respawned_worker_id =
-            dispatcher.workers.get(&key).expect("the respawned worker exists").handle.id();
-        assert_ne!(dead_worker_id, respawned_worker_id);
+        assert_eq!(
+            *seen_updates.lock().expect("test mutex is not poisoned"),
+            vec![UpdateId(1), UpdateId(2)]
+        );
+        assert_ne!(
+            dispatcher.workers.get(&key).expect("worker exists").handle.id(),
+            dead_worker_id
+        );
+        assert_eq!(
+            *policy_errors.lock().expect("test mutex is not poisoned"),
+            vec![WorkerError::WorkerTerminated { termination: WorkerTermination::Cancelled }]
+        );
+    }
+
+    #[tokio::test]
+    async fn buffered_updates_survive_handler_panic() {
+        let seen_updates = Arc::new(Mutex::new(Vec::new()));
+        let policy_errors = Arc::new(Mutex::new(Vec::new()));
+        let started = Arc::new(AtomicBool::new(false));
+        let release = Arc::new(Notify::new());
+
+        let mut dispatcher = Dispatcher::builder(
+            Bot::new("test"),
+            blocking_then_panicking_handler(
+                Arc::clone(&seen_updates),
+                Arc::clone(&started),
+                Arc::clone(&release),
+            ),
+        )
+        .worker_error_handler(test_policy(&policy_errors))
+        .build();
+
+        let listener_error_handler = Arc::new(|error: Infallible| async move { match error {} });
+
+        dispatcher.process_update::<Infallible, _>(Ok(update(1)), &listener_error_handler).await;
+
+        // Wait until the worker is blocked inside the handler of update 1.
+        wait_until(|| started.load(Ordering::Relaxed)).await;
+
+        // The worker is busy: updates 2 and 3 sit in the channel buffer.
+        dispatcher.process_update::<Infallible, _>(Ok(update(2)), &listener_error_handler).await;
+        dispatcher.process_update::<Infallible, _>(Ok(update(3)), &listener_error_handler).await;
+
+        // Let the handler of update 1 panic: the buffered updates must not be
+        // lost, and the processing order must be preserved.
+        release.notify_one();
+        wait_until(|| seen_updates.lock().expect("test mutex is not poisoned").len() == 3).await;
+
+        assert_eq!(
+            *seen_updates.lock().expect("test mutex is not poisoned"),
+            vec![UpdateId(1), UpdateId(2), UpdateId(3)]
+        );
+        assert_eq!(policy_errors.lock().expect("test mutex is not poisoned").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn default_worker_panic_does_not_cancel_siblings() {
+        let seen_updates = Arc::new(Mutex::new(Vec::new()));
+        let policy_errors = Arc::new(Mutex::new(Vec::new()));
+        let started = Arc::new(AtomicBool::new(false));
+        let release = Arc::new(Notify::new());
+
+        let mut dispatcher = Dispatcher::builder(
+            Bot::new("test"),
+            concurrent_handler(
+                Arc::clone(&seen_updates),
+                Arc::clone(&started),
+                Arc::clone(&release),
+            ),
+        )
+        .distribution_function(|_| None::<()>)
+        .worker_error_handler(test_policy(&policy_errors))
+        .build();
+
+        let listener_error_handler = Arc::new(|error: Infallible| async move { match error {} });
+
+        dispatcher.process_update::<Infallible, _>(Ok(update(1)), &listener_error_handler).await;
+        wait_until(|| started.load(Ordering::Relaxed)).await;
+
+        // Updates 2 and 3 are processed concurrently with the blocked update 1.
+        dispatcher.process_update::<Infallible, _>(Ok(update(2)), &listener_error_handler).await;
+        dispatcher.process_update::<Infallible, _>(Ok(update(3)), &listener_error_handler).await;
+        wait_until(|| seen_updates.lock().expect("test mutex is not poisoned").len() == 2).await;
+
+        release.notify_one();
+        wait_until(|| seen_updates.lock().expect("test mutex is not poisoned").len() == 3).await;
+
+        // Update 2 panicked, but update 3 completed: the panic did not cancel
+        // the sibling updates.
+        let mut seen = seen_updates.lock().expect("test mutex is not poisoned").clone();
+        seen.sort();
+        assert_eq!(seen, vec![UpdateId(1), UpdateId(2), UpdateId(3)]);
+        assert_eq!(policy_errors.lock().expect("test mutex is not poisoned").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn shutdown_with_dead_worker_does_not_panic() {
+        let seen_updates = Arc::new(Mutex::new(Vec::new()));
+        let policy_errors = Arc::new(Mutex::new(Vec::new()));
+
+        let mut dispatcher =
+            Dispatcher::builder(Bot::new("test"), recording_handler(Arc::clone(&seen_updates)))
+                .worker_error_handler(test_policy(&policy_errors))
+                .build();
+
+        let listener_error_handler = Arc::new(|error: Infallible| async move { match error {} });
+
+        let update_1 = update(1);
+        let key = default_distribution_function(&update_1).expect("the fixture has a chat");
+        dispatcher.process_update::<Infallible, _>(Ok(update_1), &listener_error_handler).await;
+
+        dispatcher.workers.get(&key).expect("worker exists").handle.abort();
+        wait_until(|| dispatcher.workers.get(&key).expect("worker exists").handle.is_finished())
+            .await;
+
+        // The dispatcher must not panic while waiting for a dead worker.
+        dispatcher.await_workers_shutdown().await;
+
+        assert!(policy_errors.lock().expect("test mutex is not poisoned").is_empty());
     }
 
     #[tokio::test]

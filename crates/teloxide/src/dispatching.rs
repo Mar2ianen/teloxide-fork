@@ -227,7 +227,7 @@ mod tracing;
 
 pub use crate::utils::shutdown_token::{IdleShutdownError, ShutdownToken};
 pub use dispatcher::{
-    Dispatcher, DispatcherBuilder, UpdateHandler, WorkerDispatchError, WorkerTermination,
+    Dispatcher, DispatcherBuilder, UpdateHandler, WorkerError, WorkerTermination,
 };
 pub use distribution::DefaultKey;
 pub use filter_ext::{MessageFilterExt, UpdateFilterExt};

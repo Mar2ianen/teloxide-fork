@@ -133,7 +133,7 @@ The fork-only features are not supplied by the upstream crates.io release. Pin a
 full commit when consuming them from an application:
 
 ```toml
-teloxide = { git = "https://github.com/Mar2ianen/teloxide-fork", rev = "80d8d601813f908bb5e71f605454d226bf909ad9", features = ["macros", "drafter", "time-rendering"] }
+teloxide = { git = "https://github.com/Mar2ianen/teloxide-fork", rev = "36d2863199988be935f011e32ef5a3ae1da05137", features = ["macros", "drafter", "rich-text"] }
 ```
 
 The `rev` above is an example of a full fork revision, not a floating branch;

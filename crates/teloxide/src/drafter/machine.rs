@@ -896,7 +896,7 @@ where
                         }
                     }
                 };
-                let failed_delivery_cleanup = if let Some(disposition) =
+                let (failed_delivery_cleanup, cleanup_timed_out) = if let Some(disposition) =
                     failure_disposition.as_ref()
                 {
                     if matches!(
@@ -904,19 +904,32 @@ where
                         DeliveryCertainty::NotAttempted | DeliveryCertainty::Rejected
                     ) {
                         let backend = self.backend.as_mut().expect("backend exists for cleanup");
-                        match backend.abort().await {
-                            Ok(()) => None,
-                            Err(error) => Some((
+                        match tokio::time::timeout_at(
+                            operation_deadline,
+                            tokio::time::timeout(self.config.request_timeout, backend.abort()),
+                        )
+                        .await
+                        {
+                            Ok(Ok(Ok(()))) => (None, false),
+                            Ok(Ok(Err(error))) => (Some((
                                 backend.classify_error(DrafterOperation::Cleanup, &error),
                                 backend.preview_message_id(),
-                            )),
+                            )), false),
+                            Ok(Err(_)) | Err(_) => (None, true),
                         }
                     } else {
-                        None
+                        (None, false)
                     }
                 } else {
-                    None
+                    (None, false)
                 };
+                if cleanup_timed_out {
+                    self.record(
+                        DrafterEventKind::BackendTimeout,
+                        None,
+                        Some(DrafterOperation::Cleanup),
+                    );
+                }
                 let cleanup_failure = self
                     .backend
                     .as_mut()
@@ -967,18 +980,33 @@ where
                 self.flush_waiters.drain(..).for_each(|waiter| {
                     let _ = waiter.reply.send(Err(DraftFlushError::WorkerStopped));
                 });
-                let Some(backend) = self.backend.as_mut() else {
+                if self.backend.is_none() {
                     let _ = reply.send(Err(DraftAbortError::WorkerStopped));
                     return false;
+                }
+                let timed_result = {
+                    let backend = self.backend.as_mut().expect("backend exists for abort");
+                    tokio::time::timeout(self.config.request_timeout, backend.abort()).await
                 };
-                let (result, error_disposition) = {
-                    let result = backend.abort().await;
-                    let error_disposition = result
+                let result = match timed_result {
+                    Ok(result) => result,
+                    Err(_) => {
+                        self.record(
+                            DrafterEventKind::BackendTimeout,
+                            None,
+                            Some(DrafterOperation::Cleanup),
+                        );
+                        let _ = reply.send(Err(DraftAbortError::RequestTimeout));
+                        self.backend.take();
+                        return false;
+                    }
+                };
+                let error_disposition = result.as_ref().err().map(|error| {
+                    self.backend
                         .as_ref()
-                        .err()
-                        .map(|error| backend.classify_error(DrafterOperation::Cleanup, error));
-                    (result, error_disposition)
-                };
+                        .expect("backend exists after abort")
+                        .classify_error(DrafterOperation::Cleanup, error)
+                });
                 if let Some(DrafterErrorDisposition {
                     class: DrafterErrorClass::RetryAfter { delay, scope },
                     ..

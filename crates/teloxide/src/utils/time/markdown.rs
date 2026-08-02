@@ -2313,8 +2313,8 @@ mod tests {
     fn dotted_text_is_not_treated_as_bare_url() {
         let parsed = LlmMarkdownFormatter::new()
             .parse(
-                "GPT 5.6 Rust 1.85.0 README.md main.rs config.toml \
-                 `invented.example/report` \\invented.example/report",
+                "GPT 5.6 Rust 1.85.0 README.md main.rs config.toml `invented.example/report` \
+                 \\invented.example/report",
             )
             .unwrap();
         assert!(parsed.bare_urls().is_empty());

@@ -13,6 +13,14 @@ pub enum UnknownCustomEmojiPolicy {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiteralLinkPolicy {
+    /// Allow only URI schemes accepted by the semantic Telegram frontend.
+    TelegramSafeSchemes,
+    /// Allow any syntactically valid URI scheme.
+    AnyUri,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InvalidTimePolicy {
     KeepLiteral,
     Error,
@@ -23,6 +31,7 @@ pub struct RichTextPolicies {
     pub unknown_link_alias: UnknownLinkAliasPolicy,
     pub unknown_custom_emoji: UnknownCustomEmojiPolicy,
     pub invalid_time: InvalidTimePolicy,
+    pub literal_link: LiteralLinkPolicy,
 }
 
 impl RichTextPolicies {
@@ -31,6 +40,7 @@ impl RichTextPolicies {
             unknown_link_alias: UnknownLinkAliasPolicy::Error,
             unknown_custom_emoji: UnknownCustomEmojiPolicy::Error,
             invalid_time: InvalidTimePolicy::Error,
+            literal_link: LiteralLinkPolicy::TelegramSafeSchemes,
         }
     }
 
@@ -45,6 +55,7 @@ impl Default for RichTextPolicies {
             unknown_link_alias: UnknownLinkAliasPolicy::KeepLabel,
             unknown_custom_emoji: UnknownCustomEmojiPolicy::KeepLiteral,
             invalid_time: InvalidTimePolicy::KeepLiteral,
+            literal_link: LiteralLinkPolicy::TelegramSafeSchemes,
         }
     }
 }
@@ -69,13 +80,34 @@ pub type MarkdownDiagnostic = RichTextDiagnostic;
 
 pub struct RichTextRenderContext<'a> {
     pub time: &'a super::TimeContext,
+    pub time_bindings: &'a super::TimeBindings,
     pub bindings: &'a super::RichTextBindings,
     pub policies: RichTextPolicies,
 }
 
 impl<'a> RichTextRenderContext<'a> {
-    pub fn new(time: &'a super::TimeContext, bindings: &'a super::RichTextBindings) -> Self {
-        Self { time, bindings, policies: RichTextPolicies::default() }
+    pub fn new(
+        time: &'a super::TimeContext,
+        time_bindings: &'a super::TimeBindings,
+        bindings: &'a super::RichTextBindings,
+    ) -> Self {
+        Self { time, time_bindings, bindings, policies: RichTextPolicies::developer() }
+    }
+
+    pub fn for_llm(
+        time: &'a super::TimeContext,
+        time_bindings: &'a super::TimeBindings,
+        bindings: &'a super::RichTextBindings,
+    ) -> Self {
+        Self { time, time_bindings, bindings, policies: RichTextPolicies::llm() }
+    }
+
+    pub fn for_developer(
+        time: &'a super::TimeContext,
+        time_bindings: &'a super::TimeBindings,
+        bindings: &'a super::RichTextBindings,
+    ) -> Self {
+        Self::new(time, time_bindings, bindings)
     }
 
     pub fn with_policies(mut self, policies: RichTextPolicies) -> Self {

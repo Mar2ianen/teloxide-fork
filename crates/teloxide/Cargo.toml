@@ -23,7 +23,11 @@ default = ["native-tls", "ctrlc_handler", "teloxide-core/default"]
 # Optional runtime layers that are useful to applications but are not part of
 # the core Telegram transport.
 drafter = ["tokio/sync", "tokio/time", "tokio/macros"]
-time-rendering = ["dep:jiff"]
+# `time-rendering` remains a feature-level compatibility alias for applications
+# that used the former time renderer. The formatter API itself changed when
+# the shared semantic Rich Text pipeline was introduced.
+rich-text = ["dep:jiff"]
+time-rendering = ["rich-text"]
 
 webhooks = ["rand"]
 webhooks-axum = ["webhooks", "axum", "tower", "tower-http"]
@@ -86,9 +90,8 @@ full = [
     "erased",
     "tracing",
     "drafter",
-    "time-rendering",
+    "rich-text",
 ]
-
 
 [dependencies]
 # replace me by the actual version when release, and return path when it's time to make 0-day fixes

@@ -46,6 +46,7 @@ pub enum RenderError {
 }
 
 impl RenderError {
+    #[cfg(feature = "rich-text")]
     pub(crate) fn invalid(
         dialect: &'static str,
         source: &str,
@@ -64,6 +65,7 @@ impl RenderError {
         }
     }
 
+    #[cfg(feature = "rich-text")]
     pub(crate) fn from_time_error(source: &str, byte_offset: usize, error: TimeError) -> Self {
         let (line, column) = line_column(source, byte_offset);
         match error {
@@ -75,6 +77,7 @@ impl RenderError {
     }
 }
 
+#[cfg(feature = "rich-text")]
 pub(crate) fn line_column(source: &str, byte_offset: usize) -> (usize, usize) {
     let prefix = &source[..byte_offset.min(source.len())];
     let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;

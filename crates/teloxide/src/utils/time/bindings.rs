@@ -115,7 +115,12 @@ fn validate_alias(alias: &str, kind: &'static str) -> Result<(), InvalidAlias> {
 
 fn validate_emoji_alias(alias: &str) -> Result<(), InvalidAlias> {
     validate_alias(alias, "custom emoji")?;
-    if !alias.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+    let valid_start =
+        alias.as_bytes().first().is_some_and(|byte| byte.is_ascii_lowercase() || *byte == b'_');
+    if !valid_start
+        || !alias
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
     {
         return Err(InvalidAlias::Invalid {
             alias: alias.to_owned(),

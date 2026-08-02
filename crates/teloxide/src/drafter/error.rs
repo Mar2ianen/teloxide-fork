@@ -193,6 +193,7 @@ impl<E: std::error::Error + 'static> std::error::Error for DraftFinishError<E> {
 #[derive(Debug)]
 pub enum DraftAbortError<E> {
     WorkerStopped,
+    RequestTimeout,
     Backend(E),
 }
 
@@ -200,6 +201,7 @@ impl<E: fmt::Display> fmt::Display for DraftAbortError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::WorkerStopped => f.write_str("drafter worker stopped"),
+            Self::RequestTimeout => f.write_str("abort cleanup request timed out"),
             Self::Backend(error) => write!(f, "abort cleanup failed: {error}"),
         }
     }

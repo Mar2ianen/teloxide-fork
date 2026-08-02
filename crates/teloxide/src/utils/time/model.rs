@@ -2,6 +2,37 @@ use std::collections::HashMap;
 
 use jiff::civil::{Date, DateTime, Time};
 
+/// A link in the semantic document before bindings are resolved.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LinkTarget {
+    /// A complete URI or URL written by the author.
+    Literal(String),
+    /// A short application-owned name resolved through [`RichTextBindings`].
+    Alias(String),
+}
+
+/// Classifies a link destination shared by all rich-text frontends.
+pub fn classify_link_target(value: &str) -> LinkTarget {
+    if has_uri_scheme(value) || value.contains('.') {
+        LinkTarget::Literal(value.to_owned())
+    } else {
+        LinkTarget::Alias(value.to_owned())
+    }
+}
+
+fn has_uri_scheme(value: &str) -> bool {
+    let Some(colon) = value.bytes().position(|byte| byte == b':') else {
+        return false;
+    };
+    let bytes = value.as_bytes();
+    if colon == 0 || !bytes[0].is_ascii_alphabetic() {
+        return false;
+    }
+    bytes[1..colon]
+        .iter()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'.' | b'-'))
+}
+
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DateTimeFormat {
@@ -110,6 +141,14 @@ pub struct DateTimeNode {
 pub enum RichNode {
     Text(String),
     DateTime(DateTimeNode),
+    Link {
+        label: Vec<RichNode>,
+        target: LinkTarget,
+    },
+    /// A named emoji is resolved after parsing through render bindings.
+    CustomEmoji {
+        alias: String,
+    },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -176,9 +215,14 @@ pub(crate) fn parse_expression(input: &str) -> Result<TimeExpression, String> {
         let date = input.parse::<Date>().map_err(|_| "invalid civil date".to_owned())?;
         return Ok(TimeExpression::CivilDate(date));
     }
-    if input.len() == 16 && input.as_bytes().get(10) == Some(&b'T') {
+    if input.len() == 16 && matches!(input.as_bytes().get(10), Some(b'T' | b' ')) {
+        let normalized = if input.as_bytes()[10] == b' ' {
+            input.replacen(' ', "T", 1)
+        } else {
+            input.to_owned()
+        };
         let datetime =
-            input.parse::<DateTime>().map_err(|_| "invalid civil datetime".to_owned())?;
+            normalized.parse::<DateTime>().map_err(|_| "invalid civil datetime".to_owned())?;
         if datetime.second() != 0 || datetime.nanosecond() != 0 {
             return Err("seconds are not supported in civil literals".to_owned());
         }

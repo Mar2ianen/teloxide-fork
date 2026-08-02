@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Bound LLM time-marker scanning to local syntax and skip URI/code/link destinations without treating ordinary ISO dates as malformed markers
-- Detect raw dotted host-like URLs outside code and escaped fragments, while keeping parser lookahead bounded and URL-aware
+- Keep raw-text URL scanning limited to explicit URI schemes, leaving ordinary dotted text such as versions and filenames unchanged
 - Reject semantic time, custom-emoji and nested-link nodes inside link labels that Telegram cannot represent safely
 - Preserve absolute source spans for nested frontend errors and escape readable fallback text for the selected frontend
 - Keep final delivery classification conservative for segment commits and clean temporary previews after confirmed final rejection

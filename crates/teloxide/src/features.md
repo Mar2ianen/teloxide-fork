@@ -21,7 +21,7 @@
 | `bincode-serializer` | Enables the [Bincode] serializer for dialogues. |
 | `drafter`            | Enables asynchronous latest-wins preview/final delivery with Telegram Drafter backends. |
 | `time-rendering`     | Enables the compatibility explicit Markdown and typed time API with timezone and DST normalization. |
-| `rich-text`          | Enables the semantic Rich Text pipeline with HTML, developer Markdown and LLM Markdown frontends, bound links and custom emoji. |
+| `rich-text`          | Opts into the semantic Rich Text pipeline with HTML, developer Markdown and LLM Markdown frontends, shared time/link/emoji bindings and policies. |
 
 [Redis]: https://redis.io/
 [Sqlite]: https://www.sqlite.org/

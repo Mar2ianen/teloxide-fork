@@ -19,12 +19,13 @@ bindings, custom-emoji bindings and error policies to every frontend.
 ```rust
 use teloxide::utils::time::{
     CustomEmojiBinding, LlmMarkdownFormatter, RichTextBindings,
-    RichTextRenderContext, TimeContext,
+    RichTextRenderContext, TimeBindings, TimeContext,
 };
 use teloxide::types::CustomEmojiId;
 use url::Url;
 
 let time = TimeContext::from_name("Europe/Moscow")?;
+let time_bindings = TimeBindings::default();
 let mut bindings = RichTextBindings::new();
 bindings.insert_link("source_1", Url::parse("https://example.com")?)?;
 bindings.insert_custom_emoji(
@@ -34,8 +35,8 @@ bindings.insert_custom_emoji(
         fallback: "🎉".into(),
     },
 )?;
-let context = RichTextRenderContext::new(&time, &bindings);
-let rendered = LlmMarkdownFormatter::new(time).render_with_context(
+let context = RichTextRenderContext::for_llm(&time, &time_bindings, &bindings);
+let rendered = LlmMarkdownFormatter::new().render_with_context(
     "Релиз 15:::00/ [в источнике](source_1) :party:",
     &context,
 )?;
@@ -51,10 +52,14 @@ Link destinations are classified consistently: a URI scheme or a dot means a
 literal URI/URL; otherwise the value is looked up in `RichTextBindings`. The
 application, not the model, owns the final URL and custom emoji ID.
 
-Parsed frontends expose `safe_cut_points()`. An unfinished time marker,
-emoji alias or link never reports its end as a safe incremental cut.
+Parsed frontends expose `known_extension_end_points()`. These are parser
+landmarks after completed extensions, not guarantees that a message can be
+segmented there: Markdown emphasis, HTML containers and other syntax may span
+an arbitrary landmark. An unfinished time marker, emoji alias, link or HTML
+semantic tag is retained as pending input.
 
 The old `MainMarkdownFormatter` and `LlmMarkdownFormatter` time-only methods
 remain available as compatibility wrappers. New code should pass one explicit
-`RichTextRenderContext` and one captured `Timestamp` through the complete
-render call.
+`RichTextRenderContext` (including `TimeBindings`) and one captured `Timestamp`
+through the complete render call. `RichTextRenderContext::for_developer` uses
+strict policies; `for_llm` uses readable fallback policies.

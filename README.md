@@ -1,27 +1,25 @@
 <div align="center">
-  <img src="https://github.com/teloxide/teloxide/blob/master/media/teloxide-logo.png?raw=true" width="250"/>
+  <img src="https://github.com/Mar2ianen/teloxide-fork/blob/master/media/teloxide-logo.png?raw=true" width="250"/>
   <h1><code>teloxide</code></h1>
-  <a href="https://docs.rs/teloxide/">
-    <img src="https://docs.rs/teloxide/badge.svg">
-  </a>
-  <a href="https://github.com/teloxide/teloxide/actions">
-    <img src="https://github.com/teloxide/teloxide/workflows/Continuous%20integration/badge.svg">
-  </a>
-  <a href="https://crates.io/crates/teloxide">
-    <img src="https://img.shields.io/crates/v/teloxide.svg">
+  <a href="https://github.com/Mar2ianen/teloxide-fork/actions/workflows/ci.yml">
+    <img src="https://github.com/Mar2ianen/teloxide-fork/actions/workflows/ci.yml/badge.svg?branch=master">
   </a>
   <a href="https://core.telegram.org/bots/api">
-    <img src="https://img.shields.io/badge/API%20coverage-Bot%20API%2010.0%20core-yellowgreen.svg">
+    <img src="https://img.shields.io/badge/API%20coverage-Bot%20API%2010.2%20core-yellowgreen.svg">
   </a>
   <a href="https://t.me/teloxide">
     <img src="https://img.shields.io/badge/support-t.me%2Fteloxide-blueviolet">
   </a>
-  <a href="https://devpod.sh/open#https://github.com/teloxide/teloxide">
+  <a href="https://devpod.sh/open#https://github.com/Mar2ianen/teloxide-fork">
     <img src="https://img.shields.io/badge/Open_in-DevPod-blueviolet">
   </a>
 
   A full-featured framework that empowers you to easily build [Telegram bots](https://telegram.org/blog/bot-revolution) using [Rust](https://www.rust-lang.org/). It handles all the difficult stuff so you can focus only on your business logic.
 </div>
+
+This repository is a maintained fork of [`teloxide`](https://github.com/teloxide/teloxide).
+The regular Telegram framework API remains compatible with the upstream `0.18.0`
+line; fork-specific APIs are opt-in features documented below.
 
 ## Highlights
 
@@ -47,8 +45,12 @@
 
 This fork includes two opt-in application layers that stay outside the default Telegram transport:
 
-- `drafter` provides asynchronous latest-wins preview delivery, shared rate limiting, native-draft and edit-in-place backends, segment commits, finalization, abort cleanup and delivery certainty
-- `time-rendering` provides explicit Markdown and typed time rendering with timezone normalization, deterministic DST handling and Telegram fallback text
+- `drafter` exposes `teloxide::drafter`: asynchronous latest-wins preview delivery, shared rate limiting, native-draft and edit-in-place backends, segment commits, finalization, abort cleanup and delivery certainty
+- `time-rendering` exposes `teloxide::utils::time`: explicit Markdown and typed time rendering with timezone normalization, deterministic DST handling and Telegram fallback text
+
+Both features are disabled by default. Native Telegram drafts are intended for
+private chats; group/chat flows should use the edit-in-place or status-then-final
+backends.
 
 Enable only the layer an application needs:
 
@@ -116,11 +118,15 @@ pretty_env_logger = "0.5"
 tokio = { version =  "1.39", features = ["rt-multi-thread", "macros"] }
 ```
 
-_Note: if there is functionality in master that is not released yet, you can pull the Git repository as follows:_
+The fork-only features are not supplied by the upstream crates.io release. Pin a
+full commit when consuming them from an application:
 
 ```toml
-teloxide = { git = "https://github.com/teloxide/teloxide.git", features = ["macros"] }
+teloxide = { git = "https://github.com/Mar2ianen/teloxide-fork", rev = "80d8d601813f908bb5e71f605454d226bf909ad9", features = ["macros", "drafter", "time-rendering"] }
 ```
+
+The `rev` above is an example of a full fork revision, not a floating branch;
+applications should update it deliberately together with `Cargo.lock`.
 
 ## API overview
 

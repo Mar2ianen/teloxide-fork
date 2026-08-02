@@ -87,9 +87,8 @@ full = [
     "erased",
     "tracing",
     "drafter",
-    "time-rendering",
+    "rich-text",
 ]
-
 
 [dependencies]
 # replace me by the actual version when release, and return path when it's time to make 0-day fixes

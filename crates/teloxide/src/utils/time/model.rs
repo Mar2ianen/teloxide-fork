@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use jiff::civil::{Date, DateTime, Time};
 
+#[cfg(feature = "rich-text")]
 /// A link in the semantic document before bindings are resolved.
+#[cfg(feature = "rich-text")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LinkTarget {
     /// A complete URI or URL written by the author.
@@ -11,7 +13,9 @@ pub enum LinkTarget {
     Alias(String),
 }
 
+#[cfg(feature = "rich-text")]
 /// Classifies a link destination shared by all rich-text frontends.
+#[cfg(feature = "rich-text")]
 pub fn classify_link_target(value: &str) -> LinkTarget {
     if has_uri_scheme(value) || value.contains('.') {
         LinkTarget::Literal(value.to_owned())
@@ -20,6 +24,7 @@ pub fn classify_link_target(value: &str) -> LinkTarget {
     }
 }
 
+#[cfg(feature = "rich-text")]
 fn has_uri_scheme(value: &str) -> bool {
     let Some(colon) = value.bytes().position(|byte| byte == b':') else {
         return false;
@@ -69,6 +74,7 @@ impl SignedTimeSpan {
         self.seconds
     }
 
+    #[cfg(feature = "rich-text")]
     pub(crate) fn parse_unsigned(input: &str) -> Result<Self, String> {
         let input = input.trim();
         if input.is_empty() {
@@ -130,6 +136,7 @@ pub enum TimeExpression {
     Variable { name: String, offset: SignedTimeSpan },
 }
 
+#[cfg(feature = "rich-text")]
 #[derive(Clone, Debug, PartialEq)]
 pub struct DateTimeNode {
     pub expression: TimeExpression,
@@ -137,6 +144,7 @@ pub struct DateTimeNode {
     pub source_range: std::ops::Range<usize>,
 }
 
+#[cfg(feature = "rich-text")]
 #[derive(Clone, Debug, PartialEq)]
 pub enum RichNode {
     Text(String),
@@ -170,6 +178,7 @@ impl TimeBindings {
     }
 }
 
+#[cfg(feature = "rich-text")]
 pub(crate) fn parse_signed_offset(input: &str) -> Result<SignedTimeSpan, String> {
     let input = input.trim();
     if input.is_empty() {
@@ -186,6 +195,7 @@ pub(crate) fn parse_signed_offset(input: &str) -> Result<SignedTimeSpan, String>
     ))
 }
 
+#[cfg(feature = "rich-text")]
 pub(crate) fn parse_expression(input: &str) -> Result<TimeExpression, String> {
     let input = input.trim();
     if input.is_empty() {
@@ -231,6 +241,7 @@ pub(crate) fn parse_expression(input: &str) -> Result<TimeExpression, String> {
     Err("unsupported time expression".to_owned())
 }
 
+#[cfg(feature = "rich-text")]
 fn split_variable(input: &str) -> Result<(String, SignedTimeSpan), String> {
     let mut end = 0;
     for (index, byte) in input.bytes().enumerate() {

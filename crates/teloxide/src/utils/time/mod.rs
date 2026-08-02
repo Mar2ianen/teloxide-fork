@@ -1,37 +1,41 @@
 //! Semantic Telegram Rich Text rendering.
 //!
-//! The `time-rendering` feature enables this module for compatibility. The
-//! `rich-text` feature is the explicit opt-in for the complete pipeline:
-//! HTML, developer Markdown and LLM Markdown are parsed into the same
-//! [`RichNode`] model and rendered with shared bindings and policies.
-//!
-//! [`StandardMarkdownFormatter`] is the opt-in path that keeps the source
-//! unchanged and does not enable semantic extensions.
+//! The `time-rendering` feature exposes time normalization and the typed time
+//! API. The `rich-text` feature additionally exposes the semantic Rich Text
+//! pipeline: HTML, developer Markdown and LLM Markdown are parsed into the
+//! same [`RichNode`] model and rendered with shared bindings and policies.
 
-mod bindings;
 mod error;
-mod markdown;
 mod model;
 mod normalize;
-mod policy;
 mod token;
 
-pub use bindings::{CustomEmojiBinding, InvalidAlias, RichTextBindings};
 pub use error::{RenderError, TimeError, TimeZoneError};
+pub use model::{DateTimeFormat, SignedTimeSpan, TimeBindings, TimeExpression, TimeValue};
+pub use normalize::{NormalizedDateTime, TimeContext};
+pub use token::DateTimeToken;
+
+#[cfg(feature = "rich-text")]
+mod bindings;
+#[cfg(feature = "rich-text")]
+mod markdown;
+#[cfg(feature = "rich-text")]
+mod policy;
+
+#[cfg(feature = "rich-text")]
+pub use bindings::{CustomEmojiBinding, InvalidAlias, RichTextBindings};
+#[cfg(feature = "rich-text")]
 pub use markdown::{
     HtmlFormatter, LlmMarkdownFormatter, MainMarkdownFormatter, ParsedHtml, ParsedLlmMarkdown,
     ParsedMainMarkdown, RenderedMessage, StandardMarkdownFormatter,
 };
-pub use model::{
-    classify_link_target, DateTimeFormat, DateTimeNode, LinkTarget, RichNode, SignedTimeSpan,
-    TimeBindings, TimeExpression, TimeValue,
-};
-pub use normalize::{NormalizedDateTime, TimeContext};
+#[cfg(feature = "rich-text")]
+pub use model::{classify_link_target, DateTimeNode, LinkTarget, RichNode};
+#[cfg(feature = "rich-text")]
 pub use policy::{
-    ExtensionKind, InvalidTimePolicy, MarkdownDiagnostic, RichTextDiagnostic, RichTextPolicies,
-    RichTextRenderContext, UnknownCustomEmojiPolicy, UnknownLinkAliasPolicy,
+    ExtensionKind, InvalidTimePolicy, LiteralLinkPolicy, MarkdownDiagnostic, RichTextDiagnostic,
+    RichTextPolicies, RichTextRenderContext, UnknownCustomEmojiPolicy, UnknownLinkAliasPolicy,
 };
-pub use token::DateTimeToken;
 
 /// The version of the explicit developer-facing dialect.
 pub const MAIN_DIALECT_VERSION: &str = "main-v1";

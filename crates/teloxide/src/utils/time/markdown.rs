@@ -4,25 +4,19 @@ use url::Url;
 
 use super::{
     classify_link_target, model::parse_expression, CustomEmojiBinding, DateTimeFormat,
-    DateTimeNode, InvalidTimePolicy, LinkTarget, RenderError, RichNode, RichTextBindings,
-    RichTextDiagnostic, RichTextPolicies, RichTextRenderContext, TimeBindings, TimeContext,
-    TimeExpression,
+    DateTimeNode, InvalidTimePolicy, LinkTarget, LiteralLinkPolicy, RenderError, RichNode,
+    RichTextBindings, RichTextDiagnostic, RichTextPolicies, RichTextRenderContext, TimeBindings,
+    TimeContext, TimeExpression,
 };
 
-#[derive(Clone)]
-pub struct MainMarkdownFormatter {
-    time: TimeContext,
-}
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MainMarkdownFormatter;
 
-#[derive(Clone)]
-pub struct LlmMarkdownFormatter {
-    time: TimeContext,
-}
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LlmMarkdownFormatter;
 
-#[derive(Clone)]
-pub struct HtmlFormatter {
-    time: TimeContext,
-}
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HtmlFormatter;
 
 /// Explicit Markdown transport without time, alias or custom-emoji semantics.
 #[derive(Clone, Copy, Debug, Default)]
@@ -32,21 +26,21 @@ pub struct StandardMarkdownFormatter;
 pub struct ParsedMainMarkdown {
     source: String,
     nodes: Vec<RichNode>,
-    safe_cut_points: Vec<usize>,
+    known_extension_end_points: Vec<usize>,
 }
 
 #[derive(Clone, Debug)]
 pub struct ParsedLlmMarkdown {
     source: String,
     nodes: Vec<RichNode>,
-    safe_cut_points: Vec<usize>,
+    known_extension_end_points: Vec<usize>,
 }
 
 #[derive(Clone, Debug)]
 pub struct ParsedHtml {
     source: String,
     nodes: Vec<RichNode>,
-    safe_cut_points: Vec<usize>,
+    known_extension_end_points: Vec<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -60,17 +54,17 @@ pub struct RenderedMessage {
     pub fallback_text: String,
     pub captured_now: Timestamp,
     pub diagnostics: Vec<RichTextDiagnostic>,
-    /// Byte offsets at which an incremental producer may safely cut input.
-    pub safe_cut_points: Vec<usize>,
+    /// End offsets recognized by the frontend after complete extensions.
+    ///
+    /// These are diagnostic parser landmarks, not a segmentation guarantee:
+    /// Markdown emphasis, HTML containers and other syntax may still span an
+    /// arbitrary landmark.
+    pub known_extension_end_points: Vec<usize>,
 }
 
 impl MainMarkdownFormatter {
-    pub fn new(time: TimeContext) -> Self {
-        Self { time }
-    }
-
-    pub fn time(&self) -> &TimeContext {
-        &self.time
+    pub fn new() -> Self {
+        Self
     }
 
     pub fn parse(&self, source: &str) -> Result<ParsedMainMarkdown, RenderError> {
@@ -78,33 +72,36 @@ impl MainMarkdownFormatter {
         Ok(ParsedMainMarkdown {
             source: source.to_owned(),
             nodes: scanned.nodes,
-            safe_cut_points: scanned.safe_cut_points,
+            known_extension_end_points: scanned.known_extension_end_points,
         })
     }
 
     pub fn render(
         &self,
         source: &str,
+        time: &TimeContext,
         bindings: &TimeBindings,
     ) -> Result<RenderedMessage, RenderError> {
-        self.render_at(source, bindings, Timestamp::now())
+        self.render_at(source, time, bindings, Timestamp::now())
     }
 
     pub fn render_with_bindings(
         &self,
         source: &str,
+        time: &TimeContext,
         bindings: &TimeBindings,
     ) -> Result<RenderedMessage, RenderError> {
-        self.render(source, bindings)
+        self.render(source, time, bindings)
     }
 
     pub fn render_at(
         &self,
         source: &str,
+        time: &TimeContext,
         bindings: &TimeBindings,
         captured_now: Timestamp,
     ) -> Result<RenderedMessage, RenderError> {
-        self.parse(source)?.render_at(&self.time, bindings, captured_now)
+        self.parse(source)?.render_at(time, bindings, captured_now)
     }
 
     /// Renders the developer Markdown frontend with shared semantic bindings.
@@ -127,12 +124,8 @@ impl MainMarkdownFormatter {
 }
 
 impl LlmMarkdownFormatter {
-    pub fn new(time: TimeContext) -> Self {
-        Self { time }
-    }
-
-    pub fn time(&self) -> &TimeContext {
-        &self.time
+    pub fn new() -> Self {
+        Self
     }
 
     pub fn parse(&self, source: &str) -> Result<ParsedLlmMarkdown, RenderError> {
@@ -140,17 +133,18 @@ impl LlmMarkdownFormatter {
         Ok(ParsedLlmMarkdown {
             source: source.to_owned(),
             nodes: scanned.nodes,
-            safe_cut_points: scanned.safe_cut_points,
+            known_extension_end_points: scanned.known_extension_end_points,
         })
     }
 
-    pub fn render(&self, source: &str) -> Result<RenderedMessage, RenderError> {
-        self.render_at(source, Timestamp::now())
+    pub fn render(&self, source: &str, time: &TimeContext) -> Result<RenderedMessage, RenderError> {
+        self.render_at(source, time, Timestamp::now())
     }
 
     pub fn render_at(
         &self,
         source: &str,
+        time: &TimeContext,
         captured_now: Timestamp,
     ) -> Result<RenderedMessage, RenderError> {
         let bindings = RichTextBindings::default();
@@ -158,14 +152,14 @@ impl LlmMarkdownFormatter {
         let time_bindings = TimeBindings::default();
         let parsed = self.parse(source)?;
         let options = RenderOptions {
-            time: &self.time,
+            time,
             time_bindings: &time_bindings,
             bindings: &bindings,
             policies: &policies,
             frontend: Frontend::Markdown,
             captured_now,
         };
-        render_nodes(source, &parsed.nodes, &parsed.safe_cut_points, &options)
+        render_nodes(source, &parsed.nodes, &parsed.known_extension_end_points, &options)
     }
 
     /// Renders the compact LLM Markdown frontend with application bindings.
@@ -188,12 +182,8 @@ impl LlmMarkdownFormatter {
 }
 
 impl HtmlFormatter {
-    pub fn new(time: TimeContext) -> Self {
-        Self { time }
-    }
-
-    pub fn time(&self) -> &TimeContext {
-        &self.time
+    pub fn new() -> Self {
+        Self
     }
 
     pub fn parse(&self, source: &str) -> Result<ParsedHtml, RenderError> {
@@ -201,7 +191,7 @@ impl HtmlFormatter {
         Ok(ParsedHtml {
             source: source.to_owned(),
             nodes: scanned.nodes,
-            safe_cut_points: scanned.safe_cut_points,
+            known_extension_end_points: scanned.known_extension_end_points,
         })
     }
 
@@ -237,14 +227,18 @@ impl StandardMarkdownFormatter {
             fallback_text: source.to_owned(),
             captured_now,
             diagnostics: Vec::new(),
-            safe_cut_points: vec![0, source.len()],
+            known_extension_end_points: vec![0, source.len()],
         }
     }
 }
 
 impl ParsedMainMarkdown {
-    pub fn safe_cut_points(&self) -> &[usize] {
-        &self.safe_cut_points
+    pub fn known_extension_end_points(&self) -> &[usize] {
+        &self.known_extension_end_points
+    }
+
+    pub fn link_aliases(&self) -> Vec<String> {
+        collect_link_aliases(&self.nodes)
     }
 
     pub fn render_at(
@@ -263,7 +257,7 @@ impl ParsedMainMarkdown {
             frontend: Frontend::Markdown,
             captured_now,
         };
-        render_nodes(&self.source, &self.nodes, &self.safe_cut_points, &options)
+        render_nodes(&self.source, &self.nodes, &self.known_extension_end_points, &options)
     }
 
     pub fn render_with_context_at(
@@ -271,22 +265,25 @@ impl ParsedMainMarkdown {
         context: &RichTextRenderContext<'_>,
         captured_now: Timestamp,
     ) -> Result<RenderedMessage, RenderError> {
-        let time_bindings = TimeBindings::default();
         let options = RenderOptions {
             time: context.time,
-            time_bindings: &time_bindings,
+            time_bindings: context.time_bindings,
             bindings: context.bindings,
             policies: &context.policies,
             frontend: Frontend::Markdown,
             captured_now,
         };
-        render_nodes(&self.source, &self.nodes, &self.safe_cut_points, &options)
+        render_nodes(&self.source, &self.nodes, &self.known_extension_end_points, &options)
     }
 }
 
 impl ParsedLlmMarkdown {
-    pub fn safe_cut_points(&self) -> &[usize] {
-        &self.safe_cut_points
+    pub fn known_extension_end_points(&self) -> &[usize] {
+        &self.known_extension_end_points
+    }
+
+    pub fn link_aliases(&self) -> Vec<String> {
+        collect_link_aliases(&self.nodes)
     }
 
     pub fn render_at(
@@ -305,7 +302,7 @@ impl ParsedLlmMarkdown {
             frontend: Frontend::Markdown,
             captured_now,
         };
-        render_nodes(&self.source, &self.nodes, &self.safe_cut_points, &options)
+        render_nodes(&self.source, &self.nodes, &self.known_extension_end_points, &options)
     }
 
     pub fn render_with_context_at(
@@ -313,22 +310,25 @@ impl ParsedLlmMarkdown {
         context: &RichTextRenderContext<'_>,
         captured_now: Timestamp,
     ) -> Result<RenderedMessage, RenderError> {
-        let time_bindings = TimeBindings::default();
         let options = RenderOptions {
             time: context.time,
-            time_bindings: &time_bindings,
+            time_bindings: context.time_bindings,
             bindings: context.bindings,
             policies: &context.policies,
             frontend: Frontend::Markdown,
             captured_now,
         };
-        render_nodes(&self.source, &self.nodes, &self.safe_cut_points, &options)
+        render_nodes(&self.source, &self.nodes, &self.known_extension_end_points, &options)
     }
 }
 
 impl ParsedHtml {
-    pub fn safe_cut_points(&self) -> &[usize] {
-        &self.safe_cut_points
+    pub fn known_extension_end_points(&self) -> &[usize] {
+        &self.known_extension_end_points
+    }
+
+    pub fn link_aliases(&self) -> Vec<String> {
+        collect_link_aliases(&self.nodes)
     }
 
     pub fn render_at(
@@ -336,16 +336,15 @@ impl ParsedHtml {
         context: &RichTextRenderContext<'_>,
         captured_now: Timestamp,
     ) -> Result<RenderedMessage, RenderError> {
-        let time_bindings = TimeBindings::default();
         let options = RenderOptions {
             time: context.time,
-            time_bindings: &time_bindings,
+            time_bindings: context.time_bindings,
             bindings: context.bindings,
             policies: &context.policies,
             frontend: Frontend::Html,
             captured_now,
         };
-        render_nodes(&self.source, &self.nodes, &self.safe_cut_points, &options)
+        render_nodes(&self.source, &self.nodes, &self.known_extension_end_points, &options)
     }
 }
 
@@ -370,10 +369,32 @@ struct RenderedFragment {
     diagnostics: Vec<RichTextDiagnostic>,
 }
 
+fn collect_link_aliases(nodes: &[RichNode]) -> Vec<String> {
+    let mut aliases = Vec::new();
+    for node in nodes {
+        match node {
+            RichNode::Link { label, target } => {
+                if let LinkTarget::Alias(alias) = target {
+                    if !aliases.contains(alias) {
+                        aliases.push(alias.clone());
+                    }
+                }
+                for alias in collect_link_aliases(label) {
+                    if !aliases.contains(&alias) {
+                        aliases.push(alias);
+                    }
+                }
+            }
+            RichNode::Text(_) | RichNode::DateTime(_) | RichNode::CustomEmoji { .. } => {}
+        }
+    }
+    aliases
+}
+
 fn render_nodes(
     source: &str,
     nodes: &[RichNode],
-    safe_cut_points: &[usize],
+    known_extension_end_points: &[usize],
     options: &RenderOptions<'_>,
 ) -> Result<RenderedMessage, RenderError> {
     let fragment = render_fragment(source, nodes, options)?;
@@ -389,7 +410,7 @@ fn render_nodes(
         fallback_text: fragment.fallback,
         captured_now: options.captured_now,
         diagnostics: fragment.diagnostics,
-        safe_cut_points: safe_cut_points.to_vec(),
+        known_extension_end_points: known_extension_end_points.to_vec(),
     })
 }
 
@@ -583,7 +604,11 @@ fn resolve_link(
 ) -> Result<LinkResolution, RenderError> {
     match target {
         LinkTarget::Literal(value) => {
-            if value.is_empty() || value.chars().any(char::is_control) {
+            if value.is_empty()
+                || value
+                    .chars()
+                    .any(|character| character.is_control() || character.is_whitespace())
+            {
                 return invalid_literal_link(
                     policies,
                     source,
@@ -591,8 +616,26 @@ fn resolve_link(
                     "literal link destination is invalid",
                 );
             }
-            if has_uri_scheme(value) && Url::parse(value).is_err() {
-                return invalid_literal_link(policies, source, value, "literal URI is invalid");
+            if has_uri_scheme(value) {
+                let Some(scheme) = value.split_once(':').map(|(scheme, _)| scheme) else {
+                    unreachable!("has_uri_scheme guarantees a scheme separator")
+                };
+                if matches!(policies.literal_link, LiteralLinkPolicy::TelegramSafeSchemes)
+                    && !matches!(
+                        scheme.to_ascii_lowercase().as_str(),
+                        "http" | "https" | "tg" | "mailto" | "ftp"
+                    )
+                {
+                    return invalid_literal_link(
+                        policies,
+                        source,
+                        value,
+                        "literal URI scheme is not allowed",
+                    );
+                }
+                if Url::parse(value).is_err() {
+                    return invalid_literal_link(policies, source, value, "literal URI is invalid");
+                }
             }
             Ok(LinkResolution { destination: Some(value.clone()), diagnostic: None })
         }
@@ -640,7 +683,7 @@ fn invalid_literal_link(
 
 struct ScanResult {
     nodes: Vec<RichNode>,
-    safe_cut_points: Vec<usize>,
+    known_extension_end_points: Vec<usize>,
 }
 
 enum MarkerScan {
@@ -662,8 +705,17 @@ fn scan(
     dialect: &'static str,
     marker: impl Fn(&str, usize, &'static str) -> MarkerScan + Copy,
 ) -> Result<ScanResult, RenderError> {
+    scan_at(source, 0, dialect, marker)
+}
+
+fn scan_at(
+    source: &str,
+    base_offset: usize,
+    dialect: &'static str,
+    marker: impl Fn(&str, usize, &'static str) -> MarkerScan + Copy,
+) -> Result<ScanResult, RenderError> {
     let mut nodes = Vec::new();
-    let mut safe_cut_points = vec![0];
+    let mut known_extension_end_points = vec![0];
     let mut text_start = 0;
     let mut index = 0;
     while index < source.len() {
@@ -688,7 +740,10 @@ fn scan(
                 parse_markdown_link(source, index)
             {
                 let label_source = &source[index + 1..label_end];
-                let label = scan(label_source, dialect, marker)?;
+                let mut label = scan(label_source, dialect, marker)?;
+                for node in &mut label.nodes {
+                    shift_node_ranges(node, base_offset + index + 1);
+                }
                 push_text(&mut nodes, &source[text_start..index]);
                 nodes.push(RichNode::Link {
                     label: label.nodes,
@@ -696,7 +751,7 @@ fn scan(
                 });
                 index = destination_end;
                 text_start = index;
-                safe_cut_points.push(index);
+                known_extension_end_points.push(index);
                 continue;
             }
         }
@@ -706,7 +761,7 @@ fn scan(
                 nodes.push(RichNode::CustomEmoji { alias });
                 index = end;
                 text_start = end;
-                safe_cut_points.push(end);
+                known_extension_end_points.push(end);
                 continue;
             }
         }
@@ -717,7 +772,7 @@ fn scan(
                 nodes.push(RichNode::DateTime(node));
                 index = end;
                 text_start = end;
-                safe_cut_points.push(end);
+                known_extension_end_points.push(end);
                 continue;
             }
             MarkerScan::MalformedIntent(error) => return Err(error),
@@ -725,10 +780,25 @@ fn scan(
         index = next_char_boundary(source, index);
     }
     push_text(&mut nodes, &source[text_start..]);
-    safe_cut_points.push(safe_cut_end(source));
-    safe_cut_points.sort_unstable();
-    safe_cut_points.dedup();
-    Ok(ScanResult { nodes, safe_cut_points })
+    known_extension_end_points.push(known_extension_end(source));
+    known_extension_end_points.sort_unstable();
+    known_extension_end_points.dedup();
+    Ok(ScanResult { nodes, known_extension_end_points })
+}
+
+fn shift_node_ranges(node: &mut RichNode, base_offset: usize) {
+    match node {
+        RichNode::DateTime(node) => {
+            node.source_range.start += base_offset;
+            node.source_range.end += base_offset;
+        }
+        RichNode::Link { label, .. } => {
+            for node in label {
+                shift_node_ranges(node, base_offset);
+            }
+        }
+        RichNode::Text(_) | RichNode::CustomEmoji { .. } => {}
+    }
 }
 
 fn scan_main_marker(source: &str, index: usize, dialect: &'static str) -> MarkerScan {
@@ -980,8 +1050,12 @@ fn malformed_llm(
 }
 
 fn scan_html(source: &str) -> Result<ScanResult, RenderError> {
+    scan_html_at(source, 0)
+}
+
+fn scan_html_at(source: &str, base_offset: usize) -> Result<ScanResult, RenderError> {
     let mut nodes = Vec::new();
-    let mut safe_cut_points = vec![0];
+    let mut known_extension_end_points = vec![0];
     let mut text_start = 0;
     let mut index = 0;
     while index < source.len() {
@@ -989,7 +1063,19 @@ fn scan_html(source: &str) -> Result<ScanResult, RenderError> {
             index = next_char_boundary(source, index);
             continue;
         }
+        if is_unclosed_html_literal(source, index) {
+            known_extension_end_points.push(index);
+            break;
+        }
+        if let Some(end) = skip_html_literal_context(source, index) {
+            index = end;
+            continue;
+        }
         let Some(tag_end) = find_tag_end(source, index) else {
+            if looks_like_html_extension_prefix(&source[index..]) {
+                known_extension_end_points.push(index);
+                break;
+            }
             index = next_char_boundary(source, index);
             continue;
         };
@@ -1005,6 +1091,10 @@ fn scan_html(source: &str) -> Result<ScanResult, RenderError> {
         }
         let attrs = parse_html_attributes(tag);
         let self_closing = tag.trim_end().ends_with("/>");
+        if !self_closing && !has_html_closing_tag(source, tag_end + 1, &name) {
+            known_extension_end_points.push(index);
+            break;
+        }
         let (node, end) = match name.as_str() {
             "tg-time" => {
                 let value = attrs.get("value").or_else(|| attrs.get("datetime"));
@@ -1023,7 +1113,8 @@ fn scan_html(source: &str) -> Result<ScanResult, RenderError> {
                     tag_end + 1
                 } else {
                     let closing = "</tg-time>";
-                    let Some(offset) = source[tag_end + 1..].find(closing) else {
+                    let Some(offset) = find_case_insensitive(&source[tag_end + 1..], closing)
+                    else {
                         return Err(RenderError::invalid(
                             "html",
                             source,
@@ -1058,7 +1149,8 @@ fn scan_html(source: &str) -> Result<ScanResult, RenderError> {
                     tag_end + 1
                 } else {
                     let closing = "</tg-emoji>";
-                    let Some(offset) = source[tag_end + 1..].find(closing) else {
+                    let Some(offset) = find_case_insensitive(&source[tag_end + 1..], closing)
+                    else {
                         return Err(RenderError::invalid(
                             "html",
                             source,
@@ -1082,7 +1174,7 @@ fn scan_html(source: &str) -> Result<ScanResult, RenderError> {
                     ));
                 };
                 let closing = "</a>";
-                let Some(offset) = source[tag_end + 1..].find(closing) else {
+                let Some(offset) = find_case_insensitive(&source[tag_end + 1..], closing) else {
                     return Err(RenderError::invalid(
                         "html",
                         source,
@@ -1093,7 +1185,10 @@ fn scan_html(source: &str) -> Result<ScanResult, RenderError> {
                 };
                 let label_start = tag_end + 1;
                 let label_end = label_start + offset;
-                let label = scan_html(&source[label_start..label_end])?;
+                let mut label = scan_html(&source[label_start..label_end])?;
+                for node in &mut label.nodes {
+                    shift_node_ranges(node, base_offset + label_start);
+                }
                 (
                     RichNode::Link { label: label.nodes, target: classify_link_target(href) },
                     label_end + closing.len(),
@@ -1105,13 +1200,13 @@ fn scan_html(source: &str) -> Result<ScanResult, RenderError> {
         nodes.push(node);
         index = end;
         text_start = end;
-        safe_cut_points.push(end);
+        known_extension_end_points.push(end);
     }
     push_text(&mut nodes, &source[text_start..]);
-    safe_cut_points.push(safe_cut_end(source));
-    safe_cut_points.sort_unstable();
-    safe_cut_points.dedup();
-    Ok(ScanResult { nodes, safe_cut_points })
+    known_extension_end_points.push(known_extension_end(source));
+    known_extension_end_points.sort_unstable();
+    known_extension_end_points.dedup();
+    Ok(ScanResult { nodes, known_extension_end_points })
 }
 
 fn infer_time_format(value: &str) -> DateTimeFormat {
@@ -1139,6 +1234,54 @@ fn find_tag_end(source: &str, start: usize) -> Option<usize> {
     None
 }
 
+fn find_case_insensitive(source: &str, needle: &str) -> Option<usize> {
+    let needle = needle.as_bytes();
+    source.as_bytes().windows(needle.len()).position(|window| {
+        window.iter().zip(needle).all(|(left, right)| left.to_ascii_lowercase() == *right)
+    })
+}
+
+fn skip_html_literal_context(source: &str, start: usize) -> Option<usize> {
+    let tag_end = find_tag_end(source, start)?;
+    let tag = &source[start..=tag_end];
+    if tag.starts_with("</") || tag.trim_end().ends_with("/>") {
+        return None;
+    }
+    let name = html_tag_name(tag)?.to_ascii_lowercase();
+    if !matches!(name.as_str(), "code" | "pre") {
+        return None;
+    }
+    let closing = format!("</{name}>");
+    let offset = find_case_insensitive(&source[tag_end + 1..], &closing)?;
+    Some(tag_end + 1 + offset + closing.len())
+}
+
+fn is_unclosed_html_literal(source: &str, start: usize) -> bool {
+    let Some(tag_end) = find_tag_end(source, start) else {
+        return false;
+    };
+    let tag = &source[start..=tag_end];
+    if tag.starts_with("</") || tag.trim_end().ends_with("/>") {
+        return false;
+    }
+    let Some(name) = html_tag_name(tag) else {
+        return false;
+    };
+    let name = name.to_ascii_lowercase();
+    matches!(name.as_str(), "code" | "pre")
+        && find_case_insensitive(source, &format!("</{name}>"))
+            .is_none_or(|closing| closing <= tag_end)
+}
+
+fn has_html_closing_tag(source: &str, start: usize, name: &str) -> bool {
+    find_case_insensitive(&source[start..], &format!("</{name}>")).is_some()
+}
+
+fn looks_like_html_extension_prefix(source: &str) -> bool {
+    let source = source.to_ascii_lowercase();
+    ["<tg-time", "<tg-emoji", "<a ", "<a>", "<a\n"].iter().any(|prefix| source.starts_with(prefix))
+}
+
 fn html_tag_name(tag: &str) -> Option<&str> {
     let inner = tag.strip_prefix('<')?.strip_suffix('>')?.trim_start_matches('/').trim();
     let end = inner.find(|ch: char| ch.is_ascii_whitespace() || ch == '/').unwrap_or(inner.len());
@@ -1148,48 +1291,59 @@ fn html_tag_name(tag: &str) -> Option<&str> {
 fn parse_html_attributes(tag: &str) -> std::collections::HashMap<String, String> {
     let mut attributes = std::collections::HashMap::new();
     let inner = tag.strip_prefix('<').and_then(|value| value.strip_suffix('>')).unwrap_or_default();
-    let inner = inner
-        .find(|character: char| character.is_ascii_whitespace() || character == '/')
-        .map_or("", |offset| &inner[offset..]);
-    let mut bytes = inner.bytes().peekable();
-    while let Some(byte) = bytes.peek().copied() {
-        if byte.is_ascii_whitespace() || byte == b'/' {
-            bytes.next();
-            continue;
-        }
-        let mut name = String::new();
-        while let Some(byte) = bytes.peek().copied() {
-            if byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_' {
-                name.push(byte as char);
-                bytes.next();
+    let mut cursor = inner.char_indices();
+    while cursor
+        .next()
+        .is_some_and(|(_, character)| !character.is_ascii_whitespace() && character != '/')
+    {}
+    loop {
+        while let Some((_, character)) = cursor.clone().next() {
+            if character.is_ascii_whitespace() || character == '/' {
+                cursor.next();
             } else {
                 break;
             }
         }
-        if name.is_empty() {
-            bytes.next();
-            continue;
-        }
-        while bytes.peek().is_some_and(u8::is_ascii_whitespace) {
-            bytes.next();
-        }
-        if bytes.next() != Some(b'=') {
-            continue;
-        }
-        while bytes.peek().is_some_and(u8::is_ascii_whitespace) {
-            bytes.next();
-        }
-        let Some(quote @ (b'\'' | b'"')) = bytes.next() else {
-            continue;
+        let Some((name_start, first)) = cursor.clone().next() else {
+            break;
         };
-        let mut value = String::new();
-        for byte in bytes.by_ref() {
-            if byte == quote {
+        if !first.is_ascii_alphanumeric() && first != '-' && first != '_' {
+            cursor.next();
+            continue;
+        }
+        let mut name_end = name_start;
+        while let Some((offset, character)) = cursor.clone().next() {
+            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
+                name_end = offset + character.len_utf8();
+                cursor.next();
+            } else {
                 break;
             }
-            value.push(byte as char);
         }
-        attributes.insert(name.to_ascii_lowercase(), value);
+        while cursor.clone().next().is_some_and(|(_, character)| character.is_ascii_whitespace()) {
+            cursor.next();
+        }
+        if cursor.next().is_none_or(|(_, character)| character != '=') {
+            continue;
+        }
+        while cursor.clone().next().is_some_and(|(_, character)| character.is_ascii_whitespace()) {
+            cursor.next();
+        }
+        let Some((_, quote @ ('\'' | '"'))) = cursor.next() else {
+            continue;
+        };
+        let Some((value_start, _)) = cursor.clone().next() else {
+            break;
+        };
+        let mut value_cursor = cursor.clone();
+        let Some(value_end) =
+            value_cursor.find_map(|(offset, character)| (character == quote).then_some(offset))
+        else {
+            break;
+        };
+        cursor = value_cursor;
+        let name = &inner[name_start..name_end];
+        attributes.insert(name.to_ascii_lowercase(), inner[value_start..value_end].to_owned());
     }
     attributes
 }
@@ -1245,23 +1399,40 @@ fn find_unescaped(source: &str, start: usize, needle: u8) -> Option<usize> {
 }
 
 fn parse_custom_emoji(source: &str, index: usize) -> Option<(String, usize)> {
+    if !is_boundary_before(source, index) {
+        return None;
+    }
     let bytes = source.as_bytes();
     let mut cursor = index + 1;
     let start = cursor;
-    while bytes.get(cursor).is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_') {
-        cursor += 1;
-    }
-    if cursor == start || bytes.get(cursor) != Some(&b':') {
+    if !bytes.get(cursor).is_some_and(|byte| byte.is_ascii_lowercase() || *byte == b'_') {
         return None;
     }
-    Some((source[start..cursor].to_ascii_lowercase(), cursor + 1))
+    while bytes
+        .get(cursor)
+        .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'_')
+    {
+        cursor += 1;
+    }
+    if cursor == start || bytes.get(cursor) != Some(&b':') || !is_boundary_after(source, cursor + 1)
+    {
+        return None;
+    }
+    Some((source[start..cursor].to_owned(), cursor + 1))
 }
 
 /// Returns the last byte offset that is not inside an unfinished extension.
 /// This is intentionally a small tail lexer: it never scans beyond the
 /// suffixes that can still become one of our semantic tokens.
-fn safe_cut_end(source: &str) -> usize {
+fn known_extension_end(source: &str) -> usize {
     let mut candidate = source.len();
+
+    for (index, _) in source.match_indices('<') {
+        let suffix = &source[index..];
+        if looks_like_html_extension_prefix(suffix) || is_unclosed_html_literal(source, index) {
+            candidate = candidate.min(index);
+        }
+    }
 
     if let Some(index) = source.rfind('[') {
         if parse_markdown_link(source, index).is_none() {
@@ -1271,8 +1442,12 @@ fn safe_cut_end(source: &str) -> usize {
 
     if let Some(index) = source.rfind(':') {
         let suffix = &source[index + 1..];
-        if !suffix.is_empty()
-            && suffix.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        let escaped = index > 0 && source.as_bytes()[index - 1] == b'\\';
+        let emoji_prefix = is_boundary_before(source, index) && !escaped;
+        if emoji_prefix
+            && suffix
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
         {
             candidate = candidate.min(index);
         }
@@ -1305,6 +1480,20 @@ fn safe_cut_end(source: &str) -> usize {
         }
     }
 
+    for (colon, _) in source.match_indices(':') {
+        let before = &source[..colon];
+        let mut digits_start = before.len();
+        while digits_start > 0 && before.as_bytes()[digits_start - 1].is_ascii_digit() {
+            digits_start -= 1;
+        }
+        if colon >= digits_start + 2
+            && before[digits_start..].bytes().all(|byte| byte.is_ascii_digit())
+            && is_boundary_before(source, digits_start)
+        {
+            candidate = candidate.min(digits_start);
+        }
+    }
+
     candidate
 }
 
@@ -1315,10 +1504,8 @@ fn is_pending_now_suffix(value: &str) -> bool {
     let Some(rest) = value.strip_prefix("now+").or_else(|| value.strip_prefix("now-")) else {
         return false;
     };
-    !rest.is_empty()
-        && rest
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || matches!(byte, b's' | b'm' | b'h' | b'd' | b'w'))
+    rest.bytes()
+        .all(|byte| byte.is_ascii_digit() || matches!(byte, b's' | b'm' | b'h' | b'd' | b'w'))
 }
 
 fn push_text(nodes: &mut Vec<RichNode>, text: &str) {
@@ -1397,6 +1584,13 @@ fn is_boundary_before(source: &str, index: usize) -> bool {
         .is_none_or(|character| !(character.is_ascii_alphanumeric() || character == '_'))
 }
 
+fn is_boundary_after(source: &str, index: usize) -> bool {
+    source[index..]
+        .chars()
+        .next()
+        .is_none_or(|character| !(character.is_ascii_alphanumeric() || character == '_'))
+}
+
 fn has_uri_scheme(value: &str) -> bool {
     let Some(colon) = value.bytes().position(|byte| byte == b':') else {
         return false;
@@ -1436,9 +1630,9 @@ mod tests {
 
     #[test]
     fn main_formatter_replaces_directive_and_keeps_fallback_clean() {
-        let formatter = MainMarkdownFormatter::new(context());
+        let formatter = MainMarkdownFormatter::new();
         let rendered = formatter
-            .render_at("Встреча @time(14:00).", &TimeBindings::default(), instant())
+            .render_at("Встреча @time(14:00).", &context(), &TimeBindings::default(), instant())
             .unwrap();
         assert!(rendered.markdown.contains("tg://time?unix="));
         assert_eq!(rendered.fallback_text, "Встреча 14:00.");
@@ -1446,10 +1640,11 @@ mod tests {
 
     #[test]
     fn main_formatter_ignores_code_and_url_destination() {
-        let formatter = MainMarkdownFormatter::new(context());
+        let formatter = MainMarkdownFormatter::new();
         let rendered = formatter
             .render_at(
                 "`@time(14:00)` [@time(15:00)](https://example.test/@time(16:00))",
+                &context(),
                 &TimeBindings::default(),
                 instant(),
             )
@@ -1462,25 +1657,28 @@ mod tests {
 
     #[test]
     fn llm_formatter_maps_clock_and_now() {
-        let formatter = LlmMarkdownFormatter::new(context());
-        let rendered =
-            formatter.render_at("14:::00/ and now/ now-15m/ now+2h30m/.", instant()).unwrap();
+        let formatter = LlmMarkdownFormatter::new();
+        let rendered = formatter
+            .render_at("14:::00/ and now/ now-15m/ now+2h30m/.", &context(), instant())
+            .unwrap();
         assert_eq!(rendered.fallback_text, "14:00 and 13:00 12:45 15:30.");
     }
 
     #[test]
     fn llm_formatter_maps_full_local_datetime() {
-        let formatter = LlmMarkdownFormatter::new(context());
-        let rendered = formatter.render_at("Release: 2026-08-03 14:::00/.", instant()).unwrap();
+        let formatter = LlmMarkdownFormatter::new();
+        let rendered =
+            formatter.render_at("Release: 2026-08-03 14:::00/.", &context(), instant()).unwrap();
         assert_eq!(rendered.fallback_text, "Release: 2026-08-03 14:00.");
     }
 
     #[test]
     fn llm_formatter_ignores_code_url_and_escaped_marker() {
-        let formatter = LlmMarkdownFormatter::new(context());
+        let formatter = LlmMarkdownFormatter::new();
         let rendered = formatter
             .render_at(
                 "`14:::00/` [14:::00/](https://example.test/14:::00/) \\::: 14:::00/",
+                &context(),
                 instant(),
             )
             .unwrap();
@@ -1492,7 +1690,7 @@ mod tests {
 
     #[test]
     fn llm_scanner_is_bounded_and_url_aware() {
-        let formatter = LlmMarkdownFormatter::new(context());
+        let formatter = LlmMarkdownFormatter::new();
         for source in [
             "now we continue / later",
             "nowadays/path",
@@ -1502,7 +1700,7 @@ mod tests {
             "<https://example.org/14:::00/path>",
             "[link](https://example.org/now/latest)",
         ] {
-            let rendered = formatter.render_at(source, instant()).unwrap();
+            let rendered = formatter.render_at(source, &context(), instant()).unwrap();
             assert_eq!(rendered.fallback_text, source);
             assert!(!rendered.markdown.contains("tg://time"), "unexpected marker in {source}");
         }
@@ -1510,6 +1708,7 @@ mod tests {
         let rendered = formatter
             .render_at(
                 "У нас 2 встречи: первая в 14:::00/\nВерсия 2, запуск в 2026-08-03 14:::00/",
+                &context(),
                 instant(),
             )
             .unwrap();
@@ -1519,36 +1718,36 @@ mod tests {
         );
 
         for source in ["2026-08-03 release", "2026-08-03 в 14:00", "2026-08-03T14:00"] {
-            let rendered = formatter.render_at(source, instant()).unwrap();
+            let rendered = formatter.render_at(source, &context(), instant()).unwrap();
             assert_eq!(rendered.fallback_text, source);
         }
 
         for source in ["2026-08-03 14:::00/", "2026-08-03T14:::00/"] {
-            let rendered = formatter.render_at(source, instant()).unwrap();
+            let rendered = formatter.render_at(source, &context(), instant()).unwrap();
             assert_eq!(rendered.fallback_text, "2026-08-03 14:00");
         }
 
         for source in ["2026-08-03 14:::xx/", "2026-08-03 14::::00/"] {
-            assert!(formatter.render_at(source, instant()).is_err(), "{source}");
+            assert!(formatter.render_at(source, &context(), instant()).is_err(), "{source}");
         }
     }
 
     #[test]
     fn llm_formatter_rejects_malformed_marker() {
-        let formatter = LlmMarkdownFormatter::new(context());
-        assert!(formatter.render_at("24:::00/", instant()).is_err());
-        assert!(formatter.render_at("now+3hours/", instant()).is_err());
-        assert!(formatter.render_at("14::::00/", instant()).is_err());
+        let formatter = LlmMarkdownFormatter::new();
+        assert!(formatter.render_at("24:::00/", &context(), instant()).is_err());
+        assert!(formatter.render_at("now+3hours/", &context(), instant()).is_err());
+        assert!(formatter.render_at("14::::00/", &context(), instant()).is_err());
     }
 
     #[test]
     fn main_formatter_rejects_missing_binding_and_invalid_relative_value() {
-        let formatter = MainMarkdownFormatter::new(context());
+        let formatter = MainMarkdownFormatter::new();
         assert!(formatter
-            .render_at("@time($missing)", &TimeBindings::default(), instant())
+            .render_at("@time($missing)", &context(), &TimeBindings::default(), instant())
             .is_err());
         assert!(formatter
-            .render_at("@relative(14:00)", &TimeBindings::default(), instant())
+            .render_at("@relative(14:00)", &context(), &TimeBindings::default(), instant())
             .is_err());
     }
 
@@ -1580,17 +1779,19 @@ mod tests {
 
     #[test]
     fn bindings_are_typed_not_string_substitutions() {
-        let formatter = MainMarkdownFormatter::new(context());
+        let formatter = MainMarkdownFormatter::new();
         let mut bindings = TimeBindings::new();
         bindings.insert("retry_at", TimeValue::Instant(instant()));
-        let rendered = formatter.render_at("retry @time($retry_at)", &bindings, instant()).unwrap();
+        let rendered = formatter
+            .render_at("retry @time($retry_at)", &context(), &bindings, instant())
+            .unwrap();
         assert_eq!(rendered.fallback_text, "retry 13:00");
     }
 
     #[test]
     fn render_at_reuses_one_captured_now() {
-        let formatter = LlmMarkdownFormatter::new(context());
-        let rendered = formatter.render_at("now/ and now+1h/", instant()).unwrap();
+        let formatter = LlmMarkdownFormatter::new();
+        let rendered = formatter.render_at("now/ and now+1h/", &context(), instant()).unwrap();
         assert_eq!(rendered.fallback_text, "13:00 and 14:00");
         assert_eq!(rendered.captured_now, instant());
     }
@@ -1611,16 +1812,17 @@ mod tests {
             )
             .unwrap();
         let time = context();
-        let context = RichTextRenderContext::new(&time, &bindings);
+        let time_bindings = TimeBindings::default();
+        let context = RichTextRenderContext::new(&time, &time_bindings, &bindings);
         let expected = "Релиз источник 🎉";
 
-        let markdown = LlmMarkdownFormatter::new(time.clone())
+        let markdown = LlmMarkdownFormatter::new()
             .render_with_context_at("Релиз [источник](source_1) :party:", &context, instant())
             .unwrap();
         assert_eq!(markdown.fallback_text, expected);
         assert!(markdown.compiled.contains("tg://emoji?id=123"));
 
-        let html = HtmlFormatter::new(time.clone())
+        let html = HtmlFormatter::new()
             .render_at(
                 "Релиз <a href=\"source_1\">источник</a> <tg-emoji alias=\"party\" />",
                 &context,
@@ -1632,18 +1834,144 @@ mod tests {
     }
 
     #[test]
+    fn developer_context_combines_time_bindings_with_rich_bindings() {
+        let time = context();
+        let mut time_bindings = TimeBindings::default();
+        time_bindings.insert("release", TimeValue::Instant(instant()));
+        let mut bindings = RichTextBindings::default();
+        bindings.insert_link("chat", Url::parse("https://example.com/chat").unwrap()).unwrap();
+        bindings
+            .insert_custom_emoji(
+                "party",
+                CustomEmojiBinding {
+                    custom_emoji_id: CustomEmojiId("123".into()),
+                    fallback: "🎉".into(),
+                },
+            )
+            .unwrap();
+        let context = RichTextRenderContext::for_developer(&time, &time_bindings, &bindings);
+        let rendered = MainMarkdownFormatter::new()
+            .render_with_context_at("@time($release) [чат](chat) :party:", &context, instant())
+            .unwrap();
+        assert_eq!(rendered.fallback_text, "13:00 чат 🎉");
+    }
+
+    #[test]
+    fn emoji_aliases_require_word_boundaries_and_named_start() {
+        let mut bindings = RichTextBindings::default();
+        bindings
+            .insert_custom_emoji(
+                "party",
+                CustomEmojiBinding {
+                    custom_emoji_id: CustomEmojiId("123".into()),
+                    fallback: "🎉".into(),
+                },
+            )
+            .unwrap();
+        assert!(bindings
+            .insert_custom_emoji(
+                "30",
+                CustomEmojiBinding {
+                    custom_emoji_id: CustomEmojiId("456".into()),
+                    fallback: "🔢".into(),
+                },
+            )
+            .is_err());
+        let time = context();
+        let time_bindings = TimeBindings::default();
+        let context = RichTextRenderContext::for_llm(&time, &time_bindings, &bindings);
+        let rendered = LlmMarkdownFormatter::new()
+            .render_with_context_at("12:30: foo:party: :party:", &context, instant())
+            .unwrap();
+        assert_eq!(rendered.fallback_text, "12:30: foo:party: 🎉");
+    }
+
+    #[test]
+    fn literal_links_are_validated_by_policy() {
+        let time = context();
+        let time_bindings = TimeBindings::default();
+        let bindings = RichTextBindings::default();
+        let context = RichTextRenderContext::for_developer(&time, &time_bindings, &bindings);
+        let formatter = MainMarkdownFormatter::new();
+        assert!(formatter
+            .render_with_context_at("[bad](javascript:alert(1))", &context, instant())
+            .is_err());
+        assert!(formatter
+            .render_with_context_at("[bad](foo.bar invalid)", &context, instant())
+            .is_err());
+        assert!(formatter
+            .render_with_context_at("[ok](https://example.com/path)", &context, instant())
+            .is_ok());
+    }
+
+    #[test]
+    fn link_label_time_errors_keep_absolute_source_offsets() {
+        let time = context();
+        let time_bindings = TimeBindings::default();
+        let mut bindings = RichTextBindings::default();
+        bindings.insert_link("source_1", Url::parse("https://example.com").unwrap()).unwrap();
+        let context = RichTextRenderContext::for_developer(&time, &time_bindings, &bindings);
+        let error = MainMarkdownFormatter::new()
+            .render_with_context_at("prefix [@time($missing)](source_1)", &context, instant())
+            .unwrap_err();
+        match error {
+            RenderError::UnknownBinding { byte_offset, .. } => assert_eq!(byte_offset, 8),
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn html_frontend_respects_code_contexts_and_unicode_attributes() {
+        let time = context();
+        let time_bindings = TimeBindings::default();
+        let mut bindings = RichTextBindings::default();
+        bindings
+            .insert_custom_emoji(
+                "party",
+                CustomEmojiBinding {
+                    custom_emoji_id: CustomEmojiId("123".into()),
+                    fallback: "🎉".into(),
+                },
+            )
+            .unwrap();
+        let context = RichTextRenderContext::for_developer(&time, &time_bindings, &bindings);
+        let rendered = HtmlFormatter::new()
+            .render_at(
+                "<code><tg-emoji alias=\"party\" /></code> <a href=\"https://example.com/привет\">сайт</a> <TG-EMOJI alias=\"party\"></tg-emoji>",
+                &context,
+                instant(),
+            )
+            .unwrap();
+        assert!(rendered.fallback_text.contains("<tg-emoji alias=\"party\" />"));
+        assert!(rendered.fallback_text.ends_with("сайт 🎉"));
+    }
+
+    #[test]
+    fn incomplete_html_extensions_are_pending() {
+        for source in [
+            "<tg-emoji alias=\"party\"",
+            "<tg-emoji alias=\"party\">",
+            "<code><tg-emoji alias=\"party\" />",
+        ] {
+            let parsed = HtmlFormatter::new().parse(source).unwrap();
+            assert_eq!(parsed.known_extension_end_points().last().copied(), Some(0), "{source}");
+            assert_eq!(parsed.nodes.len(), 1, "{source}");
+        }
+    }
+
+    #[test]
     fn developer_policy_is_strict_and_llm_policy_keeps_readable_fallback() {
         let time = context();
         let bindings = RichTextBindings::default();
-        let developer = RichTextRenderContext::new(&time, &bindings)
+        let time_bindings = TimeBindings::default();
+        let developer = RichTextRenderContext::new(&time, &time_bindings, &bindings)
             .with_policies(RichTextPolicies::developer());
-        assert!(MainMarkdownFormatter::new(time.clone())
+        assert!(MainMarkdownFormatter::new()
             .render_with_context_at("[missing](source_1) :party:", &developer, instant())
             .is_err());
 
-        let llm =
-            RichTextRenderContext::new(&time, &bindings).with_policies(RichTextPolicies::llm());
-        let rendered = LlmMarkdownFormatter::new(time.clone())
+        let llm = RichTextRenderContext::for_llm(&time, &time_bindings, &bindings);
+        let rendered = LlmMarkdownFormatter::new()
             .render_with_context_at("[missing](source_1) :party:", &llm, instant())
             .unwrap();
         assert_eq!(rendered.fallback_text, "missing :party:");
@@ -1654,8 +1982,9 @@ mod tests {
     fn html_time_and_links_use_common_ir() {
         let time = context();
         let bindings = RichTextBindings::default();
-        let context = RichTextRenderContext::new(&time, &bindings);
-        let rendered = HtmlFormatter::new(time.clone())
+        let time_bindings = TimeBindings::default();
+        let context = RichTextRenderContext::new(&time, &time_bindings, &bindings);
+        let rendered = HtmlFormatter::new()
             .render_at(
                 "Встреча <tg-time value=\"15:00\"></tg-time> <a href=\"https://example.com\">сайт</a>",
                 &context,
@@ -1668,17 +1997,31 @@ mod tests {
     }
 
     #[test]
-    fn incomplete_extensions_are_pending_and_not_safe_cut_points() {
-        let formatter = LlmMarkdownFormatter::new(context());
-        for source in ["14:::", "14:::00", "now", "now+3h", ":party", "[источник](source_"]
-        {
+    fn incomplete_extensions_are_pending_and_not_segmentation_guarantees() {
+        let formatter = LlmMarkdownFormatter::new();
+        for source in [
+            "14:",
+            "14::",
+            "14:::",
+            "14:::00",
+            "now",
+            "now+",
+            "now+3h",
+            ":",
+            ":party",
+            "[источник](source_",
+        ] {
             let parsed = formatter.parse(source).unwrap();
-            assert_eq!(parsed.safe_cut_points().last().copied(), Some(0), "{source}");
+            assert_eq!(parsed.known_extension_end_points().last().copied(), Some(0), "{source}");
             assert_eq!(parsed.nodes.len(), 1, "{source}");
         }
         for source in ["14:::00/", "now+3h/", ":party:", "[источник](source_1)"] {
             let parsed = formatter.parse(source).unwrap();
-            assert_eq!(parsed.safe_cut_points().last().copied(), Some(source.len()), "{source}");
+            assert_eq!(
+                parsed.known_extension_end_points().last().copied(),
+                Some(source.len()),
+                "{source}"
+            );
         }
     }
 

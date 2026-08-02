@@ -59,9 +59,10 @@ segmented there: Markdown emphasis, HTML containers and other syntax may span
 an arbitrary landmark. An unfinished time marker, emoji alias, link or HTML
 semantic tag is retained as pending input.
 
-The old `MainMarkdownFormatter` and `LlmMarkdownFormatter` time-only methods
-remain available as compatibility wrappers under `utils::time` when the
-`time-rendering` feature is enabled. New code should pass one explicit
+The `time-rendering` feature remains a feature-level compatibility alias for
+applications that used the former time renderer, but the old time-only
+formatter constructors and methods are not source-compatible with this shared
+semantic API migration. New code should pass one explicit
 `RichTextRenderContext` (including `TimeBindings`) and one captured `Timestamp`
 through the complete render call. `RichTextRenderContext::for_developer` uses
 strict policies; `for_llm` uses readable fallback policies.

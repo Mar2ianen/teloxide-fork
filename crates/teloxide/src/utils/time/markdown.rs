@@ -1338,9 +1338,7 @@ fn parse_html_time_format(
             _ => Err("tg-time `format` must be time, date, datetime or relative"),
         };
     }
-    if value.starts_with("now") {
-        Ok(DateTimeFormat::Time)
-    } else if value.len() == 5 {
+    if value.starts_with("now") || value.len() == 5 {
         Ok(DateTimeFormat::Time)
     } else if value.len() == 10 {
         Ok(DateTimeFormat::Date)

@@ -2,18 +2,17 @@ use std::collections::HashMap;
 
 use jiff::civil::{Date, DateTime, Time};
 
-#[cfg(feature = "rich-text")]
 /// A link in the semantic document before bindings are resolved.
 #[cfg(feature = "rich-text")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LinkTarget {
     /// A complete URI or URL written by the author.
     Literal(String),
-    /// A short application-owned name resolved through [`RichTextBindings`].
+    /// A short application-owned name resolved through
+    /// [`crate::utils::rich_text::RichTextBindings`].
     Alias(String),
 }
 
-#[cfg(feature = "rich-text")]
 /// Classifies a link destination shared by all rich-text frontends.
 #[cfg(feature = "rich-text")]
 pub fn classify_link_target(value: &str) -> LinkTarget {

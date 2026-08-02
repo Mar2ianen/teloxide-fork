@@ -266,6 +266,8 @@ where
             default_handler,
             error_handler,
             worker_error_handler,
+            #[cfg(test)]
+            worker_factory: None,
             state: ShutdownToken::new(),
             distribution_f,
             worker_queue_size,
@@ -318,6 +320,8 @@ pub struct Dispatcher<R, Err, Key> {
 
     error_handler: Arc<dyn ErrorHandler<Err> + Send + Sync>,
     worker_error_handler: Arc<dyn ErrorHandler<WorkerError> + Send + Sync>,
+    #[cfg(test)]
+    worker_factory: Option<fn(WorkerDeps<Err>) -> Worker>,
 
     state: ShutdownToken,
 }
@@ -604,6 +608,11 @@ where
     }
 
     fn new_worker(&self) -> Worker {
+        #[cfg(test)]
+        if let Some(factory) = self.worker_factory {
+            return factory(self.worker_deps());
+        }
+
         spawn_worker(
             self.worker_deps(),
             Arc::clone(&self.current_number_of_active_workers),
@@ -613,6 +622,11 @@ where
     }
 
     fn new_default_worker(&self) -> Worker {
+        #[cfg(test)]
+        if let Some(factory) = self.worker_factory {
+            return factory(self.worker_deps());
+        }
+
         spawn_default_worker(self.worker_deps(), self.worker_queue_size)
     }
 
@@ -624,6 +638,13 @@ where
             error_handler: Arc::clone(&self.error_handler),
             worker_error_handler: Arc::clone(&self.worker_error_handler),
         }
+    }
+
+    /// Overrides worker spawning in tests so that deterministic failures can
+    /// be injected. Not present in production builds.
+    #[cfg(test)]
+    fn set_worker_factory(&mut self, factory: fn(WorkerDeps<Err>) -> Worker) {
+        self.worker_factory = Some(factory);
     }
 
     async fn remove_inactive_workers_if_needed(&mut self) {
@@ -1497,6 +1518,43 @@ mod tests {
             *seen_updates.lock().expect("test mutex is not poisoned"),
             vec![UpdateId(1), UpdateId(2)]
         );
+    }
+
+    /// A worker factory that produces workers with an already-closed channel,
+    /// simulating a worker task that died right after being spawned.
+    fn dead_worker_factory(_deps: WorkerDeps<Infallible>) -> Worker {
+        let (tx, rx) = tokio::sync::mpsc::channel::<Update>(1);
+        drop(rx);
+        let handle = tokio::spawn(async {});
+        Worker { tx, handle, is_waiting: Arc::new(AtomicBool::new(false)) }
+    }
+
+    #[tokio::test]
+    async fn undeliverable_update_is_reported_to_the_error_policy() {
+        let policy_errors = Arc::new(Mutex::new(Vec::new()));
+
+        let mut dispatcher =
+            Dispatcher::<_, Infallible, _>::builder(Bot::new("test"), dptree::entry())
+                .worker_error_handler(test_policy(&policy_errors))
+                .build();
+        dispatcher.set_worker_factory(dead_worker_factory);
+
+        let listener_error_handler = Arc::new(|error: Infallible| async move { match error {} });
+
+        // Both the original and the replacement worker are dead on arrival, so
+        // the update cannot be delivered and must be reported.
+        dispatcher.process_update::<Infallible, _>(Ok(update(1)), &listener_error_handler).await;
+
+        let policy_errors = policy_errors.lock().expect("test mutex is not poisoned");
+        assert_eq!(policy_errors.len(), 1);
+        match &policy_errors[0] {
+            WorkerError::UpdateUndeliverable { update, first_termination, retry_termination } => {
+                assert_eq!(update.id, UpdateId(1));
+                assert_eq!(*first_termination, WorkerTermination::Finished);
+                assert_eq!(*retry_termination, WorkerTermination::Finished);
+            }
+            error => panic!("expected UpdateUndeliverable, got {error:?}"),
+        }
     }
 
     #[tokio::test]

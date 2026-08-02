@@ -55,6 +55,12 @@ for strict template validation or `for_llm` for readable diagnostics and
 fallbacks. Parsed frontends expose `known_extension_end_points`; these are
 parser landmarks, not safe message-segmentation boundaries.
 
+The `rich-text` context is shared by all three frontends and contains both
+`TimeBindings` and `RichTextBindings`. Use `RichTextRenderContext::for_developer`
+for strict template validation or `for_llm` for readable diagnostics and
+fallbacks. Parsed frontends expose `known_extension_end_points`; these are
+parser landmarks, not safe message-segmentation boundaries.
+
 Enable only the layer an application needs:
 
 ```toml
@@ -85,6 +91,7 @@ cargo test -p teloxide --features "drafter,time-rendering"
 cargo test -p teloxide --no-default-features --features drafter --lib
 cargo test -p teloxide --no-default-features --features time-rendering --lib
 cargo test -p teloxide --no-default-features --features rich-text --lib
+cargo check -p teloxide --no-default-features
 cargo clippy -p teloxide --all-targets --features "drafter,rich-text" -- -D warnings
 cargo check -p teloxide --example drafter --features drafter
 ```

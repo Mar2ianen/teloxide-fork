@@ -2,6 +2,41 @@ use std::collections::HashMap;
 
 use jiff::civil::{Date, DateTime, Time};
 
+/// A link in the semantic document before bindings are resolved.
+#[cfg(feature = "rich-text")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LinkTarget {
+    /// A complete URI or URL written by the author.
+    Literal(String),
+    /// A short application-owned name resolved through
+    /// [`crate::utils::rich_text::RichTextBindings`].
+    Alias(String),
+}
+
+/// Classifies a link destination shared by all rich-text frontends.
+#[cfg(feature = "rich-text")]
+pub fn classify_link_target(value: &str) -> LinkTarget {
+    if has_uri_scheme(value) || value.contains('.') {
+        LinkTarget::Literal(value.to_owned())
+    } else {
+        LinkTarget::Alias(value.to_owned())
+    }
+}
+
+#[cfg(feature = "rich-text")]
+fn has_uri_scheme(value: &str) -> bool {
+    let Some(colon) = value.bytes().position(|byte| byte == b':') else {
+        return false;
+    };
+    let bytes = value.as_bytes();
+    if colon == 0 || !bytes[0].is_ascii_alphabetic() {
+        return false;
+    }
+    bytes[1..colon]
+        .iter()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'.' | b'-'))
+}
+
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DateTimeFormat {
@@ -38,6 +73,7 @@ impl SignedTimeSpan {
         self.seconds
     }
 
+    #[cfg(feature = "rich-text")]
     pub(crate) fn parse_unsigned(input: &str) -> Result<Self, String> {
         let input = input.trim();
         if input.is_empty() {
@@ -99,6 +135,7 @@ pub enum TimeExpression {
     Variable { name: String, offset: SignedTimeSpan },
 }
 
+#[cfg(feature = "rich-text")]
 #[derive(Clone, Debug, PartialEq)]
 pub struct DateTimeNode {
     pub expression: TimeExpression,
@@ -106,10 +143,27 @@ pub struct DateTimeNode {
     pub source_range: std::ops::Range<usize>,
 }
 
+#[cfg(feature = "rich-text")]
 #[derive(Clone, Debug, PartialEq)]
 pub enum RichNode {
     Text(String),
     DateTime(DateTimeNode),
+    /// A syntactically signalled but malformed time token. LLM rendering can
+    /// keep it literal according to `InvalidTimePolicy`.
+    InvalidTime {
+        literal: String,
+        source_range: std::ops::Range<usize>,
+    },
+    Link {
+        label: Vec<RichNode>,
+        target: LinkTarget,
+        source_range: std::ops::Range<usize>,
+    },
+    /// A named emoji is resolved after parsing through render bindings.
+    CustomEmoji {
+        alias: String,
+        source_range: std::ops::Range<usize>,
+    },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -131,6 +185,7 @@ impl TimeBindings {
     }
 }
 
+#[cfg(feature = "rich-text")]
 pub(crate) fn parse_signed_offset(input: &str) -> Result<SignedTimeSpan, String> {
     let input = input.trim();
     if input.is_empty() {
@@ -147,6 +202,7 @@ pub(crate) fn parse_signed_offset(input: &str) -> Result<SignedTimeSpan, String>
     ))
 }
 
+#[cfg(feature = "rich-text")]
 pub(crate) fn parse_expression(input: &str) -> Result<TimeExpression, String> {
     let input = input.trim();
     if input.is_empty() {
@@ -176,9 +232,14 @@ pub(crate) fn parse_expression(input: &str) -> Result<TimeExpression, String> {
         let date = input.parse::<Date>().map_err(|_| "invalid civil date".to_owned())?;
         return Ok(TimeExpression::CivilDate(date));
     }
-    if input.len() == 16 && input.as_bytes().get(10) == Some(&b'T') {
+    if input.len() == 16 && matches!(input.as_bytes().get(10), Some(b'T' | b' ')) {
+        let normalized = if input.as_bytes()[10] == b' ' {
+            input.replacen(' ', "T", 1)
+        } else {
+            input.to_owned()
+        };
         let datetime =
-            input.parse::<DateTime>().map_err(|_| "invalid civil datetime".to_owned())?;
+            normalized.parse::<DateTime>().map_err(|_| "invalid civil datetime".to_owned())?;
         if datetime.second() != 0 || datetime.nanosecond() != 0 {
             return Err("seconds are not supported in civil literals".to_owned());
         }
@@ -187,6 +248,7 @@ pub(crate) fn parse_expression(input: &str) -> Result<TimeExpression, String> {
     Err("unsupported time expression".to_owned())
 }
 
+#[cfg(feature = "rich-text")]
 fn split_variable(input: &str) -> Result<(String, SignedTimeSpan), String> {
     let mut end = 0;
     for (index, byte) in input.bytes().enumerate() {

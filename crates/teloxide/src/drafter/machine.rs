@@ -108,6 +108,20 @@ enum TerminalOutcome<T, E> {
     Synthetic(TerminalFailure),
 }
 
+fn terminal_delivery_certainty<T, E>(
+    outcome: &TerminalOutcome<T, E>,
+    disposition: Option<&DrafterErrorDisposition>,
+) -> Option<DeliveryCertainty> {
+    match outcome {
+        TerminalOutcome::Success(_) => None,
+        TerminalOutcome::Backend(_) => disposition.map(|value| value.delivery),
+        TerminalOutcome::Synthetic(TerminalFailure::RequestTimeout) => {
+            Some(DeliveryCertainty::Unknown)
+        }
+        TerminalOutcome::Synthetic(TerminalFailure::Deadline(delivery)) => Some(*delivery),
+    }
+}
+
 async fn wait_for_terminal_permit<L, R>(
     limiter: &L,
     key: super::DrafterRateLimitKey,
@@ -896,32 +910,29 @@ where
                         }
                     }
                 };
-                let (failed_delivery_cleanup, cleanup_timed_out) = if let Some(disposition) =
-                    failure_disposition.as_ref()
-                {
-                    if matches!(
-                        disposition.delivery,
-                        DeliveryCertainty::NotAttempted | DeliveryCertainty::Rejected
-                    ) {
-                        let backend = self.backend.as_mut().expect("backend exists for cleanup");
-                        match tokio::time::timeout_at(
-                            operation_deadline,
-                            tokio::time::timeout(self.config.request_timeout, backend.abort()),
-                        )
-                        .await
-                        {
-                            Ok(Ok(Ok(()))) => (None, false),
-                            Ok(Ok(Err(error))) => (
-                                Some((
-                                    backend.classify_error(DrafterOperation::Cleanup, &error),
-                                    backend.preview_message_id(),
-                                )),
-                                false,
-                            ),
-                            Ok(Err(_)) | Err(_) => (None, true),
-                        }
-                    } else {
-                        (None, false)
+                let cleanup_delivery =
+                    terminal_delivery_certainty(&result, failure_disposition.as_ref());
+                let (failed_delivery_cleanup, cleanup_timed_out) = if matches!(
+                    cleanup_delivery,
+                    Some(DeliveryCertainty::NotAttempted | DeliveryCertainty::Rejected)
+                ) {
+                    let backend = self.backend.as_mut().expect("backend exists for cleanup");
+                    let cleanup_deadline = Instant::now() + self.config.request_timeout;
+                    match tokio::time::timeout_at(
+                        cleanup_deadline,
+                        tokio::time::timeout(self.config.request_timeout, backend.abort()),
+                    )
+                    .await
+                    {
+                        Ok(Ok(Ok(()))) => (None, false),
+                        Ok(Ok(Err(error))) => (
+                            Some((
+                                backend.classify_error(DrafterOperation::Cleanup, &error),
+                                backend.preview_message_id(),
+                            )),
+                            false,
+                        ),
+                        Ok(Err(_)) | Err(_) => (None, true),
                     }
                 } else {
                     (None, false)
@@ -1593,6 +1604,7 @@ mod tests {
     struct AlwaysRetryAfterBackend {
         commit_attempts: Arc<Mutex<usize>>,
         finish_attempts: Arc<Mutex<usize>>,
+        abort_calls: Arc<Mutex<usize>>,
     }
 
     impl DrafterBackend for AlwaysRetryAfterBackend {
@@ -1626,6 +1638,7 @@ mod tests {
         }
 
         async fn abort(&mut self) -> Result<(), Self::Error> {
+            *self.abort_calls.lock().unwrap() += 1;
             Ok(())
         }
 
@@ -1690,6 +1703,56 @@ mod tests {
             DrafterErrorDisposition {
                 class: DrafterErrorClass::Ambiguous,
                 delivery: DeliveryCertainty::Unknown,
+            }
+        }
+    }
+
+    struct HangingAbortBackend {
+        abort_calls: Arc<Mutex<usize>>,
+    }
+
+    impl DrafterBackend for HangingAbortBackend {
+        type Preview = String;
+        type Final = String;
+        type SegmentOutput = String;
+        type Output = String;
+        type Error = TestError;
+
+        fn capabilities(&self) -> DrafterCapabilities {
+            DrafterCapabilities {
+                mode: DrafterMode::EditInPlace,
+                expires_without_refresh: false,
+                supports_draft_thinking: false,
+                supports_rich_preview: false,
+            }
+        }
+
+        async fn update(&mut self, _preview: String) -> Result<PreviewAck, Self::Error> {
+            Ok(PreviewAck)
+        }
+
+        async fn commit_segment(&mut self, _final_payload: &String) -> Result<String, Self::Error> {
+            Ok(String::new())
+        }
+
+        async fn finish(&mut self, _final_payload: &String) -> Result<String, Self::Error> {
+            Err(TestError::Rejected)
+        }
+
+        async fn abort(&mut self) -> Result<(), Self::Error> {
+            *self.abort_calls.lock().unwrap() += 1;
+            std::future::pending().await
+        }
+
+        fn classify_error(
+            &self,
+            _operation: DrafterOperation,
+            error: &Self::Error,
+        ) -> DrafterErrorDisposition {
+            assert!(matches!(error, TestError::Rejected));
+            DrafterErrorDisposition {
+                class: DrafterErrorClass::Permanent,
+                delivery: DeliveryCertainty::Rejected,
             }
         }
     }
@@ -2062,6 +2125,7 @@ mod tests {
         let backend = AlwaysRetryAfterBackend {
             commit_attempts: Arc::new(Mutex::new(0)),
             finish_attempts: Arc::clone(&finish_attempts),
+            abort_calls: Arc::new(Mutex::new(0)),
         };
         let (drafter, _sink) = Drafter::snapshots_with_observer(
             backend,
@@ -2108,11 +2172,92 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn terminal_deadline_before_first_permit_still_aborts_preview() {
+        let abort_calls = Arc::new(Mutex::new(0));
+        let backend = ClassifiedBackend {
+            previews: Arc::new(Mutex::new(Vec::new())),
+            update_calls: 0,
+            fail_update_at: None,
+            final_attempts: Arc::new(Mutex::new(0)),
+            retry_final_once: false,
+            rejected_final: false,
+            ambiguous_final: false,
+            commit_attempts: Arc::new(Mutex::new(0)),
+            retry_commit_once: false,
+            invalid_commit_once: false,
+            cleanup_retry_once: false,
+            abort_cleanup_retry_once: false,
+            abort_calls: Arc::clone(&abort_calls),
+            preview_message_id: Some(teloxide_core::types::MessageId(91)),
+            expires_without_refresh: false,
+        };
+        let limiter = InProcessRateLimiter::new(Duration::ZERO, Duration::ZERO);
+        limiter.penalize(DrafterRateLimitScope::Global, Duration::from_secs(10));
+        let (drafter, _sink) = Drafter::snapshots(
+            backend,
+            limiter,
+            DraftConfig {
+                request_timeout: Duration::from_secs(1),
+                terminal_timeout: Duration::from_secs(1),
+                ..DraftConfig::default()
+            },
+        )
+        .unwrap();
+
+        let finish = tokio::spawn(async move { drafter.finish("final".to_owned()).await });
+        for _ in 0..3 {
+            tokio::task::yield_now().await;
+        }
+        tokio::time::advance(Duration::from_secs(1)).await;
+        let result = finish.await.unwrap();
+
+        assert!(matches!(
+            result,
+            Err(DraftFinishError::DeadlineExceeded { delivery: DeliveryCertainty::NotAttempted })
+        ));
+        assert_eq!(*abort_calls.lock().unwrap(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retry_after_beyond_terminal_deadline_still_runs_cleanup() {
+        let abort_calls = Arc::new(Mutex::new(0));
+        let backend = AlwaysRetryAfterBackend {
+            commit_attempts: Arc::new(Mutex::new(0)),
+            finish_attempts: Arc::new(Mutex::new(0)),
+            abort_calls: Arc::clone(&abort_calls),
+        };
+        let (drafter, _sink) = Drafter::snapshots(
+            backend,
+            NoopLimiter,
+            DraftConfig {
+                request_timeout: Duration::from_secs(1),
+                terminal_timeout: Duration::from_millis(10),
+                ..DraftConfig::default()
+            },
+        )
+        .unwrap();
+
+        let finish = tokio::spawn(async move { drafter.finish("final".to_owned()).await });
+        for _ in 0..3 {
+            tokio::task::yield_now().await;
+        }
+        tokio::time::advance(Duration::from_millis(10)).await;
+        let result = finish.await.unwrap();
+
+        assert!(matches!(
+            result,
+            Err(DraftFinishError::DeadlineExceeded { delivery: DeliveryCertainty::Rejected })
+        ));
+        assert_eq!(*abort_calls.lock().unwrap(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn segment_commit_retry_after_budget_is_bounded() {
         let commit_attempts = Arc::new(Mutex::new(0));
         let backend = AlwaysRetryAfterBackend {
             commit_attempts: Arc::clone(&commit_attempts),
             finish_attempts: Arc::new(Mutex::new(0)),
+            abort_calls: Arc::new(Mutex::new(0)),
         };
         let (mut drafter, _sink) = Drafter::snapshots(
             backend,
@@ -2158,6 +2303,7 @@ mod tests {
         let backend = AlwaysRetryAfterBackend {
             commit_attempts: Arc::new(Mutex::new(0)),
             finish_attempts: Arc::clone(&finish_attempts),
+            abort_calls: Arc::new(Mutex::new(0)),
         };
         let (drafter, _sink) = Drafter::snapshots(
             backend,
@@ -2217,6 +2363,46 @@ mod tests {
             result,
             Err(DraftFinishError::RequestTimeout { delivery: DeliveryCertainty::Unknown })
         ));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cleanup_has_its_own_timeout_after_terminal_deadline() {
+        let abort_calls = Arc::new(Mutex::new(0));
+        let observer = RecordingObserver::default();
+        let observer_ref = Arc::new(observer.clone());
+        let backend = HangingAbortBackend { abort_calls: Arc::clone(&abort_calls) };
+        let (drafter, _sink) = Drafter::snapshots_with_observer(
+            backend,
+            NoopLimiter,
+            DraftConfig {
+                request_timeout: Duration::from_millis(20),
+                terminal_timeout: Duration::from_millis(1),
+                ..DraftConfig::default()
+            },
+            Arc::clone(&observer_ref) as Arc<dyn DrafterObserver>,
+        )
+        .unwrap();
+
+        let finish = tokio::spawn(async move { drafter.finish("final".to_owned()).await });
+        for _ in 0..3 {
+            tokio::task::yield_now().await;
+        }
+        tokio::time::advance(Duration::from_millis(21)).await;
+        let result = finish.await.unwrap();
+
+        assert!(matches!(
+            result,
+            Err(DraftFinishError::Backend {
+                class: DrafterErrorClass::Permanent,
+                delivery: DeliveryCertainty::Rejected,
+                ..
+            })
+        ));
+        assert_eq!(*abort_calls.lock().unwrap(), 1);
+        assert!(observer.events.lock().unwrap().iter().any(|event| {
+            event.kind == DrafterEventKind::BackendTimeout
+                && event.operation == Some(DrafterOperation::Cleanup)
+        }));
     }
 
     #[tokio::test(start_paused = true)]
@@ -2459,6 +2645,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn ambiguous_final_is_not_retried() {
         let final_attempts = Arc::new(Mutex::new(0));
+        let abort_calls = Arc::new(Mutex::new(0));
         let backend = ClassifiedBackend {
             previews: Arc::new(Mutex::new(Vec::new())),
             update_calls: 0,
@@ -2472,7 +2659,7 @@ mod tests {
             invalid_commit_once: false,
             cleanup_retry_once: false,
             abort_cleanup_retry_once: false,
-            abort_calls: Arc::new(Mutex::new(0)),
+            abort_calls: Arc::clone(&abort_calls),
             preview_message_id: None,
             expires_without_refresh: false,
         };
@@ -2489,6 +2676,7 @@ mod tests {
             })
         ));
         assert_eq!(*final_attempts.lock().unwrap(), 1);
+        assert_eq!(*abort_calls.lock().unwrap(), 0);
     }
 
     struct PanickingObserver;

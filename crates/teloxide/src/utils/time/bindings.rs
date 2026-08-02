@@ -6,6 +6,12 @@ use url::Url;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CustomEmojiBinding {
     pub custom_emoji_id: CustomEmojiId,
+    /// Visible fallback/alt text for the custom emoji entity.
+    ///
+    /// The Telegram entity is valid only when this is the exact ordinary
+    /// emoji sequence represented by `custom_emoji_id`. Teloxide validates
+    /// that it is non-empty; applications should obtain the pair from their
+    /// trusted emoji registry or code generator rather than inventing it.
     pub fallback: String,
 }
 

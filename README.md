@@ -47,7 +47,7 @@ This fork includes two opt-in application layers that stay outside the default T
 
 - `drafter` provides asynchronous latest-wins preview delivery, shared rate limiting, native-draft and edit-in-place backends, segment commits, finalization, abort cleanup and delivery certainty
 - `rich-text` provides the shared semantic Rich Text pipeline: HTML, developer Markdown and LLM Markdown frontends with bound links, custom emoji and time normalization
-- `time-rendering` is a compatibility alias that also enables the Rich Text pipeline and preserves the former formatter imports under `utils::time`
+- `time-rendering` is a feature-level compatibility alias that also enables the Rich Text pipeline; the former formatter API was replaced by the shared semantic API
 
 The `rich-text` context is shared by all three frontends and contains both
 `TimeBindings` and `RichTextBindings`. Use `RichTextRenderContext::for_developer`
@@ -68,10 +68,11 @@ TELOXIDE_TOKEN=... TELOXIDE_USER_ID=... \
 cargo run -p teloxide --features drafter --example drafter
 ```
 
-The canonical semantic API is under `teloxide::utils::rich_text`; the former
-`teloxide::utils::time` formatter imports remain available through the
-`time-rendering` compatibility feature. For the full public API and feature
-matrix see [`crates/teloxide/src/features.md`](crates/teloxide/src/features.md).
+The canonical semantic API is under `teloxide::utils::rich_text`. The
+`time-rendering` feature remains as a feature-level compatibility alias, but
+the former time-only formatter constructors and methods were replaced by the
+shared semantic API. For the full public API and feature matrix see
+[`crates/teloxide/src/features.md`](crates/teloxide/src/features.md).
 The implementation-specific delivery contract is documented in the Drafter
 module rustdoc and the time renderer API docs.
 

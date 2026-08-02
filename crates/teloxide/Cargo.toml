@@ -23,9 +23,9 @@ default = ["native-tls", "ctrlc_handler", "teloxide-core/default"]
 # Optional runtime layers that are useful to applications but are not part of
 # the core Telegram transport.
 drafter = ["tokio/sync", "tokio/time", "tokio/macros"]
-# `time-rendering` remains the compatibility feature for the original public
-# formatter imports. The semantic Rich Text pipeline is the canonical feature
-# and also owns the time frontend implementation.
+# `time-rendering` remains a feature-level compatibility alias for applications
+# that used the former time renderer. The formatter API itself changed when
+# the shared semantic Rich Text pipeline was introduced.
 rich-text = ["dep:jiff"]
 time-rendering = ["rich-text"]
 

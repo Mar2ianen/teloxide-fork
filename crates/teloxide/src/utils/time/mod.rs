@@ -1,24 +1,36 @@
-//! Explicit Telegram time rendering.
+//! Semantic Telegram Rich Text rendering.
 //!
-//! This module is enabled by the `time-rendering` feature. It keeps the
-//! semantic time model and the Telegram transport representation together,
-//! while leaving ordinary Markdown and HTML rendering unchanged.
+//! The `time-rendering` feature enables this module for compatibility. The
+//! `rich-text` feature is the explicit opt-in for the complete pipeline:
+//! HTML, developer Markdown and LLM Markdown are parsed into the same
+//! [`RichNode`] model and rendered with shared bindings and policies.
+//!
+//! [`StandardMarkdownFormatter`] is the opt-in path that keeps the source
+//! unchanged and does not enable semantic extensions.
 
+mod bindings;
 mod error;
 mod markdown;
 mod model;
 mod normalize;
+mod policy;
 mod token;
 
+pub use bindings::{CustomEmojiBinding, InvalidAlias, RichTextBindings};
 pub use error::{RenderError, TimeError, TimeZoneError};
 pub use markdown::{
-    LlmMarkdownFormatter, MainMarkdownFormatter, ParsedLlmMarkdown, ParsedMainMarkdown,
-    RenderedMessage,
+    HtmlFormatter, LlmMarkdownFormatter, MainMarkdownFormatter, ParsedHtml, ParsedLlmMarkdown,
+    ParsedMainMarkdown, RenderedMessage, StandardMarkdownFormatter,
 };
 pub use model::{
-    DateTimeFormat, DateTimeNode, RichNode, SignedTimeSpan, TimeBindings, TimeExpression, TimeValue,
+    classify_link_target, DateTimeFormat, DateTimeNode, LinkTarget, RichNode, SignedTimeSpan,
+    TimeBindings, TimeExpression, TimeValue,
 };
 pub use normalize::{NormalizedDateTime, TimeContext};
+pub use policy::{
+    ExtensionKind, InvalidTimePolicy, MarkdownDiagnostic, RichTextDiagnostic, RichTextPolicies,
+    RichTextRenderContext, UnknownCustomEmojiPolicy, UnknownLinkAliasPolicy,
+};
 pub use token::DateTimeToken;
 
 /// The version of the explicit developer-facing dialect.

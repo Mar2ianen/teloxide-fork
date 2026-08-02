@@ -24,6 +24,7 @@ default = ["native-tls", "ctrlc_handler", "teloxide-core/default"]
 # the core Telegram transport.
 drafter = ["tokio/sync", "tokio/time", "tokio/macros"]
 time-rendering = ["dep:jiff"]
+rich-text = ["time-rendering"]
 
 webhooks = ["rand"]
 webhooks-axum = ["webhooks", "axum", "tower", "tower-http"]

@@ -45,17 +45,20 @@ line; fork-specific APIs are opt-in features documented below.
 
 This fork includes two opt-in application layers that stay outside the default Telegram transport:
 
-- `drafter` exposes `teloxide::drafter`: asynchronous latest-wins preview delivery, shared rate limiting, native-draft and edit-in-place backends, segment commits, finalization, abort cleanup and delivery certainty
-- `time-rendering` exposes `teloxide::utils::time`: explicit Markdown and typed time rendering with timezone normalization, deterministic DST handling and Telegram fallback text
+- `drafter` provides asynchronous latest-wins preview delivery, shared rate limiting, native-draft and edit-in-place backends, segment commits, finalization, abort cleanup and delivery certainty
+- `rich-text` provides the shared semantic Rich Text pipeline: HTML, developer Markdown and LLM Markdown frontends with bound links, custom emoji and time normalization
+- `time-rendering` is a compatibility alias that also enables the Rich Text pipeline and preserves the former formatter imports under `utils::time`
 
-Both features are disabled by default. Native Telegram drafts are intended for
-private chats; group/chat flows should use the edit-in-place or status-then-final
-backends.
+The `rich-text` context is shared by all three frontends and contains both
+`TimeBindings` and `RichTextBindings`. Use `RichTextRenderContext::for_developer`
+for strict template validation or `for_llm` for readable diagnostics and
+fallbacks. Parsed frontends expose `known_extension_end_points`; these are
+parser landmarks, not safe message-segmentation boundaries.
 
 Enable only the layer an application needs:
 
 ```toml
-teloxide = { version = "0.18.0", features = ["macros", "drafter", "time-rendering"] }
+teloxide = { version = "0.18.0", features = ["macros", "drafter", "rich-text"] }
 ```
 
 The Drafter example requires the feature explicitly:
@@ -65,18 +68,24 @@ TELOXIDE_TOKEN=... TELOXIDE_USER_ID=... \
 cargo run -p teloxide --features drafter --example drafter
 ```
 
-For the full public API and feature matrix see [`crates/teloxide/src/features.md`](crates/teloxide/src/features.md). The implementation-specific delivery contract is documented in the Drafter module rustdoc and the time renderer API docs.
+The canonical semantic API is under `teloxide::utils::rich_text`; the former
+`teloxide::utils::time` formatter imports remain available through the
+`time-rendering` compatibility feature. For the full public API and feature
+matrix see [`crates/teloxide/src/features.md`](crates/teloxide/src/features.md).
+The implementation-specific delivery contract is documented in the Drafter
+module rustdoc and the time renderer API docs.
 
 ### Release checks for optional features
 
-Changes to `drafter` or `time-rendering` should be checked with the pinned formatter and with both feature combinations enabled and disabled:
+Changes to `drafter`, `time-rendering` or `rich-text` should be checked with the pinned formatter and with both feature combinations enabled and disabled:
 
 ```bash
 cargo +nightly-2025-06-12 fmt --all -- --check
 cargo test -p teloxide --features "drafter,time-rendering"
 cargo test -p teloxide --no-default-features --features drafter --lib
 cargo test -p teloxide --no-default-features --features time-rendering --lib
-cargo clippy -p teloxide --all-targets --features "drafter,time-rendering" -- -D warnings
+cargo test -p teloxide --no-default-features --features rich-text --lib
+cargo clippy -p teloxide --all-targets --features "drafter,rich-text" -- -D warnings
 cargo check -p teloxide --example drafter --features drafter
 ```
 

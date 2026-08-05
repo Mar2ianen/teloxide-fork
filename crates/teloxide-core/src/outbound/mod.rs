@@ -11,12 +11,14 @@
 //! policy of the calling layer).
 
 mod actor;
+mod adaptor;
 mod scheduler;
 mod types;
 
 pub use actor::{
     OutboundAcquire, OutboundLane, OutboundPermit, OutboundQueue, OutboundQueueHandle,
 };
+pub use adaptor::{class, Outbound, OutboundRequestError, ScheduledRequest};
 pub use types::{
     AgingPolicy, OutboundAcquireError, OutboundChatKey, OutboundClass, OutboundCompletion,
     OutboundCorrelationId, OutboundLimits, OutboundMetadata, OutboundPriority, OutboundQueueError,

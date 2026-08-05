@@ -1,27 +1,25 @@
 <div align="center">
-  <img src="https://github.com/teloxide/teloxide/blob/master/media/teloxide-logo.png?raw=true" width="250"/>
+  <img src="https://github.com/Mar2ianen/teloxide-fork/blob/master/media/teloxide-logo.png?raw=true" width="250"/>
   <h1><code>teloxide</code></h1>
-  <a href="https://docs.rs/teloxide/">
-    <img src="https://docs.rs/teloxide/badge.svg">
-  </a>
-  <a href="https://github.com/teloxide/teloxide/actions">
-    <img src="https://github.com/teloxide/teloxide/workflows/Continuous%20integration/badge.svg">
-  </a>
-  <a href="https://crates.io/crates/teloxide">
-    <img src="https://img.shields.io/crates/v/teloxide.svg">
+  <a href="https://github.com/Mar2ianen/teloxide-fork/actions/workflows/ci.yml">
+    <img src="https://github.com/Mar2ianen/teloxide-fork/actions/workflows/ci.yml/badge.svg?branch=master">
   </a>
   <a href="https://core.telegram.org/bots/api">
-    <img src="https://img.shields.io/badge/API%20coverage-Bot%20API%2010.0%20core-yellowgreen.svg">
+    <img src="https://img.shields.io/badge/API%20coverage-Bot%20API%2010.2%20core-yellowgreen.svg">
   </a>
   <a href="https://t.me/teloxide">
     <img src="https://img.shields.io/badge/support-t.me%2Fteloxide-blueviolet">
   </a>
-  <a href="https://devpod.sh/open#https://github.com/teloxide/teloxide">
+  <a href="https://devpod.sh/open#https://github.com/Mar2ianen/teloxide-fork">
     <img src="https://img.shields.io/badge/Open_in-DevPod-blueviolet">
   </a>
 
   A full-featured framework that empowers you to easily build [Telegram bots](https://telegram.org/blog/bot-revolution) using [Rust](https://www.rust-lang.org/). It handles all the difficult stuff so you can focus only on your business logic.
 </div>
+
+This repository is a maintained fork of [`teloxide`](https://github.com/teloxide/teloxide).
+The regular Telegram framework API remains compatible with the upstream `0.18.0`
+line; fork-specific APIs are opt-in features documented below.
 
 ## Highlights
 
@@ -42,6 +40,58 @@
 
 [`structopt`]: https://github.com/TeXitoi/structopt
 [`serde-json`]: https://github.com/serde-rs/json
+
+## Optional runtime features
+
+This fork includes two opt-in application layers that stay outside the default Telegram transport:
+
+- `drafter` provides asynchronous latest-wins preview delivery, shared rate limiting, native-draft and edit-in-place backends, segment commits, finalization, abort cleanup and delivery certainty
+- `rich-text` provides the shared semantic Rich Text pipeline: HTML, developer Markdown and LLM Markdown frontends with bound links, custom emoji and time normalization
+- `time-rendering` is a feature-level compatibility alias that also enables the Rich Text pipeline; the former formatter API was replaced by the shared semantic API
+
+The `rich-text` context is shared by all three frontends and contains both
+`TimeBindings` and `RichTextBindings`. Use `RichTextRenderContext::for_developer`
+for strict template validation or `for_llm` for readable diagnostics and
+fallbacks. Parsed frontends expose `known_extension_end_points`; these are
+parser landmarks, not safe message-segmentation boundaries.
+
+Enable only the layer an application needs:
+
+```toml
+teloxide = { version = "0.18.0", features = ["macros", "drafter", "rich-text"] }
+```
+
+The Drafter example requires the feature explicitly:
+
+```bash
+TELOXIDE_TOKEN=... TELOXIDE_USER_ID=... \
+cargo run -p teloxide --features drafter --example drafter
+```
+
+The canonical semantic API is under `teloxide::utils::rich_text`. The
+`time-rendering` feature remains as a feature-level compatibility alias, but
+the former time-only formatter constructors and methods were replaced by the
+shared semantic API. For the full public API and feature matrix see
+[`crates/teloxide/src/features.md`](crates/teloxide/src/features.md).
+The implementation-specific delivery contract is documented in the Drafter
+module rustdoc and the time renderer API docs.
+
+### Release checks for optional features
+
+Changes to `drafter`, `time-rendering` or `rich-text` should be checked with the pinned formatter and with both feature combinations enabled and disabled:
+
+```bash
+cargo +nightly-2025-06-12 fmt --all -- --check
+cargo test -p teloxide --features "drafter,time-rendering"
+cargo test -p teloxide --no-default-features --features drafter --lib
+cargo test -p teloxide --no-default-features --features time-rendering --lib
+cargo test -p teloxide --no-default-features --features rich-text --lib
+cargo check -p teloxide --no-default-features
+cargo clippy -p teloxide --all-targets --features "drafter,rich-text" -- -D warnings
+cargo check -p teloxide --example drafter --features drafter
+```
+
+Applications consuming the fork must pin the full teloxide commit and refresh their lockfile before publishing a release.
 
 ## Setting up your environment
 
@@ -79,11 +129,15 @@ pretty_env_logger = "0.5"
 tokio = { version =  "1.39", features = ["rt-multi-thread", "macros"] }
 ```
 
-_Note: if there is functionality in master that is not released yet, you can pull the Git repository as follows:_
+The fork-only features are not supplied by the upstream crates.io release. Pin a
+full commit when consuming them from an application:
 
 ```toml
-teloxide = { git = "https://github.com/teloxide/teloxide.git", features = ["macros"] }
+teloxide = { git = "https://github.com/Mar2ianen/teloxide-fork", rev = "7efc1a024cc9acee64ff1f497f94151e2ca697c5", features = ["macros", "drafter", "rich-text"] }
 ```
+
+The `rev` above is an example of a full fork revision, not a floating branch;
+applications should update it deliberately together with `Cargo.lock`.
 
 ## API overview
 

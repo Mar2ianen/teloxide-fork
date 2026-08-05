@@ -39,7 +39,8 @@ use std::{
 use super::types::{
     AgingPolicy, EnqueueError, EnqueueOutcome, Grant, JobId, OutboundChatKey, OutboundClass,
     OutboundCompletion, OutboundEnqueueMode, OutboundLaneKey, OutboundLimits, OutboundMeta,
-    OutboundPriority, OutboundScope, SchedulerConfigError, SchedulerWakeup, WindowLimit,
+    OutboundPriority, OutboundScope, OutboundSnapshot, SchedulerConfigError, SchedulerWakeup,
+    WindowLimit,
 };
 
 /// A granted job whose permit is still in flight. The lane is released on
@@ -206,6 +207,14 @@ impl RollingWindow {
         self.used += u64::from(weight);
     }
 
+    /// Inserts a debited event without an admission check. Used when the
+    /// windows are rebuilt with new limits: the carried history may
+    /// legitimately exceed the new capacity (a grant is never refunded).
+    fn insert(&mut self, at: Instant, weight: u32) {
+        self.history.push_back((at, weight));
+        self.used += u64::from(weight);
+    }
+
     /// The earliest moment at which `weight` would fit again.
     ///
     /// The history is not pruned here: an already expired entry yields an
@@ -245,6 +254,17 @@ impl WindowSet {
         }
     }
 
+    /// Carries a debited event over to every window of the set that still
+    /// covers it.
+    fn insert_at(&mut self, now: Instant, at: Instant, weight: u32) {
+        for window in &mut self.windows {
+            match now.checked_sub(window.window) {
+                Some(cutoff) if at <= cutoff => continue, // already expired
+                _ => window.insert(at, weight),
+            }
+        }
+    }
+
     /// The earliest moment the whole set admits `weight`: every window must
     /// allow it, so the set is ready when the last blocking window is.
     fn earliest_for(&self, now: Instant, weight: u32) -> Option<Instant> {
@@ -266,8 +286,6 @@ enum PenaltyKey {
 #[derive(Clone, Copy)]
 struct Candidate {
     job: JobId,
-    sequence: u64,
-    effective: u8,
     weight: NonZeroU32,
     scope: OutboundScope,
 }
@@ -480,6 +498,7 @@ impl SchedulerState {
         &mut self,
         meta: OutboundMeta,
         mode: OutboundEnqueueMode,
+        queue_capacity: usize,
         not_before: Option<Instant>,
         now: Instant,
     ) -> Result<EnqueueOutcome, EnqueueError> {
@@ -538,6 +557,14 @@ impl SchedulerState {
             },
             None => self.take_sequence(),
         };
+
+        // Backlog bound. A latest-wins replacement removed the superseded
+        // job already and does not grow the backlog, so it is admitted even
+        // at capacity; a brand-new job is rejected when the backlog is
+        // full.
+        if superseded.is_none() && self.jobs.len() >= queue_capacity {
+            return Err(EnqueueError::QueueFull);
+        }
 
         let job = JobId(self.next_job_id);
         self.next_job_id += 1;
@@ -1401,7 +1428,7 @@ impl SchedulerState {
             let key = self.candidates.pop()?;
             match key.reference {
                 CandidateRef::Job(job_id) => {
-                    let (candidate_effective, sequence, weight, scope) = {
+                    let (weight, scope) = {
                         let Some(job) = self.jobs.get(&job_id) else {
                             self.stale_candidates += 1;
                             continue;
@@ -1412,16 +1439,10 @@ impl SchedulerState {
                             self.stale_candidates += 1;
                             continue;
                         }
-                        (job.candidate_effective, job.sequence, job.meta.weight, job.meta.scope)
+                        (job.meta.weight, job.meta.scope)
                     };
                     self.jobs.get_mut(&job_id).expect("job exists").in_candidate_heap = false;
-                    return Some(Candidate {
-                        job: job_id,
-                        sequence,
-                        effective: candidate_effective,
-                        weight,
-                        scope,
-                    });
+                    return Some(Candidate { job: job_id, weight, scope });
                 }
                 CandidateRef::Lane(lane) => {
                     let outcome = {
@@ -1455,23 +1476,14 @@ impl SchedulerState {
                                     // (effective) or a different sequence.
                                     let stale_key =
                                         effective != key.effective || job.sequence != key.sequence;
-                                    (
-                                        Some((
-                                            job_id,
-                                            job.sequence,
-                                            effective,
-                                            job.meta.weight,
-                                            job.meta.scope,
-                                        )),
-                                        stale_key,
-                                    )
+                                    (Some((job_id, job.meta.weight, job.meta.scope)), stale_key)
                                 }
                                 _ => (None, false), // dead or delayed head
                             },
                             None => (None, false), // empty lane: removed below
                         }
                     };
-                    let Some((job_id, sequence, effective, weight, scope)) = outcome.0 else {
+                    let Some((job_id, weight, scope)) = outcome.0 else {
                         // no grantable head: drop the lane if it is empty
                         // and free
                         if self
@@ -1489,7 +1501,7 @@ impl SchedulerState {
                         self.push_lane_head_candidate(lane, now);
                         continue;
                     }
-                    return Some(Candidate { job: job_id, sequence, effective, weight, scope });
+                    return Some(Candidate { job: job_id, weight, scope });
                 }
             }
         }
@@ -1621,15 +1633,189 @@ impl SchedulerState {
                 self.lanes.remove(&lane);
             }
         }
-        if let OutboundCompletion::RetryAfter { scope, until } = completion {
-            if until > now {
-                self.penalize(scope, until);
+        if let OutboundCompletion::RetryAfter { scope, duration } = completion {
+            if !duration.is_zero() {
+                self.penalize(scope, now + duration);
             }
         }
     }
 
     /// Penalizes a scope until `until`, extending an existing penalty only
     /// when the new deadline is later (max(old, new)).
+    pub(crate) fn global_limits(&self) -> &[WindowLimit] {
+        &self.global_limits
+    }
+
+    pub(crate) fn chat_limits(&self) -> &[WindowLimit] {
+        &self.chat_limits
+    }
+
+    /// A point-in-time view of the queue state.
+    pub(crate) fn snapshot(&self) -> OutboundSnapshot {
+        OutboundSnapshot {
+            pending: self.jobs.len(),
+            in_flight: self.in_flight.len(),
+            blocked: self.blocked.len(),
+            delayed: self.delayed.len(),
+            candidates: self.candidates.len(),
+            reservations: self.reservations.len(),
+        }
+    }
+
+    /// Replaces the rate windows, keeping the already debited grant
+    /// history: `set_limits` changes the limits, it does not reset the
+    /// rate budget (a grant is never refunded, so a same-value update must
+    /// not enable a fresh burst). Every pending job must still fit the new
+    /// windows, otherwise the update is rejected as a whole. Blocked and
+    /// parked candidates are re-armed because their deadlines were derived
+    /// from the old windows.
+    pub(crate) fn set_limits(
+        &mut self,
+        limits: OutboundLimits,
+        now: Instant,
+    ) -> Result<(), SchedulerConfigError> {
+        for window in limits.global.iter().chain(limits.chat.iter()) {
+            if window.capacity == 0 {
+                return Err(SchedulerConfigError::ZeroWindowCapacity);
+            }
+            if window.window.is_zero() {
+                return Err(SchedulerConfigError::ZeroWindowDuration);
+            }
+        }
+        // A pending job that does not fit any new window could never be
+        // granted (weight > capacity): the admission pass would stall it
+        // forever or trip the consume debug assertion. Reject the update
+        // as a whole.
+        for job in self.jobs.values() {
+            let weight = job.meta.weight.get();
+            if let Some(window) = limits.global.iter().find(|w| weight > w.capacity) {
+                return Err(SchedulerConfigError::PendingWeightExceedsWindow {
+                    scope: job.meta.scope,
+                    weight,
+                    capacity: window.capacity,
+                });
+            }
+            if let OutboundScope::Chat(_) = job.meta.scope {
+                if let Some(window) = limits.chat.iter().find(|w| weight > w.capacity) {
+                    return Err(SchedulerConfigError::PendingWeightExceedsWindow {
+                        scope: job.meta.scope,
+                        weight,
+                        capacity: window.capacity,
+                    });
+                }
+            }
+        }
+
+        // Carry the debited history over to the new windows.
+        let global_events = self.collect_global_events(now);
+        let chat_events: Vec<(OutboundChatKey, Vec<(Instant, u32)>)> = self
+            .chat_window_sets
+            .iter()
+            .map(|(chat, set)| {
+                // The longest window is the per-chat ledger; events that
+                // already expired under the old windows are filtered out at
+                // the current instant (prospective policy, see
+                // `collect_global_events`).
+                let events = set
+                    .windows
+                    .iter()
+                    .max_by_key(|window| window.window)
+                    .map(|window| {
+                        let cutoff = now.checked_sub(window.window);
+                        window
+                            .history
+                            .iter()
+                            .filter(|(at, _)| cutoff.is_none_or(|cutoff| *at > cutoff))
+                            .copied()
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                (*chat, events)
+            })
+            .collect();
+        self.global_limits = limits.global;
+        self.global_windows = WindowSet::new(&self.global_limits);
+        for (at, weight) in global_events {
+            self.global_windows.insert_at(now, at, weight);
+        }
+        self.chat_limits = limits.chat;
+        self.chat_window_sets.clear();
+        for (chat, events) in chat_events {
+            if events.is_empty() {
+                continue;
+            }
+            let mut set = WindowSet::new(&self.chat_limits);
+            for (at, weight) in events {
+                set.insert_at(now, at, weight);
+            }
+            if set.windows.iter().any(|window| !window.history.is_empty()) {
+                self.chat_window_sets.insert(chat, set);
+            }
+        }
+
+        self.rearm_blocked_and_parked(now);
+        Ok(())
+    }
+
+    /// Collects the debited events of the global window set under the
+    /// PROSPECTIVE policy: the windows are pruned at the current instant
+    /// first (so the outcome does not depend on whether an admission
+    /// happened to prune earlier), then the ledger is taken from the
+    /// longest window, which retains every event any not-longer new window
+    /// could still cover (`WindowSet::insert_at` filters per new window).
+    /// Lengthening a window beyond the old maximum does not retroactively
+    /// constrain grants that already expired under the old windows.
+    fn collect_global_events(&mut self, now: Instant) -> Vec<(Instant, u32)> {
+        for window in &mut self.global_windows.windows {
+            window.prune(now);
+        }
+        self.global_windows
+            .windows
+            .iter()
+            .max_by_key(|window| window.window)
+            .map(|window| window.history.iter().copied().collect())
+            .unwrap_or_default()
+    }
+
+    /// Re-inserts every blocked and parked candidate into the candidate
+    /// heap. Called when the limits change: the old `until` deadlines were
+    /// computed from the previous windows and are meaningless now.
+    fn rearm_blocked_and_parked(&mut self, now: Instant) {
+        let blocked = std::mem::take(&mut self.blocked);
+        self.stale_blocked = 0;
+        for entry in blocked {
+            let BlockedJob { reference, .. } = entry.0;
+            self.rearm_reference(reference, now);
+        }
+        let reservations = std::mem::take(&mut self.reservations);
+        for (_, reservation) in reservations {
+            for reference in reservation.queue {
+                self.rearm_reference(reference, now);
+            }
+        }
+    }
+
+    /// Re-inserts one candidate reference, dropping its location flags:
+    /// the old blocked/parked entries are gone.
+    fn rearm_reference(&mut self, reference: CandidateRef, now: Instant) {
+        match reference {
+            CandidateRef::Job(job_id) => {
+                if let Some(job) = self.jobs.get_mut(&job_id) {
+                    job.in_blocked_heap = false;
+                    job.parked_in = None;
+                    job.reservation_owner = None;
+                    self.push_job_candidate(job_id, now);
+                }
+            }
+            CandidateRef::Lane(lane) => {
+                if let Some(lane_state) = self.lanes.get_mut(&lane) {
+                    lane_state.in_blocked_heap = false;
+                }
+                self.push_lane_head_candidate(lane, now);
+            }
+        }
+    }
+
     pub(crate) fn penalize(&mut self, scope: OutboundScope, until: Instant) {
         let key = match scope {
             OutboundScope::Global => PenaltyKey::Global,
@@ -1779,7 +1965,7 @@ mod tests {
         OutboundMeta {
             scope,
             lane,
-            class: OutboundClass(0),
+            class: OutboundClass::new(0),
             priority,
             weight: NonZeroU32::new(1).unwrap(),
         }
@@ -1794,7 +1980,7 @@ mod tests {
         OutboundMeta {
             scope,
             lane,
-            class: OutboundClass(class),
+            class: OutboundClass::new(class),
             priority,
             weight: NonZeroU32::new(1).unwrap(),
         }
@@ -1824,7 +2010,7 @@ mod tests {
     }
 
     fn fifo(s: &mut SchedulerState, meta: OutboundMeta, now: Instant) -> JobId {
-        s.enqueue(meta, OutboundEnqueueMode::Fifo, None, now).unwrap().job
+        s.enqueue(meta, OutboundEnqueueMode::Fifo, usize::MAX, None, now).unwrap().job
     }
 
     fn replace(
@@ -1833,7 +2019,8 @@ mod tests {
         user_key: u64,
         now: Instant,
     ) -> EnqueueOutcome {
-        s.enqueue(meta, OutboundEnqueueMode::ReplacePending { user_key }, None, now).unwrap()
+        s.enqueue(meta, OutboundEnqueueMode::ReplacePending { user_key }, usize::MAX, None, now)
+            .unwrap()
     }
 
     #[test]
@@ -1864,7 +2051,7 @@ mod tests {
         let a = fifo(
             &mut s,
             meta(
-                OutboundScope::Chat(OutboundChatKey(1)),
+                OutboundScope::Chat(OutboundChatKey::new(1)),
                 Some(OutboundLaneKey(1)),
                 OutboundPriority::NORMAL,
             ),
@@ -1873,7 +2060,7 @@ mod tests {
         let b = fifo(
             &mut s,
             meta(
-                OutboundScope::Chat(OutboundChatKey(2)),
+                OutboundScope::Chat(OutboundChatKey::new(2)),
                 Some(OutboundLaneKey(2)),
                 OutboundPriority::NORMAL,
             ),
@@ -1887,7 +2074,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
         let a = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
         let b = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
@@ -1908,7 +2095,7 @@ mod tests {
         let t0 = base();
         let a = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey(1)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::NORMAL),
             t0,
         );
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
@@ -1916,7 +2103,7 @@ mod tests {
         // chat 2's window is free, but the global window is exhausted
         let b = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey(2)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::new(2)), None, OutboundPriority::NORMAL),
             t0,
         );
         assert!(s.grant_ready(t0).is_empty());
@@ -1925,7 +2112,7 @@ mod tests {
         let t1 = t0 + Duration::from_millis(501);
         let c = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey(1)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::NORMAL),
             t1,
         );
         assert_eq!(jobs(&s.grant_ready(t1)), vec![b]);
@@ -1945,6 +2132,7 @@ mod tests {
             .enqueue(
                 global(OutboundPriority::NORMAL),
                 OutboundEnqueueMode::Fifo,
+                usize::MAX,
                 Some(not_before),
                 t0,
             )
@@ -1961,7 +2149,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
         let a = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
         let b = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
         s.cancel(a, t0);
@@ -2030,7 +2218,7 @@ mod tests {
     fn penalty_extension_keeps_the_later_deadline() {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
-        let scope = OutboundScope::Chat(OutboundChatKey(1));
+        let scope = OutboundScope::Chat(OutboundChatKey::new(1));
         s.penalize(scope, t0 + Duration::from_secs(5));
         s.penalize(scope, t0 + Duration::from_secs(3)); // shorter: ignored
         let a = fifo(&mut s, meta(scope, None, OutboundPriority::CRITICAL), t0);
@@ -2046,15 +2234,15 @@ mod tests {
         let t0 = base();
         let _a = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey(1)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::NORMAL),
             t0,
         );
         let b = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey(2)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::new(2)), None, OutboundPriority::NORMAL),
             t0,
         );
-        s.penalize(OutboundScope::Chat(OutboundChatKey(1)), t0 + Duration::from_secs(60));
+        s.penalize(OutboundScope::Chat(OutboundChatKey::new(1)), t0 + Duration::from_secs(60));
         // the penalized chat 1 job must not block the same-priority chat 2 job
         assert_eq!(jobs(&s.grant_ready(t0)), vec![b]);
     }
@@ -2071,13 +2259,13 @@ mod tests {
         let t0 = base();
         let a = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey(1)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::NORMAL),
             t0,
         );
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]); // chat 1 window exhausted
         let b = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey(2)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::new(2)), None, OutboundPriority::NORMAL),
             t0,
         );
         assert_eq!(jobs(&s.grant_ready(t0)), vec![b]); // chat 2 unaffected
@@ -2089,15 +2277,15 @@ mod tests {
         let t0 = base();
         let _a = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey(1)), None, OutboundPriority::CRITICAL),
+            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::CRITICAL),
             t0,
         );
         let b = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey(2)), None, OutboundPriority::BACKGROUND),
+            meta(OutboundScope::Chat(OutboundChatKey::new(2)), None, OutboundPriority::BACKGROUND),
             t0,
         );
-        s.penalize(OutboundScope::Chat(OutboundChatKey(1)), t0 + Duration::from_secs(60));
+        s.penalize(OutboundScope::Chat(OutboundChatKey::new(1)), t0 + Duration::from_secs(60));
         assert_eq!(jobs(&s.grant_ready(t0)), vec![b]);
         assert!(s.grant_ready(t0).is_empty());
     }
@@ -2107,7 +2295,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
         let a = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
         let b = fifo(&mut s, meta(chat, lane, OutboundPriority::CRITICAL), t0);
         // the lane is strictly FIFO: the critical job cannot overtake
@@ -2121,12 +2309,13 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
         let not_before = t0 + Duration::from_secs(5);
         let a = s
             .enqueue(
                 meta(chat, lane, OutboundPriority::NORMAL),
                 OutboundEnqueueMode::Fifo,
+                usize::MAX,
                 Some(not_before),
                 t0,
             )
@@ -2145,7 +2334,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
         let a = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
         let b = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
@@ -2170,7 +2359,7 @@ mod tests {
         let mut s = scheduler(limits(2), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let scope = OutboundScope::Chat(OutboundChatKey(1));
+        let scope = OutboundScope::Chat(OutboundChatKey::new(1));
         let a = fifo(&mut s, meta(scope, lane, OutboundPriority::NORMAL), t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
 
@@ -2188,14 +2377,14 @@ mod tests {
     fn retry_after_completion_penalizes_the_reported_scope() {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
-        let chat = OutboundChatKey(1);
+        let chat = OutboundChatKey::new(1);
         let a = fifo(&mut s, meta(OutboundScope::Chat(chat), None, OutboundPriority::NORMAL), t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
         s.complete(
             a,
             OutboundCompletion::RetryAfter {
                 scope: OutboundScope::Chat(chat),
-                until: t0 + Duration::from_secs(5),
+                duration: Duration::from_secs(5),
             },
             t0,
         );
@@ -2210,7 +2399,7 @@ mod tests {
         let t0 = base();
         let a = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey(1)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::NORMAL),
             t0,
         );
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
@@ -2219,14 +2408,14 @@ mod tests {
             a,
             OutboundCompletion::RetryAfter {
                 scope: OutboundScope::Global,
-                until: t0 + Duration::from_secs(5),
+                duration: Duration::from_secs(5),
             },
             t0,
         );
         // the global penalty blocks every scope
         let b = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey(2)), None, OutboundPriority::CRITICAL),
+            meta(OutboundScope::Chat(OutboundChatKey::new(2)), None, OutboundPriority::CRITICAL),
             t0,
         );
         assert!(s.grant_ready(t0 + Duration::from_secs(4)).is_empty());
@@ -2271,7 +2460,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let scope = OutboundScope::Chat(OutboundChatKey(1));
+        let scope = OutboundScope::Chat(OutboundChatKey::new(1));
         let old = replace(&mut s, meta(scope, lane, OutboundPriority::NORMAL), 1, t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![old.job]);
 
@@ -2290,7 +2479,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let scope = OutboundScope::Chat(OutboundChatKey(1));
+        let scope = OutboundScope::Chat(OutboundChatKey::new(1));
         let old = replace(&mut s, meta(scope, lane, OutboundPriority::NORMAL), 1, t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![old.job]);
 
@@ -2322,7 +2511,7 @@ mod tests {
     fn replacement_keeps_the_penalty_scope() {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
-        let scope = OutboundScope::Chat(OutboundChatKey(1));
+        let scope = OutboundScope::Chat(OutboundChatKey::new(1));
         let a = replace(&mut s, meta(scope, None, OutboundPriority::NORMAL), 1, t0);
         s.penalize(scope, t0 + Duration::from_secs(60));
         let outcome = replace(&mut s, meta(scope, None, OutboundPriority::NORMAL), 1, t0);
@@ -2373,8 +2562,8 @@ mod tests {
     fn replacement_does_not_break_fifo_of_other_lanes() {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
-        let scope_a = OutboundScope::Chat(OutboundChatKey(1));
-        let scope_b = OutboundScope::Chat(OutboundChatKey(2));
+        let scope_a = OutboundScope::Chat(OutboundChatKey::new(1));
+        let scope_b = OutboundScope::Chat(OutboundChatKey::new(2));
         let a1 = replace(
             &mut s,
             meta(scope_a, Some(OutboundLaneKey(1)), OutboundPriority::NORMAL),
@@ -2411,14 +2600,14 @@ mod tests {
         let t0 = base();
         let a = replace(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey(1)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::NORMAL),
             7,
             t0,
         );
         // the same user key with a different scope is a different slot
         let b = replace(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey(2)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::new(2)), None, OutboundPriority::NORMAL),
             7,
             t0,
         );
@@ -2428,7 +2617,7 @@ mod tests {
         let c = replace(
             &mut s,
             meta_with_class(
-                OutboundScope::Chat(OutboundChatKey(1)),
+                OutboundScope::Chat(OutboundChatKey::new(1)),
                 None,
                 OutboundPriority::NORMAL,
                 9,
@@ -2453,7 +2642,13 @@ mod tests {
             ..global(OutboundPriority::NORMAL)
         };
         assert_eq!(
-            s.enqueue(heavy, OutboundEnqueueMode::ReplacePending { user_key: 7 }, None, t0),
+            s.enqueue(
+                heavy,
+                OutboundEnqueueMode::ReplacePending { user_key: 7 },
+                usize::MAX,
+                None,
+                t0
+            ),
             Err(EnqueueError::IncompatibleCoalesceMetadata)
         );
         // the old job is untouched and still grants
@@ -2471,13 +2666,20 @@ mod tests {
                 weight: NonZeroU32::new(weight).unwrap(),
                 ..global(OutboundPriority::NORMAL)
             };
-            match s.enqueue(meta, OutboundEnqueueMode::ReplacePending { user_key: 7 }, None, t0) {
+            match s.enqueue(
+                meta,
+                OutboundEnqueueMode::ReplacePending { user_key: 7 },
+                usize::MAX,
+                None,
+                t0,
+            ) {
                 Ok(outcome) => {
                     assert_eq!(outcome.superseded, Some(last));
                     last = outcome.job;
                 }
                 Err(EnqueueError::IncompatibleCoalesceMetadata)
-                | Err(EnqueueError::WeightExceedsWindow { .. }) => {}
+                | Err(EnqueueError::WeightExceedsWindow { .. })
+                | Err(EnqueueError::QueueFull) => {}
             }
         }
         // exactly one pending job remains despite the weight alternation
@@ -2517,6 +2719,7 @@ mod tests {
                 .enqueue(
                     global(OutboundPriority::NORMAL),
                     OutboundEnqueueMode::ReplacePending { user_key: 7 },
+                    usize::MAX,
                     Some(not_before),
                     t0,
                 )
@@ -2548,11 +2751,11 @@ mod tests {
         let t0 = base();
         let a = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey(1)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::NORMAL),
             t0,
         );
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
-        assert!(s.chat_window_sets.contains_key(&OutboundChatKey(1)));
+        assert!(s.chat_window_sets.contains_key(&OutboundChatKey::new(1)));
         // after the window expires, the idle set is pruned
         s.grant_ready(t0 + Duration::from_secs(2));
         assert!(s.chat_window_sets.is_empty());
@@ -2570,13 +2773,13 @@ mod tests {
         let t0 = base();
         let a = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey(1)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::NORMAL),
             t0,
         );
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]); // chat 1 window exhausted
         let _b = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey(1)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::NORMAL),
             t0,
         );
         assert!(s.grant_ready(t0).is_empty());
@@ -2599,7 +2802,7 @@ mod tests {
         // the weight exceeds the window capacity: the job could never be
         // granted, so it is rejected instead of waiting forever
         assert_eq!(
-            s.enqueue(heavy, OutboundEnqueueMode::Fifo, None, t0),
+            s.enqueue(heavy, OutboundEnqueueMode::Fifo, usize::MAX, None, t0),
             Err(EnqueueError::WeightExceedsWindow {
                 scope: OutboundScope::Global,
                 weight: NonZeroU32::new(2).unwrap(),
@@ -2667,7 +2870,7 @@ mod tests {
         let t0 = base();
         let a = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey(1)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::NORMAL),
             t0,
         );
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
@@ -2708,6 +2911,7 @@ mod tests {
             .enqueue(
                 global(OutboundPriority::NORMAL),
                 OutboundEnqueueMode::ReplacePending { user_key: 7 },
+                usize::MAX,
                 Some(t0 + Duration::from_secs(10)),
                 t0,
             )
@@ -2718,6 +2922,7 @@ mod tests {
             .enqueue(
                 global(OutboundPriority::NORMAL),
                 OutboundEnqueueMode::ReplacePending { user_key: 7 },
+                usize::MAX,
                 Some(t0 + Duration::from_secs(20)),
                 t0,
             )
@@ -2734,11 +2939,12 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let scope = OutboundScope::Chat(OutboundChatKey(1));
+        let scope = OutboundScope::Chat(OutboundChatKey::new(1));
         let old_outcome = s
             .enqueue(
                 meta(scope, lane, OutboundPriority::NORMAL),
                 OutboundEnqueueMode::ReplacePending { user_key: 1 },
+                usize::MAX,
                 Some(t0 + Duration::from_secs(10)),
                 t0,
             )
@@ -2749,6 +2955,7 @@ mod tests {
             .enqueue(
                 meta(scope, lane, OutboundPriority::NORMAL),
                 OutboundEnqueueMode::ReplacePending { user_key: 1 },
+                usize::MAX,
                 Some(t0 + Duration::from_secs(20)),
                 t0,
             )
@@ -2774,6 +2981,7 @@ mod tests {
                 s.enqueue(
                     global(OutboundPriority::NORMAL),
                     OutboundEnqueueMode::ReplacePending { user_key: i },
+                    usize::MAX,
                     Some(not_before),
                     t0,
                 )
@@ -2792,7 +3000,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = OutboundLaneKey(1);
-        let chat = OutboundScope::Chat(OutboundChatKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
         // make the lane's own order counter wrap around
         s.lanes.insert(
             lane,
@@ -2823,7 +3031,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = OutboundLaneKey(1);
-        let chat = OutboundScope::Chat(OutboundChatKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
         let head = fifo(&mut s, meta(chat, Some(lane), OutboundPriority::NORMAL), t0);
         // churn behind the head: superseded records stay as stale entries
         let mut live = None;
@@ -2832,6 +3040,7 @@ mod tests {
                 .enqueue(
                     meta(chat, Some(lane), OutboundPriority::NORMAL),
                     OutboundEnqueueMode::ReplacePending { user_key: 1 },
+                    usize::MAX,
                     None,
                     t0,
                 )
@@ -2855,7 +3064,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = OutboundLaneKey(1);
-        let chat = OutboundScope::Chat(OutboundChatKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
         let a = fifo(&mut s, meta(chat, Some(lane), OutboundPriority::NORMAL), t0);
         s.cancel(a, t0);
         assert!(s.lanes.contains_key(&lane));
@@ -2885,6 +3094,7 @@ mod tests {
                 .enqueue(
                     global(OutboundPriority::NORMAL),
                     OutboundEnqueueMode::ReplacePending { user_key: 7 },
+                    usize::MAX,
                     None,
                     t0,
                 )
@@ -2915,12 +3125,13 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
         // a live delayed lane head blocks the lane and the compaction
         let _head = s
             .enqueue(
                 meta(chat, lane, OutboundPriority::NORMAL),
                 OutboundEnqueueMode::Fifo,
+                usize::MAX,
                 Some(t0 + Duration::from_secs(60)),
                 t0,
             )
@@ -2932,6 +3143,7 @@ mod tests {
                 .enqueue(
                     meta(chat, lane, OutboundPriority::NORMAL),
                     OutboundEnqueueMode::ReplacePending { user_key: 1 },
+                    usize::MAX,
                     None,
                     t0,
                 )
@@ -2963,6 +3175,7 @@ mod tests {
                 .enqueue(
                     global(OutboundPriority::NORMAL),
                     OutboundEnqueueMode::Fifo,
+                    usize::MAX,
                     Some(t0 + Duration::from_secs(100)),
                     t0,
                 )
@@ -2974,6 +3187,7 @@ mod tests {
                 .enqueue(
                     global(OutboundPriority::NORMAL),
                     OutboundEnqueueMode::Fifo,
+                    usize::MAX,
                     Some(t0 + Duration::from_secs(1)),
                     t0,
                 )
@@ -3001,6 +3215,7 @@ mod tests {
             .enqueue(
                 global(OutboundPriority::LOWEST),
                 OutboundEnqueueMode::ReplacePending { user_key: 7 },
+                usize::MAX,
                 Some(t0 + Duration::from_millis(100)),
                 t0,
             )
@@ -3011,6 +3226,7 @@ mod tests {
             .enqueue(
                 global(OutboundPriority::LOWEST),
                 OutboundEnqueueMode::ReplacePending { user_key: 7 },
+                usize::MAX,
                 None,
                 t0 + Duration::from_millis(90),
             )
@@ -3021,6 +3237,7 @@ mod tests {
             .enqueue(
                 global(OutboundPriority::new(50)),
                 OutboundEnqueueMode::Fifo,
+                usize::MAX,
                 None,
                 t0 + Duration::from_millis(90),
             )
@@ -3044,6 +3261,7 @@ mod tests {
                 s.enqueue(
                     global(OutboundPriority::NORMAL),
                     OutboundEnqueueMode::Fifo,
+                    usize::MAX,
                     Some(not_before),
                     t0,
                 )
@@ -3079,7 +3297,13 @@ mod tests {
             ..global(OutboundPriority::LOWEST)
         };
         let heavy_job = s
-            .enqueue(heavy, OutboundEnqueueMode::Fifo, None, t0 - Duration::from_millis(256))
+            .enqueue(
+                heavy,
+                OutboundEnqueueMode::Fifo,
+                usize::MAX,
+                None,
+                t0 - Duration::from_millis(256),
+            )
             .unwrap()
             .job;
         // an endless stream of light jobs keeps arriving, one per tick
@@ -3128,8 +3352,8 @@ mod tests {
         let mut s = scheduler(limits(1), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat1 = OutboundScope::Chat(OutboundChatKey(1));
-        let chat2 = OutboundScope::Chat(OutboundChatKey(2));
+        let chat1 = OutboundScope::Chat(OutboundChatKey::new(1));
+        let chat2 = OutboundScope::Chat(OutboundChatKey::new(2));
         // a chat-1 job fills both windows
         let a = fifo(&mut s, meta(chat1, None, OutboundPriority::NORMAL), t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
@@ -3152,13 +3376,14 @@ mod tests {
     fn replacing_a_queued_lane_head_rekeys_the_candidate() {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
-        let chat = OutboundScope::Chat(OutboundChatKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
         // a critical lane head is queued, then replaced by a low-priority
         // job while it is already in the candidate heap
         let old = s
             .enqueue(
                 meta(chat, Some(OutboundLaneKey(1)), OutboundPriority::CRITICAL),
                 OutboundEnqueueMode::ReplacePending { user_key: 1 },
+                usize::MAX,
                 None,
                 t0,
             )
@@ -3168,6 +3393,7 @@ mod tests {
             .enqueue(
                 meta(chat, Some(OutboundLaneKey(1)), OutboundPriority::LOWEST),
                 OutboundEnqueueMode::ReplacePending { user_key: 1 },
+                usize::MAX,
                 None,
                 t0,
             )
@@ -3185,12 +3411,13 @@ mod tests {
     fn repeatedly_replacing_a_queued_lane_head_rekeys_the_candidate() {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
-        let chat = OutboundScope::Chat(OutboundChatKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
         // CRITICAL -> LOWEST -> CRITICAL replacements of the queued head
         let a = s
             .enqueue(
                 meta(chat, Some(OutboundLaneKey(1)), OutboundPriority::CRITICAL),
                 OutboundEnqueueMode::ReplacePending { user_key: 1 },
+                usize::MAX,
                 None,
                 t0,
             )
@@ -3200,6 +3427,7 @@ mod tests {
             .enqueue(
                 meta(chat, Some(OutboundLaneKey(1)), OutboundPriority::LOWEST),
                 OutboundEnqueueMode::ReplacePending { user_key: 1 },
+                usize::MAX,
                 None,
                 t0,
             )
@@ -3209,6 +3437,7 @@ mod tests {
             .enqueue(
                 meta(chat, Some(OutboundLaneKey(1)), OutboundPriority::CRITICAL),
                 OutboundEnqueueMode::ReplacePending { user_key: 1 },
+                usize::MAX,
                 None,
                 t0,
             )
@@ -3244,7 +3473,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
         // a live unlaned job holds sequence 0
         let live = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
         // two lane jobs; the head is cancelled and stays as a stale entry
@@ -3271,6 +3500,7 @@ mod tests {
             .enqueue(
                 global(OutboundPriority::CRITICAL),
                 OutboundEnqueueMode::ReplacePending { user_key: 7 },
+                usize::MAX,
                 Some(not_before),
                 t0,
             )
@@ -3280,6 +3510,7 @@ mod tests {
             .enqueue(
                 global(OutboundPriority::CRITICAL),
                 OutboundEnqueueMode::ReplacePending { user_key: 7 },
+                usize::MAX,
                 Some(not_before),
                 t0,
             )
@@ -3307,7 +3538,7 @@ mod tests {
             aging(),
         );
         let t0 = base();
-        let chat1 = OutboundScope::Chat(OutboundChatKey(1));
+        let chat1 = OutboundScope::Chat(OutboundChatKey::new(1));
         let a = fifo(&mut s, meta(chat1, None, OutboundPriority::NORMAL), t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
         // a global job is blocked by the global window: the global hold
@@ -3332,7 +3563,7 @@ mod tests {
         let t1 = t0 + Duration::from_secs(1);
         assert_eq!(jobs(&s.grant_ready(t1)), vec![g]);
         assert_eq!(
-            s.reservations.get(&WindowRef::Chat(OutboundChatKey(1))).map(|r| r.queue.len()),
+            s.reservations.get(&WindowRef::Chat(OutboundChatKey::new(1))).map(|r| r.queue.len()),
             Some(1),
             "the candidate must join the active chat hold"
         );
@@ -3349,7 +3580,7 @@ mod tests {
         let mut s = scheduler(limits(1), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
         // Заполнить окно, чтобы голова lane была заблокирована.
         let a = fifo(&mut s, meta(chat, None, OutboundPriority::NORMAL), t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
@@ -3379,18 +3610,37 @@ mod tests {
         }
         s.grant_ready(t0); // used = 9
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
         let heavy = OutboundMeta {
             weight: NonZeroU32::new(10).unwrap(),
             ..meta(chat, lane, OutboundPriority::NORMAL)
         };
-        let heavy_job = s.enqueue(heavy, OutboundEnqueueMode::Fifo, None, t0).unwrap().job;
+        let heavy_job =
+            s.enqueue(heavy, OutboundEnqueueMode::Fifo, usize::MAX, None, t0).unwrap().job;
         let light = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
         s.grant_ready(t0); // heavy -> blocked (entry Lane(lane)); light ждёт за ним
                            // Отмена тяжелой головы: лёгкий наследник обязан пройти немедленно,
                            // а не ждать фантомный дедлайн старой головы.
         s.cancel(heavy_job, t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![light]);
+    }
+
+    #[test]
+    fn set_limits_rearm_resets_lane_blocked_flags() {
+        let mut s = scheduler(limits(1), aging());
+        let t0 = base();
+        let lane = Some(OutboundLaneKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
+        let a = fifo(&mut s, meta(chat, None, OutboundPriority::NORMAL), t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
+        let b = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
+        s.grant_ready(t0); // b -> blocked (entry Lane(lane))
+                           // Снятие лимитов пере-армирует lane head и сбрасывает флаги.
+        s.set_limits(OutboundLimits { global: Vec::new(), chat: Vec::new() }, t0).unwrap();
+        // Отмена после rearm не должна учитывать фантомный blocked entry.
+        s.cancel(b, t0);
+        assert_eq!(s.stale_blocked, 0);
+        s.next_deadline(t0); // без паники
     }
 
     #[test]
@@ -3402,12 +3652,13 @@ mod tests {
         }
         s.grant_ready(t0); // used = 9
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
         let heavy = OutboundMeta {
             weight: NonZeroU32::new(10).unwrap(),
             ..meta(chat, lane, OutboundPriority::NORMAL)
         };
-        let heavy_job = s.enqueue(heavy, OutboundEnqueueMode::Fifo, None, t0).unwrap().job;
+        let heavy_job =
+            s.enqueue(heavy, OutboundEnqueueMode::Fifo, usize::MAX, None, t0).unwrap().job;
         let light = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
         s.grant_ready(t0); // heavy -> blocked (T1); light ждёт за ним
         s.cancel(heavy_job, t0); // свежая нода until=now; старая (T1) устарела
@@ -3427,7 +3678,7 @@ mod tests {
         let mut s = scheduler(limits(1), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
         let a = fifo(&mut s, meta(chat, None, OutboundPriority::NORMAL), t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]); // окно full
         let b = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
@@ -3486,7 +3737,7 @@ mod tests {
             weight: NonZeroU32::new(10).unwrap(),
             ..global(OutboundPriority::NORMAL)
         };
-        s.enqueue(heavy, OutboundEnqueueMode::Fifo, None, t0).unwrap();
+        s.enqueue(heavy, OutboundEnqueueMode::Fifo, usize::MAX, None, t0).unwrap();
         s.grant_ready(t0);
         // Горячий latest-wins лёгких job-ов паркуется за reservation.
         replace(&mut s, global(OutboundPriority::NORMAL), 7, t0);
@@ -3513,7 +3764,8 @@ mod tests {
             weight: NonZeroU32::new(10).unwrap(),
             ..global(OutboundPriority::NORMAL)
         };
-        let heavy_job = s.enqueue(heavy, OutboundEnqueueMode::Fifo, None, t0).unwrap().job;
+        let heavy_job =
+            s.enqueue(heavy, OutboundEnqueueMode::Fifo, usize::MAX, None, t0).unwrap().job;
         s.grant_ready(t0); // heavy -> Blocked (owner окна)
         let light = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
         s.grant_ready(t0); // light -> Reserved (parked)

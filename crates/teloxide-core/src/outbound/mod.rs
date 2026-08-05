@@ -1,14 +1,25 @@
-//! Deterministic outbound scheduling model (internal draft, Commit 1).
+//! Deterministic outbound scheduling model.
 //!
-//! A pure state machine with explicit time: no Tokio, no actor, no public
-//! API. The actor, completion-aware permits and the `Requester` adapter are
-//! added in later commits; this module is not exported publicly yet.
+//! Commit 1 delivered the pure state machine ([`scheduler`]); Commit 2 adds
+//! the actor, the handle and the completion-aware permit ([`actor`]) on top
+//! of it.
 //!
-//! The scheduler owns only the shared admission/rate/order layer: priorities
-//! with aging, per-chat ordering lanes, rolling windows, `RetryAfter`
-//! penalties and latest-wins replacement of pending jobs. It never executes
-//! requests itself and never retries them (retry remains the policy of the
-//! calling layer).
+//! The scheduler owns only the shared admission/rate/order layer:
+//! priorities with aging, per-chat ordering lanes, rolling windows,
+//! `RetryAfter` penalties and latest-wins replacement of pending jobs. It
+//! never executes requests itself and never retries them (retry remains the
+//! policy of the calling layer).
 
+mod actor;
 mod scheduler;
 mod types;
+
+pub use actor::{
+    OutboundAcquire, OutboundLane, OutboundPermit, OutboundQueue, OutboundQueueHandle,
+};
+pub use types::{
+    AgingPolicy, OutboundAcquireError, OutboundChatKey, OutboundClass, OutboundCompletion,
+    OutboundCorrelationId, OutboundLimits, OutboundMetadata, OutboundPriority, OutboundQueueError,
+    OutboundScope, OutboundSetLimitsError, OutboundSettings, OutboundSnapshot,
+    SchedulerConfigError, WindowLimit,
+};

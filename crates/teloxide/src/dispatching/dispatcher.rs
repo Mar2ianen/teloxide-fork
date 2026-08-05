@@ -96,6 +96,10 @@ where
     /// inside it is contained and logged instead of killing a worker or the
     /// dispatcher.
     ///
+    /// The panic containment guarantees hold only when the crate is compiled
+    /// with `panic = "unwind"` (the default); with `panic = "abort"` any
+    /// panic terminates the process regardless.
+    ///
     /// By default, it is [`LoggingErrorHandler`].
     #[must_use]
     pub fn worker_error_handler(
@@ -508,9 +512,15 @@ where
             Ok(upd) => upd,
             Err(err) => {
                 // A panicking listener error handler must not terminate the
-                // dispatcher.
-                let result =
-                    AssertUnwindSafe(err_handler.clone().handle_error(err)).catch_unwind().await;
+                // dispatcher. The handler is invoked inside the containment
+                // boundary so that a synchronous panic before the future is
+                // returned is caught as well.
+                let handler = Arc::clone(err_handler);
+                let result = AssertUnwindSafe(async move {
+                    handler.handle_error(err).await;
+                })
+                .catch_unwind()
+                .await;
                 if let Err(payload) = result {
                     let message = panic_message(payload);
                     log::error!(
@@ -709,7 +719,19 @@ where
             // We must wait for worker to stop anyway, even though it should stop
             // immediately. This helps in case if we've checked that the worker
             // is waiting in between it received the update and set the flag.
-            let _ = handle.await;
+            match worker_termination_from_result(handle.await) {
+                WorkerTermination::Finished => {}
+                termination => {
+                    // Abnormal terminations are reported through the dispatcher
+                    // error policy to keep the contract that every abnormal
+                    // worker termination is reported.
+                    report_worker_error(
+                        &self.worker_error_handler,
+                        WorkerError::WorkerTerminated { termination },
+                    )
+                    .await;
+                }
+            }
         }
     }
 
@@ -953,16 +975,23 @@ impl Drop for ActiveWorkerGuard {
 
 /// Extracts the message of a panic payload.
 ///
-/// The payload itself is leaked instead of dropped: a payload can carry a
-/// destructor that panics, and a panic while unwinding would abort the whole
-/// process, escaping the panic containment of the caller.
+/// Known payload types (strings) are consumed without leaking. An unknown
+/// payload is leaked instead of dropped: its destructor could panic, and a
+/// panic while unwinding would abort the whole process, escaping the panic
+/// containment of the caller.
 fn panic_message(payload: Box<dyn Any + Send>) -> Option<String> {
-    let message = payload
-        .downcast_ref::<&'static str>()
-        .map(|message| (*message).to_string())
-        .or_else(|| payload.downcast_ref::<String>().cloned());
-    std::mem::forget(payload);
-    message
+    let payload = match payload.downcast::<String>() {
+        Ok(message) => return Some(*message),
+        Err(payload) => payload,
+    };
+
+    match payload.downcast::<&'static str>() {
+        Ok(message) => Some((*message).to_owned()),
+        Err(payload) => {
+            std::mem::forget(payload);
+            None
+        }
+    }
 }
 
 /// The reason a dispatcher worker task stopped.
@@ -991,6 +1020,7 @@ impl std::fmt::Display for WorkerTermination {
 /// An abnormal event detected by the dispatcher around its worker
 /// infrastructure.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum WorkerError {
     /// A handler panic was contained inside a worker; the worker keeps
     /// processing the queued updates.
@@ -1000,8 +1030,8 @@ pub enum WorkerError {
         /// The panic message, if it could be extracted from the payload.
         message: Option<String>,
     },
-    /// A worker task terminated abnormally; the dispatcher spawned a fresh
-    /// worker to keep dispatching.
+    /// A worker task terminated abnormally; the dispatcher keeps dispatching
+    /// with a fresh worker.
     WorkerTerminated {
         /// The reason the worker task stopped.
         termination: WorkerTermination,
@@ -1340,6 +1370,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cleanup_of_idle_workers_does_not_report_terminations() {
+        let seen_updates = Arc::new(Mutex::new(Vec::new()));
+        let policy_errors = Arc::new(Mutex::new(Vec::new()));
+
+        let mut dispatcher =
+            Dispatcher::builder(Bot::new("test"), recording_handler(Arc::clone(&seen_updates)))
+                .worker_error_handler(test_policy(&policy_errors))
+                .build();
+
+        let listener_error_handler = Arc::new(|error: Infallible| async move { match error {} });
+
+        let update_1 = update(1);
+        let key = default_distribution_function(&update_1).expect("the fixture has a chat");
+        dispatcher.process_update::<Infallible, _>(Ok(update_1), &listener_error_handler).await;
+
+        // Wait until the worker processed the update and is idle again.
+        wait_until(|| seen_updates.lock().expect("test mutex is not poisoned").len() == 1).await;
+        wait_until(|| {
+            dispatcher.workers.get(&key).expect("worker exists").is_waiting.load(Ordering::Relaxed)
+        })
+        .await;
+
+        // Cleaning up an idle worker is a normal termination: nothing is
+        // reported through the error policy.
+        dispatcher.remove_inactive_workers().await;
+        assert!(dispatcher.workers.is_empty());
+        assert!(policy_errors.lock().expect("test mutex is not poisoned").is_empty());
+    }
+
+    #[tokio::test]
     async fn buffered_updates_survive_handler_panic() {
         let seen_updates = Arc::new(Mutex::new(Vec::new()));
         let policy_errors = Arc::new(Mutex::new(Vec::new()));
@@ -1639,17 +1699,30 @@ mod tests {
         );
     }
 
+    /// An error handler that panics synchronously, before returning its
+    /// future.
+    struct SyncPanickingErrorHandler;
+
+    impl ErrorHandler<String> for SyncPanickingErrorHandler {
+        fn handle_error(self: Arc<Self>, _error: String) -> BoxFuture<'static, ()> {
+            panic!("test: synchronous listener error handler panic");
+        }
+    }
+
     #[tokio::test]
     async fn panicking_listener_error_handler_does_not_terminate_the_dispatcher() {
         let mut dispatcher =
             Dispatcher::<_, Infallible, _>::builder(Bot::new("test"), dptree::entry()).build();
 
-        let listener_error_handler = Arc::new(|_error: String| async move {
-            panic!("test: listener error handler panic");
-        });
+        // A direct `ErrorHandler` implementation that panics synchronously,
+        // before returning its future, must not terminate the dispatcher.
+        let listener_error_handler = Arc::new(SyncPanickingErrorHandler);
 
         dispatcher
-            .process_update::<String, _>(Err("listener error".to_owned()), &listener_error_handler)
+            .process_update::<String, SyncPanickingErrorHandler>(
+                Err("listener error".to_owned()),
+                &listener_error_handler,
+            )
             .await;
 
         // The dispatcher keeps dispatching after the contained panic.

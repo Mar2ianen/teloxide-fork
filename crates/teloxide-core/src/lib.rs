@@ -128,6 +128,9 @@ pub mod types;
 mod bot;
 
 // implementation details
+// Draft scheduling model: consumed by the outbound actor in Commit 2.
+#[allow(dead_code)] // Remove together with this attribute once the actor lands.
+mod outbound;
 mod serde_multipart;
 mod util;
 

@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Make sure `postgres-storage-rustls` feature actually enables rustls-based postgres storage ([#1400](https://github.com/teloxide/teloxide/pull/1400))
 - Escape `@` mentions in `markdown::user_mention_or_link` ([#1411](https://github.com/teloxide/teloxide/pull/1411))
 - Add local TBA file downloading support in `crate::net::download` ([#1173](https://github.com/teloxide/teloxide/pull/1173))
-- Contain handler panics inside dispatcher workers so that queued updates are not lost, respawn dead workers and retry the dispatch once, and report abnormal worker events through `DispatcherBuilder::worker_error_handler` instead of panicking, containing panics raised by the error handler itself
+- Contain panics inside dispatcher workers and user-supplied dispatcher callbacks (handlers, the worker error policy, the update listener error handler and the distribution function) so that queued updates are not lost, respawn dead workers and retry the dispatch once, and report abnormal worker events through `DispatcherBuilder::worker_error_handler` instead of panicking
 
 - Added schema and rust types checking ([#1396](https://github.com/teloxide/teloxide/pull/1396)) [**BC**]
   - `delete_chat_photo` method now returns `True`, not `String`

@@ -507,7 +507,17 @@ where
         let upd = match update {
             Ok(upd) => upd,
             Err(err) => {
-                err_handler.clone().handle_error(err).await;
+                // A panicking listener error handler must not terminate the
+                // dispatcher.
+                let result =
+                    AssertUnwindSafe(err_handler.clone().handle_error(err)).catch_unwind().await;
+                if let Err(payload) = result {
+                    let message = panic_message(payload);
+                    log::error!(
+                        "The update listener error handler panicked: {}",
+                        message.as_deref().unwrap_or("unknown panic payload")
+                    );
+                }
                 return;
             }
         };
@@ -521,7 +531,21 @@ where
             return;
         }
 
-        let key = (self.distribution_f)(&upd);
+        let key = match std::panic::catch_unwind(AssertUnwindSafe(|| (self.distribution_f)(&upd))) {
+            Ok(key) => key,
+            Err(payload) => {
+                // A panicking distribution function must not terminate the
+                // dispatcher; the unroutable update is dropped.
+                let message = panic_message(payload);
+                log::error!(
+                    "The distribution function panicked while routing update {:?}: {}; the update \
+                     was dropped",
+                    upd.id,
+                    message.as_deref().unwrap_or("unknown panic payload"),
+                );
+                return;
+            }
+        };
 
         match self.try_dispatch_update(key.clone(), upd).await {
             Ok(()) => {}
@@ -876,7 +900,7 @@ async fn handle_update_catching_panics<Err>(
             .await;
 
     if let Err(payload) = result {
-        let message = panic_message(&*payload);
+        let message = panic_message(payload);
         report_worker_error(
             &worker_error_handler,
             WorkerError::HandlerPanicked { update_id, message },
@@ -899,7 +923,7 @@ async fn report_worker_error(
         AssertUnwindSafe(async move { handler.handle_error(error).await }).catch_unwind().await;
 
     if let Err(payload) = result {
-        let message = panic_message(&*payload);
+        let message = panic_message(payload);
         log::error!(
             "The dispatcher worker error handler panicked while handling \"{error_message}\": {}",
             message.as_deref().unwrap_or("unknown panic payload")
@@ -928,11 +952,17 @@ impl Drop for ActiveWorkerGuard {
 }
 
 /// Extracts the message of a panic payload.
-fn panic_message(payload: &(dyn Any + Send)) -> Option<String> {
-    payload
+///
+/// The payload itself is leaked instead of dropped: a payload can carry a
+/// destructor that panics, and a panic while unwinding would abort the whole
+/// process, escaping the panic containment of the caller.
+fn panic_message(payload: Box<dyn Any + Send>) -> Option<String> {
+    let message = payload
         .downcast_ref::<&'static str>()
         .map(|message| (*message).to_string())
-        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .or_else(|| payload.downcast_ref::<String>().cloned());
+    std::mem::forget(payload);
+    message
 }
 
 /// The reason a dispatcher worker task stopped.
@@ -980,7 +1010,9 @@ pub enum WorkerError {
     /// task died and the freshly spawned replacement also stopped before
     /// accepting the update.
     UpdateUndeliverable {
-        /// The update that could not be delivered and was dropped.
+        /// The update that could not be delivered to a worker. It is provided
+        /// to the error handler, which may inspect or preserve it before the
+        /// error is dropped.
         update: Box<Update>,
         /// The reason the original worker task stopped.
         first_termination: WorkerTermination,
@@ -1022,7 +1054,7 @@ fn worker_termination_from_result(result: Result<(), tokio::task::JoinError>) ->
     match result {
         Ok(()) => WorkerTermination::Finished,
         Err(err) if err.is_panic() => {
-            WorkerTermination::Panicked { message: panic_message(&*err.into_panic()) }
+            WorkerTermination::Panicked { message: panic_message(err.into_panic()) }
         }
         Err(_) => WorkerTermination::Cancelled,
     }
@@ -1181,6 +1213,27 @@ mod tests {
                 Ok(())
             }
         })
+    }
+
+    /// A panic payload whose destructor panics as well.
+    struct PanicOnDrop;
+
+    impl Drop for PanicOnDrop {
+        fn drop(&mut self) {
+            panic!("test: panic payload destructor panic");
+        }
+    }
+
+    /// A handler that records the update and panics with a payload carrying a
+    /// panicking destructor.
+    fn panic_any_handler(seen_updates: Arc<Mutex<Vec<UpdateId>>>) -> UpdateHandler<Infallible> {
+        dptree::entry().endpoint(dptree::di::Asyncify({
+            let seen_updates = Arc::clone(&seen_updates);
+            move |update: Update| -> Result<(), Infallible> {
+                seen_updates.lock().expect("test mutex is not poisoned").push(update.id);
+                std::panic::panic_any(PanicOnDrop);
+            }
+        }))
     }
 
     #[tokio::test]
@@ -1555,6 +1608,75 @@ mod tests {
             }
             error => panic!("expected UpdateUndeliverable, got {error:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn panic_payload_with_panicking_destructor_does_not_kill_the_worker() {
+        let seen_updates = Arc::new(Mutex::new(Vec::new()));
+
+        let mut dispatcher =
+            Dispatcher::builder(Bot::new("test"), panic_any_handler(Arc::clone(&seen_updates)))
+                .build();
+
+        let listener_error_handler = Arc::new(|error: Infallible| async move { match error {} });
+
+        let update_1 = update(1);
+        let key = default_distribution_function(&update_1).expect("the fixture has a chat");
+        dispatcher.process_update::<Infallible, _>(Ok(update_1), &listener_error_handler).await;
+
+        let worker_id = dispatcher.workers.get(&key).expect("worker exists").handle.id();
+
+        dispatcher.process_update::<Infallible, _>(Ok(update(2)), &listener_error_handler).await;
+
+        wait_until(|| seen_updates.lock().expect("test mutex is not poisoned").len() == 2).await;
+
+        // The panic payload carries a panicking destructor; the same worker
+        // must survive both updates.
+        assert_eq!(dispatcher.workers.get(&key).expect("worker exists").handle.id(), worker_id);
+        assert_eq!(
+            *seen_updates.lock().expect("test mutex is not poisoned"),
+            vec![UpdateId(1), UpdateId(2)]
+        );
+    }
+
+    #[tokio::test]
+    async fn panicking_listener_error_handler_does_not_terminate_the_dispatcher() {
+        let mut dispatcher =
+            Dispatcher::<_, Infallible, _>::builder(Bot::new("test"), dptree::entry()).build();
+
+        let listener_error_handler = Arc::new(|_error: String| async move {
+            panic!("test: listener error handler panic");
+        });
+
+        dispatcher
+            .process_update::<String, _>(Err("listener error".to_owned()), &listener_error_handler)
+            .await;
+
+        // The dispatcher keeps dispatching after the contained panic.
+        dispatcher
+            .process_update::<Infallible, _>(
+                Ok(update(1)),
+                &Arc::new(|error: Infallible| async move { match error {} }),
+            )
+            .await;
+        assert_eq!(dispatcher.workers.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn panicking_distribution_function_does_not_terminate_the_dispatcher() {
+        let mut dispatcher =
+            Dispatcher::<_, Infallible, _>::builder(Bot::new("test"), dptree::entry())
+                .distribution_function::<()>(|_| panic!("test: distribution function panic"))
+                .build();
+
+        let listener_error_handler = Arc::new(|error: Infallible| async move { match error {} });
+
+        dispatcher.process_update::<Infallible, _>(Ok(update(1)), &listener_error_handler).await;
+
+        // The unroutable update was dropped, no worker was created, and the
+        // dispatcher is still alive.
+        assert!(dispatcher.workers.is_empty());
+        assert!(dispatcher.default_worker.is_none());
     }
 
     #[tokio::test]

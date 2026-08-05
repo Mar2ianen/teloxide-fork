@@ -73,6 +73,18 @@ struct Job {
     /// The effective priority of the freshest candidate entry for this
     /// job; entries with a lower effective are stale and skipped on pop.
     candidate_effective: u8,
+    /// Whether the job currently sleeps in the blocked heap. Its entry is
+    /// dropped lazily when it surfaces and counted in `stale_blocked`, so
+    /// the accounting never underflows and the heap can be compacted.
+    in_blocked_heap: bool,
+    /// The reservation queue this job is parked in, if any. Parked
+    /// entries are dropped lazily and counted in the reservation's
+    /// `stale` counter.
+    parked_in: Option<WindowRef>,
+    /// The window this job's block reserved (the job is the reservation
+    /// owner). When the owner dies the hold is released and the parked
+    /// queue is woken immediately.
+    reservation_owner: Option<WindowRef>,
 }
 
 /// An ordering lane: strictly FIFO in sequence order. The lane head is the
@@ -96,6 +108,12 @@ struct LaneState {
     /// Whether the current head is already represented in the candidate
     /// heap; prevents duplicate lane entries.
     in_candidate_heap: bool,
+    /// Whether the lane's blocked-heap entry is still pending. Tracked so
+    /// that cancelling the lane head can account the stale blocked entry.
+    in_blocked_heap: bool,
+    /// Generation of the lane's current blocked node; a node with a lower
+    /// generation is stale and ignored when it surfaces.
+    blocked_generation: u64,
     /// The effective priority of the freshest candidate entry for this
     /// lane; entries with a lower effective are stale and skipped on pop.
     candidate_effective: u8,
@@ -292,6 +310,11 @@ impl PartialOrd for CandidateKey {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct BlockedJob {
     until: Instant,
+    /// Ownership token of the node. Lane nodes carry the lane's blocked
+    /// generation: a node whose generation does not match the lane's
+    /// current one is stale (replaced by a fresh wake node) and never
+    /// touches the lane when it surfaces.
+    generation: u64,
     reference: CandidateRef,
 }
 
@@ -318,9 +341,18 @@ enum WindowRef {
 /// is re-blocked); while the hold is active every consumer of the window is
 /// parked in `queue`. On expiry exactly the head is promoted per tick, so a
 /// rate-limited drain stays linear instead of re-pushing the whole queue.
+///
+/// `owner` is the candidate whose block created (or last extended) the
+/// hold; when it dies the hold is released and the parked queue is woken
+/// immediately, because the new state of the window may admit the parked
+/// jobs right away. `stale` counts parked entries whose job is gone; the
+/// queue is rebuilt when they dominate, so a hot latest-wins slot cannot
+/// grow a reservation queue without bound.
 struct Reservation {
+    owner: Option<CandidateRef>,
     until: Instant,
     queue: VecDeque<CandidateRef>,
+    stale: usize,
 }
 
 /// The verdict of the admission check for one candidate.
@@ -498,7 +530,7 @@ impl SchedulerState {
                     // ready.
                     inherited_ready_at = old_job.not_before.is_none().then_some(old_job.ready_at);
                     inherited_lane_order = old_job.lane_order;
-                    self.remove_waiting(old);
+                    self.remove_waiting(old, now);
                     superseded = Some(old);
                     sequence
                 }
@@ -533,6 +565,9 @@ impl SchedulerState {
                 lane_order,
                 in_candidate_heap: false,
                 candidate_effective: 0,
+                in_blocked_heap: false,
+                parked_in: None,
+                reservation_owner: None,
             },
         );
         if let Some(until) = not_before {
@@ -566,6 +601,7 @@ impl SchedulerState {
         }
         self.compact_delayed_if_needed();
         self.compact_candidate_heap_if_needed();
+        self.compact_blocked_if_needed();
         Ok(EnqueueOutcome { job, superseded })
     }
 
@@ -704,7 +740,13 @@ impl SchedulerState {
     /// skipped when they surface, the lane-pending entry is dropped when it
     /// reaches the head, and the coalesce entry is removed eagerly because
     /// a stale slot must never be reused.
-    fn remove_waiting(&mut self, job: JobId) {
+    ///
+    /// Every structure the job left an entry in accounts the stale entry
+    /// here (never at pop time), so the stale counters stay consistent and
+    /// can be used for compaction. If the job was the owner of a window
+    /// hold, the hold is released and every parked job is woken
+    /// immediately.
+    fn remove_waiting(&mut self, job: JobId, now: Instant) {
         let Some(job_struct) = self.jobs.get(&job) else { return };
         let coalesce_key = job_struct.coalesce_key;
         let was_delayed = job_struct.not_before.is_some();
@@ -712,27 +754,86 @@ impl SchedulerState {
         if was_delayed {
             self.stale_delayed += 1;
         }
+        if job_struct.in_blocked_heap {
+            self.stale_blocked += 1;
+        }
+        if let Some(window) = job_struct.parked_in {
+            if let Some(reservation) = self.reservations.get_mut(&window) {
+                reservation.stale += 1;
+            }
+        }
+        if let Some(window) = job_struct.reservation_owner {
+            let owner = match lane {
+                Some(lane) => CandidateRef::Lane(lane),
+                None => CandidateRef::Job(job),
+            };
+            // The candidate the window was held back for is gone: release
+            // the hold and wake every parked job now — the window state
+            // may admit them immediately.
+            if self.reservations.get(&window).is_some_and(|r| r.owner == Some(owner)) {
+                if let Some(reservation) = self.reservations.remove(&window) {
+                    for reference in reservation.queue {
+                        self.push_reference(reference, now);
+                    }
+                }
+            }
+        }
+        self.remove_coalesce_entry(job, coalesce_key);
+        self.jobs.remove(&job);
         // Count the entry that stays behind in the candidate heap or lane
         // queue; it is dropped when it surfaces.
         match lane {
             Some(lane) => {
                 if let Some(lane_state) = self.lanes.get_mut(&lane) {
                     lane_state.stale += 1;
+                    if lane_state.in_blocked_heap {
+                        if lane_state.pending.iter().any(|&(_, id)| self.jobs.contains_key(&id)) {
+                            // A successor survives, but the current node's
+                            // deadline was computed for the cancelled
+                            // head's weight/scope and would hold the
+                            // successor back. Wake the lane immediately
+                            // with a fresh node; the old node is accounted
+                            // stale (its generation no longer matches) and
+                            // never touches the lane when it surfaces.
+                            // The counter wraps after 2^64 wake nodes
+                            // (astronomically unreachable); in the wrap
+                            // epoch a very old node could collide with a
+                            // fresh generation, which would only re-push a
+                            // lane head early once - acceptable for the
+                            // draft model.
+                            lane_state.blocked_generation =
+                                lane_state.blocked_generation.wrapping_add(1);
+                            self.stale_blocked += 1;
+                            self.blocked.push(Reverse(BlockedJob {
+                                until: now,
+                                generation: lane_state.blocked_generation,
+                                reference: CandidateRef::Lane(lane),
+                            }));
+                        } else {
+                            // No live pending job left: the node is dead
+                            // and accounted for compaction. Clear the
+                            // lane's blocked flag together with the node:
+                            // a later job on the same lane must be able to
+                            // become a candidate again.
+                            self.stale_blocked += 1;
+                            lane_state.in_blocked_heap = false;
+                        }
+                    }
                 }
             }
             None if !was_delayed => self.stale_candidates += 1,
             None => {}
         }
-        self.remove_coalesce_entry(job, coalesce_key);
-        self.jobs.remove(&job);
     }
 
     /// Cancels a job that has not been granted yet. Granted jobs are
     /// cancelled through their permit completion instead.
-    pub(crate) fn cancel(&mut self, job: JobId) {
-        self.remove_waiting(job);
-        // A cancel-only churn must not leave a bloated delayed heap behind.
+    pub(crate) fn cancel(&mut self, job: JobId, now: Instant) {
+        self.remove_waiting(job, now);
+        // A cancel-only churn must not leave a bloated delayed or blocked
+        // heap behind.
         self.compact_delayed_if_needed();
+        self.compact_blocked_if_needed();
     }
 
     fn remove_coalesce_entry(&mut self, job: JobId, key: Option<InternalCoalesceKey>) {
@@ -867,6 +968,13 @@ impl SchedulerState {
             if lane_state.in_flight.is_some() {
                 return;
             }
+            if lane_state.in_blocked_heap {
+                // The lane is already represented by a blocked-heap node;
+                // pushing a candidate entry too would duplicate the lane
+                // and double-account its cancellation. The blocked node
+                // wakes the current head when it surfaces.
+                return;
+            }
             while let Some(&(_, job_id)) = lane_state.pending.first() {
                 if self.jobs.contains_key(&job_id) {
                     break;
@@ -923,6 +1031,8 @@ impl SchedulerState {
             next_order: 0,
             stale: 0,
             in_candidate_heap: false,
+            in_blocked_heap: false,
+            blocked_generation: 0,
             candidate_effective: 0,
         });
         let order = match inherited_order {
@@ -974,6 +1084,28 @@ impl SchedulerState {
         }
     }
 
+    /// Rebuilds the blocked heap when stale entries dominate, so that a
+    /// hot latest-wins slot cannot grow the heap without bound while a
+    /// long penalty or window keeps the slot blocked.
+    fn compact_blocked_if_needed(&mut self) {
+        if self.stale_blocked == 0 || self.stale_blocked * 2 < self.blocked.len() {
+            return;
+        }
+        self.blocked = self
+            .blocked
+            .drain()
+            .filter(|entry| blocked_node_alive(entry.0, &self.jobs, &self.lanes))
+            .collect();
+        self.stale_blocked = 0;
+    }
+
+    /// Whether a blocked node is still live: a job node dies with its job;
+    /// a lane node dies when the lane has no live pending job or when its
+    /// generation no longer matches the lane's current blocked node.
+    fn blocked_node_alive(&self, node: BlockedJob) -> bool {
+        blocked_node_alive(node, &self.jobs, &self.lanes)
+    }
+
     /// Wakes candidates whose blocked deadline has passed and re-inserts
     /// them (re-validating the reference: a lane entry wakes its current
     /// head, a dead job is skipped).
@@ -982,21 +1114,46 @@ impl SchedulerState {
             if top.0.until > now {
                 break;
             }
-            let BlockedJob { reference, .. } = self.blocked.pop().unwrap().0;
+            let BlockedJob { reference, generation, .. } = self.blocked.pop().unwrap().0;
             match reference {
                 CandidateRef::Job(job_id) => {
-                    let Some(meta) = self.jobs.get(&job_id).map(|job| job.meta) else {
-                        self.stale_blocked += 1;
+                    // A dead reference was already counted in
+                    // `stale_blocked` when its job died; drop it here.
+                    if !self.jobs.contains_key(&job_id) {
+                        self.stale_blocked = self.stale_blocked.saturating_sub(1);
                         continue;
-                    };
+                    }
                     let Some(job) = self.jobs.get(&job_id) else { continue };
                     if job.not_before.is_some() {
                         continue; // re-delayed somehow; the heap will wake it
                     }
+                    self.jobs.get_mut(&job_id).expect("job exists").in_blocked_heap = false;
                     self.push_job_candidate(job_id, now);
-                    let _ = meta;
                 }
-                CandidateRef::Lane(lane) => self.push_lane_head_candidate(lane, now),
+                CandidateRef::Lane(lane) => {
+                    let Some(lane_state) = self.lanes.get_mut(&lane) else {
+                        self.stale_blocked = self.stale_blocked.saturating_sub(1);
+                        continue;
+                    };
+                    if generation != lane_state.blocked_generation {
+                        // A stale node (replaced by a fresh wake node): it
+                        // was accounted when it was superseded and must
+                        // never touch the lane's current blocked state.
+                        self.stale_blocked = self.stale_blocked.saturating_sub(1);
+                        continue;
+                    }
+                    if !lane_state.pending.iter().any(|&(_, id)| self.jobs.contains_key(&id)) {
+                        // The current node of a lane with no live pending
+                        // job left: accounted when the last job died. The
+                        // lane flag is cleared defensively so the state is
+                        // self-healing even on unexpected paths.
+                        lane_state.in_blocked_heap = false;
+                        self.stale_blocked = self.stale_blocked.saturating_sub(1);
+                        continue;
+                    }
+                    lane_state.in_blocked_heap = false;
+                    self.push_lane_head_candidate(lane, now);
+                }
             }
         }
     }
@@ -1024,9 +1181,17 @@ impl SchedulerState {
                         break;
                     }
                     reservation.queue.pop_front();
+                    reservation.stale = reservation.stale.saturating_sub(1);
                 }
                 match reservation.queue.pop_front() {
-                    Some(reference) => Some(reference),
+                    Some(reference) => {
+                        if let CandidateRef::Job(job_id) = reference {
+                            if let Some(job) = self.jobs.get_mut(&job_id) {
+                                job.parked_in = None;
+                            }
+                        }
+                        Some(reference)
+                    }
                     None => {
                         remove = true;
                         None
@@ -1150,16 +1315,43 @@ impl SchedulerState {
                 }
                 Admission::Blocked { until, reserve } => {
                     if let Some(window) = reserve {
-                        let reservation = self
-                            .reservations
-                            .entry(window)
-                            .or_insert_with(|| Reservation { until, queue: VecDeque::new() });
-                        if until > reservation.until {
+                        let reference = self.reference_of(candidate);
+                        let reservation = self.reservations.entry(window).or_insert_with(|| {
+                            Reservation { owner: None, until, queue: VecDeque::new(), stale: 0 }
+                        });
+                        if until > reservation.until || reservation.owner.is_none() {
                             reservation.until = until;
+                            reservation.owner = Some(reference);
+                            if let Some(job) = self.jobs.get_mut(&candidate.job) {
+                                job.reservation_owner = Some(window);
+                            }
                         }
                     }
+                    let generation = if let Some(job) = self.jobs.get(&candidate.job) {
+                        if let Some(lane) = job.meta.lane {
+                            // The blocked node references the lane and is
+                            // owned by the lane state: exactly one CURRENT
+                            // node per blocked lane (older nodes carry a
+                            // stale generation), so the stale accounting
+                            // never double-counts a cancelled lane head.
+                            let lane_state = self.lanes.get_mut(&lane).expect("lane exists");
+                            lane_state.in_blocked_heap = true;
+                            lane_state.blocked_generation =
+                                lane_state.blocked_generation.wrapping_add(1);
+                            lane_state.blocked_generation
+                        } else {
+                            self.jobs
+                                .get_mut(&candidate.job)
+                                .expect("job exists")
+                                .in_blocked_heap = true;
+                            0
+                        }
+                    } else {
+                        0
+                    };
                     self.blocked.push(Reverse(BlockedJob {
                         until,
+                        generation,
                         reference: self.reference_of(candidate),
                     }));
                 }
@@ -1168,6 +1360,11 @@ impl SchedulerState {
                     let reference = self.reference_of(candidate);
                     if let Some(reservation) = self.reservations.get_mut(&window) {
                         reservation.queue.push_back(reference);
+                        if let CandidateRef::Job(job_id) = reference {
+                            if let Some(job) = self.jobs.get_mut(&job_id) {
+                                job.parked_in = Some(window);
+                            }
+                        }
                     } else {
                         // Defensive: no reservation found, keep the
                         // candidate alive by re-inserting it.
@@ -1178,7 +1375,23 @@ impl SchedulerState {
         }
         self.prune_expired_penalties(now);
         self.prune_idle_chat_windows(now);
+        self.compact_reservations_if_needed();
         grants
+    }
+
+    /// Rebuilds parked queues whose dead entries dominate, so that a hot
+    /// latest-wins slot cannot grow a reservation queue without bound
+    /// while the hold stays active.
+    fn compact_reservations_if_needed(&mut self) {
+        for (_, reservation) in self.reservations.iter_mut() {
+            if reservation.stale == 0 || reservation.stale * 2 < reservation.queue.len() {
+                continue;
+            }
+            reservation
+                .queue
+                .retain(|&reference| reference_alive(reference, &self.jobs, &self.lanes));
+            reservation.stale = 0;
+        }
     }
 
     /// Pops the best live candidate from the persistent heap, re-keying
@@ -1450,11 +1663,11 @@ impl SchedulerState {
             self.stale_delayed -= 1;
         }
         while let Some(top) = self.blocked.peek() {
-            if reference_alive(top.0.reference, &self.jobs, &self.lanes) {
+            if self.blocked_node_alive(top.0) {
                 break;
             }
             self.blocked.pop();
-            self.stale_blocked -= 1;
+            self.stale_blocked = self.stale_blocked.saturating_sub(1);
         }
         // drop aging events whose reference is no longer a candidate (it
         // was granted, blocked or parked; its wake-up is managed elsewhere)
@@ -1499,6 +1712,22 @@ impl SchedulerState {
             Some(at) => SchedulerWakeup::At(at),
             None => SchedulerWakeup::ExternalEvent,
         }
+    }
+}
+
+/// Free variant of [`SchedulerState::blocked_node_alive`] usable inside
+/// closures that borrow disjoint scheduler fields.
+fn blocked_node_alive(
+    node: BlockedJob,
+    jobs: &HashMap<JobId, Job>,
+    lanes: &HashMap<OutboundLaneKey, LaneState>,
+) -> bool {
+    match node.reference {
+        CandidateRef::Job(job_id) => jobs.contains_key(&job_id),
+        CandidateRef::Lane(lane) => lanes.get(&lane).is_some_and(|state| {
+            state.blocked_generation == node.generation
+                && state.pending.iter().any(|&(_, id)| jobs.contains_key(&id))
+        }),
     }
 }
 
@@ -1735,7 +1964,7 @@ mod tests {
         let chat = OutboundScope::Chat(OutboundChatKey(1));
         let a = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
         let b = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
-        s.cancel(a);
+        s.cancel(a, t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![b]);
     }
 
@@ -1745,7 +1974,7 @@ mod tests {
         let t0 = base();
         let a = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
         let b = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
-        s.cancel(b);
+        s.cancel(b, t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
         // the cancelled job never consumed window budget
         let c = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
@@ -2033,7 +2262,7 @@ mod tests {
         let t0 = base();
         let a = replace(&mut s, global(OutboundPriority::NORMAL), 7, t0);
         let outcome = replace(&mut s, global(OutboundPriority::NORMAL), 7, t0);
-        s.cancel(a.job); // the old id is invalidated: must not remove the replacement
+        s.cancel(a.job, t0); // the old id is invalidated: must not remove the replacement
         assert_eq!(jobs(&s.grant_ready(t0)), vec![outcome.job]);
     }
 
@@ -2273,7 +2502,7 @@ mod tests {
         assert!(s.coalesce.is_empty());
         // and after a cancel too
         let b = replace(&mut s, global(OutboundPriority::NORMAL), 7, t0);
-        s.cancel(b.job);
+        s.cancel(b.job, t0);
         assert!(s.coalesce.is_empty());
     }
 
@@ -2554,7 +2783,7 @@ mod tests {
         }
         // a delayed job cancelled after the last compaction leaves a stale
         // heap entry that must be dropped exactly once at promotion time
-        s.cancel(ids[19]);
+        s.cancel(ids[19], t0);
         assert_eq!(jobs(&s.grant_ready(not_before)), ids[..19]);
     }
 
@@ -2574,6 +2803,8 @@ mod tests {
                 stale: 0,
                 in_candidate_heap: false,
                 candidate_effective: 0,
+                in_blocked_heap: false,
+                blocked_generation: 0,
             },
         );
         let a = fifo(&mut s, meta(chat, Some(lane), OutboundPriority::NORMAL), t0);
@@ -2626,7 +2857,7 @@ mod tests {
         let lane = OutboundLaneKey(1);
         let chat = OutboundScope::Chat(OutboundChatKey(1));
         let a = fifo(&mut s, meta(chat, Some(lane), OutboundPriority::NORMAL), t0);
-        s.cancel(a);
+        s.cancel(a, t0);
         assert!(s.lanes.contains_key(&lane));
         s.grant_ready(t0);
         assert!(!s.lanes.contains_key(&lane), "a lane with no jobs must be removed");
@@ -2822,7 +3053,7 @@ mod tests {
         }
         // a cancel-only churn must not leave a bloated heap behind
         for id in &ids {
-            s.cancel(*id);
+            s.cancel(*id, t0);
         }
         assert_eq!(jobs(&s.grant_ready(not_before + Duration::from_secs(1))), vec![]);
         assert!(s.delayed.is_empty(), "the delayed heap must be compacted");
@@ -2909,7 +3140,7 @@ mod tests {
         let head = fifo(&mut s, meta(chat2, lane, OutboundPriority::NORMAL), t0);
         let next = fifo(&mut s, meta(chat2, lane, OutboundPriority::NORMAL), t0);
         assert!(s.grant_ready(t0).is_empty());
-        s.cancel(head);
+        s.cancel(head, t0);
         // when the reservation expires the woken jobs drain in FIFO order:
         // b (older), then the lane's next head (the parked one was dead)
         let t1 = t0 + Duration::from_secs(1);
@@ -2999,7 +3230,7 @@ mod tests {
         assert_eq!(a, JobId(0));
         // a cancelled job leaves a stale candidate entry behind
         let b = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
-        s.cancel(b);
+        s.cancel(b, t0);
         // the counter is about to wrap with a live sequence 0: the next
         // enqueue triggers the dense rebase, which must not panic on the
         // stale candidate entry
@@ -3019,7 +3250,7 @@ mod tests {
         // two lane jobs; the head is cancelled and stays as a stale entry
         let a = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
         let b = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
-        s.cancel(a);
+        s.cancel(a, t0);
         // force the dense rebase while the stale head is still in pending
         s.next_sequence = u64::MAX;
         let c = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
@@ -3111,5 +3342,184 @@ mod tests {
             "the expired global hold must keep only its own queue"
         );
         let _ = (c1, c2, c3);
+    }
+
+    #[test]
+    fn cancelling_a_blocked_lane_head_keeps_stale_accounting_consistent() {
+        let mut s = scheduler(limits(1), aging());
+        let t0 = base();
+        let lane = Some(OutboundLaneKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey(1));
+        // Заполнить окно, чтобы голова lane была заблокирована.
+        let a = fifo(&mut s, meta(chat, None, OutboundPriority::NORMAL), t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
+        let b = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
+        let c = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
+        s.grant_ready(t0); // b (голова lane) -> blocked (entry Lane(lane))
+                           // Отмена головы при живом наследнике: свежая нода будит lane
+                           // немедленно; устаревшая (generation mismatch) вычищается
+                           // компакцией прямо в cancel.
+        s.cancel(b, t0);
+        assert_eq!(s.stale_blocked, 0);
+        assert_eq!(s.blocked.len(), 1);
+        s.next_deadline(t0); // без паники
+                             // Отмена последнего живого job lane: entry умирает; компакция в
+                             // cancel вычищает его и сбрасывает счётчик — underflow невозможен.
+        s.cancel(c, t0);
+        assert!(s.blocked.is_empty());
+        s.next_deadline(t0); // без паники
+    }
+
+    #[test]
+    fn cancelling_a_blocked_lane_head_re_admits_the_surviving_successor() {
+        let mut s = scheduler(limits(10), aging());
+        let t0 = base();
+        for _ in 0..9 {
+            fifo(&mut s, global(OutboundPriority::NORMAL), t0);
+        }
+        s.grant_ready(t0); // used = 9
+        let lane = Some(OutboundLaneKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey(1));
+        let heavy = OutboundMeta {
+            weight: NonZeroU32::new(10).unwrap(),
+            ..meta(chat, lane, OutboundPriority::NORMAL)
+        };
+        let heavy_job = s.enqueue(heavy, OutboundEnqueueMode::Fifo, None, t0).unwrap().job;
+        let light = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
+        s.grant_ready(t0); // heavy -> blocked (entry Lane(lane)); light ждёт за ним
+                           // Отмена тяжелой головы: лёгкий наследник обязан пройти немедленно,
+                           // а не ждать фантомный дедлайн старой головы.
+        s.cancel(heavy_job, t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![light]);
+    }
+
+    #[test]
+    fn stale_wake_node_does_not_disturb_a_successor_blocked_by_its_own_deadline() {
+        let mut s = scheduler(limits(10), aging());
+        let t0 = base();
+        for _ in 0..9 {
+            fifo(&mut s, global(OutboundPriority::NORMAL), t0);
+        }
+        s.grant_ready(t0); // used = 9
+        let lane = Some(OutboundLaneKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey(1));
+        let heavy = OutboundMeta {
+            weight: NonZeroU32::new(10).unwrap(),
+            ..meta(chat, lane, OutboundPriority::NORMAL)
+        };
+        let heavy_job = s.enqueue(heavy, OutboundEnqueueMode::Fifo, None, t0).unwrap().job;
+        let light = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
+        s.grant_ready(t0); // heavy -> blocked (T1); light ждёт за ним
+        s.cancel(heavy_job, t0); // свежая нода until=now; старая (T1) устарела
+                                 // До re-admit наследника навешиваем chat penalty: light снова
+                                 // заблокируется своим собственным дедлайном T2 > T1.
+        s.penalize(chat, t0 + Duration::from_secs(3));
+        s.grant_ready(t0); // promote свежей ноды -> light кандидат -> Blocked(T2)
+                           // В T1 старая нода surface-ится: она НЕ должна разбудить lane,
+                           // чья актуальная нода живёт до T2.
+        assert!(s.grant_ready(t0 + Duration::from_secs(1)).is_empty());
+        // В T2 penalty истёк, light проходит.
+        assert_eq!(jobs(&s.grant_ready(t0 + Duration::from_secs(3))), vec![light]);
+    }
+
+    #[test]
+    fn cancelling_the_last_blocked_lane_job_keeps_the_lane_usable() {
+        let mut s = scheduler(limits(1), aging());
+        let t0 = base();
+        let lane = Some(OutboundLaneKey(1));
+        let chat = OutboundScope::Chat(OutboundChatKey(1));
+        let a = fifo(&mut s, meta(chat, None, OutboundPriority::NORMAL), t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![a]); // окно full
+        let b = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
+        s.grant_ready(t0); // b -> blocked (entry Lane(lane))
+        s.cancel(b, t0); // последний job lane: нода мертва, флаг должен сброситься
+                         // Новый job на той же lane обязан снова стать кандидатом.
+        let c = fifo(&mut s, meta(chat, lane, OutboundPriority::NORMAL), t0);
+        assert!(s.grant_ready(t0).is_empty()); // окно ещё full
+        assert_eq!(jobs(&s.grant_ready(t0 + Duration::from_secs(1))), vec![c]);
+    }
+
+    #[test]
+    fn cancel_while_blocked_keeps_stale_accounting_consistent() {
+        let mut s = scheduler(limits(1), aging());
+        let t0 = base();
+        // Заполнить окно, чтобы второй job был заблокирован.
+        let a = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
+        let b = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
+        s.grant_ready(t0); // b -> blocked heap
+        s.cancel(b, t0);
+        // stale blocked entry должен быть учтён, а не привести к underflow.
+        let wakeup = s.next_deadline(t0);
+        assert!(matches!(wakeup, SchedulerWakeup::At(_) | SchedulerWakeup::ExternalEvent));
+        // Отмена единственного заблокированного job компактит heap до нуля.
+        assert!(s.blocked.is_empty());
+    }
+
+    #[test]
+    fn hot_latest_wins_during_penalty_keeps_blocked_heap_bounded() {
+        let mut s = scheduler(limits(1), aging());
+        let t0 = base();
+        // Часовой глобальный penalty: каждый кандидат блокируется.
+        s.penalize(OutboundScope::Global, t0 + Duration::from_secs(3600));
+        replace(&mut s, global(OutboundPriority::NORMAL), 7, t0);
+        s.grant_ready(t0);
+        for _ in 0..100_000 {
+            replace(&mut s, global(OutboundPriority::NORMAL), 7, t0);
+            s.grant_ready(t0);
+        }
+        // Один live job, а heap остаётся малым за счёт compaction.
+        assert_eq!(s.jobs.len(), 1);
+        assert!(s.blocked.len() <= 4, "blocked heap grew: {}", s.blocked.len());
+    }
+
+    #[test]
+    fn hot_latest_wins_under_reservation_keeps_parked_queue_bounded() {
+        let mut s = scheduler(limits(10), aging());
+        let t0 = base();
+        for _ in 0..9 {
+            fifo(&mut s, global(OutboundPriority::NORMAL), t0);
+        }
+        s.grant_ready(t0); // used = 9
+                           // Heavy (weight 10) не влезает: резервирует окно.
+        let heavy = OutboundMeta {
+            weight: NonZeroU32::new(10).unwrap(),
+            ..global(OutboundPriority::NORMAL)
+        };
+        s.enqueue(heavy, OutboundEnqueueMode::Fifo, None, t0).unwrap();
+        s.grant_ready(t0);
+        // Горячий latest-wins лёгких job-ов паркуется за reservation.
+        replace(&mut s, global(OutboundPriority::NORMAL), 7, t0);
+        s.grant_ready(t0);
+        for _ in 0..100_000 {
+            replace(&mut s, global(OutboundPriority::NORMAL), 7, t0);
+            s.grant_ready(t0);
+        }
+        assert_eq!(s.jobs.len(), 2); // heavy + один live light
+        let total_parked: usize =
+            s.reservations.values().map(|reservation| reservation.queue.len()).sum();
+        assert!(total_parked <= 4, "parked queue grew: {total_parked}");
+    }
+
+    #[test]
+    fn cancelling_the_reservation_owner_wakes_a_parked_light_job() {
+        let mut s = scheduler(limits(10), aging());
+        let t0 = base();
+        for _ in 0..9 {
+            fifo(&mut s, global(OutboundPriority::NORMAL), t0);
+        }
+        s.grant_ready(t0); // used = 9
+        let heavy = OutboundMeta {
+            weight: NonZeroU32::new(10).unwrap(),
+            ..global(OutboundPriority::NORMAL)
+        };
+        let heavy_job = s.enqueue(heavy, OutboundEnqueueMode::Fifo, None, t0).unwrap().job;
+        s.grant_ready(t0); // heavy -> Blocked (owner окна)
+        let light = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
+        s.grant_ready(t0); // light -> Reserved (parked)
+        assert!(jobs(&s.grant_ready(t0)).is_empty());
+        // Отмена владельца снимает hold и немедленно будит light.
+        s.cancel(heavy_job, t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![light]);
     }
 }

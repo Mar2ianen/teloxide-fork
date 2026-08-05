@@ -109,6 +109,9 @@ enum OutboundCommand {
     Complete {
         job_id: JobId,
         outcome: OutboundCompletion,
+        /// Resolved once the completion is applied; used by
+        /// [`OutboundPermit::complete_and_await`] as a per-request barrier.
+        ack: Option<oneshot::Sender<()>>,
     },
     Penalize {
         scope: OutboundScope,
@@ -441,7 +444,37 @@ impl OutboundPermit {
     /// penalty). The rate budget consumed by the grant is never refunded.
     pub fn complete(mut self, outcome: OutboundCompletion) {
         self.completed = true;
-        let _ = self.lifecycle.send(OutboundCommand::Complete { job_id: self.job_id, outcome });
+        let _ = self.lifecycle.send(OutboundCommand::Complete {
+            job_id: self.job_id,
+            outcome,
+            ack: None,
+        });
+    }
+
+    /// Completes the permit and waits until the actor has applied the
+    /// outcome. This is the per-request barrier of the adaptor: when this
+    /// future resolves, a `RetryAfter` penalty is already registered, so a
+    /// subsequent acquire from the same caller is guaranteed to observe it
+    /// (no acquire can overtake the completion that precedes it).
+    ///
+    /// If the actor is gone the wait is skipped: there is nothing to apply
+    /// the outcome to.
+    pub async fn complete_and_await(mut self, outcome: OutboundCompletion) {
+        let (ack_tx, ack_rx) = oneshot::channel();
+        self.completed = true;
+        let sent = self.lifecycle.send(OutboundCommand::Complete {
+            job_id: self.job_id,
+            outcome,
+            ack: Some(ack_tx),
+        });
+        if sent.is_err() {
+            // The actor (and its channel) is gone: the outcome cannot be
+            // applied anywhere.
+            return;
+        }
+        // The actor may die after receiving the command but before
+        // resolving the ack: the receiver closes and the wait ends.
+        let _ = ack_rx.await;
     }
 }
 
@@ -451,6 +484,7 @@ impl Drop for OutboundPermit {
             let _ = self.lifecycle.send(OutboundCommand::Complete {
                 job_id: self.job_id,
                 outcome: OutboundCompletion::CancelledAfterGrant,
+                ack: None,
             });
         }
     }
@@ -473,6 +507,12 @@ pub(crate) struct OutboundActor {
     base: Instant,
     started_at: tokio::time::Instant,
 }
+
+/// Maximum number of lifecycle commands drained per actor loop iteration.
+/// The drain gives already-arrived completions/cancellations priority over
+/// new enqueues; the bound keeps a busy lifecycle producer from starving
+/// the enqueue ingress.
+const LIFECYCLE_DRAIN_BATCH: usize = 64;
 
 impl OutboundActor {
     fn now(&self) -> Instant {
@@ -532,8 +572,11 @@ impl OutboundActor {
                 self.waiters.remove(&job_id);
                 self.scheduler.cancel(job_id, self.now());
             }
-            OutboundCommand::Complete { job_id, outcome } => {
+            OutboundCommand::Complete { job_id, outcome, ack } => {
                 self.scheduler.complete(job_id, outcome, self.now());
+                if let Some(ack) = ack {
+                    let _ = ack.send(());
+                }
             }
             OutboundCommand::Penalize { scope, duration } => {
                 if !duration.is_zero() {
@@ -618,11 +661,52 @@ impl OutboundActor {
             let timer = tokio::time::sleep(Duration::from_secs(0));
             tokio::pin!(timer);
             loop {
+                // Bounded lifecycle drain. Lifecycle commands ride their
+                // own unbounded channel so that completions, cancellations
+                // and shutdown can never be blocked by a saturated enqueue
+                // ingress. Draining the already-arrived lifecycle commands
+                // BEFORE the `select!` below makes a completion (and its
+                // RetryAfter penalty) that was sent before a subsequent
+                // acquire from the same caller apply first: both sends are
+                // synchronous, so by the time the caller yields both are in
+                // their channels, and the drain sees the completion before
+                // the acquire is even considered.
+                //
+                // The drain is BOUNDED: the `select!` below polls the
+                // channels fairly, so a busy lifecycle producer (the public
+                // handle exposes `penalize`/`snapshot`/`limits` with no
+                // admission) can delay but never starve the enqueue
+                // ingress.
+                let mut drained = 0;
+                while drained < LIFECYCLE_DRAIN_BATCH {
+                    match self.lifecycle.try_recv() {
+                        Ok(OutboundCommand::Shutdown) => {
+                            self.shutdown_waiters();
+                            return;
+                        }
+                        Ok(command) => {
+                            self.handle_command(command);
+                            drained += 1;
+                        }
+                        Err(_) => break,
+                    }
+                }
+
+                // Admission AFTER the drain and BEFORE waiting for the
+                // next event: drained commands change scheduler state
+                // (a completion frees its lane, a cancel wakes the next
+                // lane head or releases a reservation, `set_limits` can
+                // make pending jobs admissible). Without this pass the
+                // actor would go to sleep with ready candidates behind it:
+                // e.g. two serial lanes with in-flight heads and pending
+                // tails, both completions arriving in one batch — the
+                // first is handled by the `select!`, the second by the
+                // drain, and the second lane's tail would never be granted
+                // until some unrelated event woke the actor.
+                let wakeup = self.run_admission();
+                timer.as_mut().reset(self.timer_deadline(wakeup));
+
                 tokio::select! {
-                    // Lifecycle commands ride their own unbounded channel:
-                    // completions, cancellations and shutdown can never be
-                    // blocked by a saturated enqueue ingress. Select is
-                    // fair between the channels (no strict priority).
                     command = self.lifecycle.recv() => {
                         match command {
                             Some(OutboundCommand::Shutdown) => {
@@ -655,8 +739,6 @@ impl OutboundActor {
                     }
                     _ = timer.as_mut() => {}
                 }
-                let wakeup = self.run_admission();
-                timer.as_mut().reset(self.timer_deadline(wakeup));
             }
         })
         .catch_unwind()
@@ -699,12 +781,21 @@ mod tests {
         }
     }
 
-    fn chat_metadata(chat: u64, priority: OutboundPriority) -> OutboundMetadata {
+    fn chat_metadata(chat: i64, priority: OutboundPriority) -> OutboundMetadata {
         OutboundMetadata {
             scope: OutboundScope::Chat(OutboundChatKey::new(chat)),
             class: OutboundClass::new(0),
             priority,
             weight: NonZeroU32::new(1).unwrap(),
+        }
+    }
+
+    fn global_metadata(priority: OutboundPriority, weight: u32) -> OutboundMetadata {
+        OutboundMetadata {
+            scope: OutboundScope::Global,
+            class: OutboundClass::new(0),
+            priority,
+            weight: NonZeroU32::new(weight).unwrap(),
         }
     }
 
@@ -976,6 +1067,159 @@ mod tests {
         // released, so the second job of the lane proceeds.
         drop(first);
         let permit = tokio::time::timeout(Duration::from_secs(1), second).await.unwrap().unwrap();
+        permit.complete(OutboundCompletion::Success);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn drained_completions_wake_all_serial_lanes() {
+        let queue = OutboundQueue::new_spawn(settings()).unwrap();
+        let handle = queue.handle();
+        let lane_a = handle.serial_lane();
+        let lane_b = handle.serial_lane();
+
+        // Каждая lane: in-flight head + pending tail.
+        let a1 = lane_a.acquire(chat_metadata(1, OutboundPriority::NORMAL)).await.unwrap();
+        let b1 = lane_b.acquire(chat_metadata(2, OutboundPriority::NORMAL)).await.unwrap();
+        let a2 = lane_a.acquire(chat_metadata(1, OutboundPriority::NORMAL));
+        let b2 = lane_b.acquire(chat_metadata(2, OutboundPriority::NORMAL));
+        tokio::pin!(a2);
+        tokio::pin!(b2);
+        assert!(futures::poll!(a2.as_mut()).is_pending());
+        assert!(futures::poll!(b2.as_mut()).is_pending());
+
+        // Барьер: оба хвоста уже обработаны actor-ом и лежат в pending
+        // (иначе complete'ы могли бы обработаться раньше enqueue, и тест
+        // не детерминированно попадал бы в drained batch).
+        for _ in 0..100 {
+            tokio::task::yield_now().await;
+            let snapshot = handle.snapshot().await.unwrap();
+            if snapshot.pending == 2 {
+                break;
+            }
+        }
+        assert_eq!(handle.snapshot().await.unwrap().pending, 2);
+
+        // Оба completion'а отправляются синхронно, до следующего yield:
+        // один обрабатывается `select!`, второй — следующим lifecycle
+        // drain. Admission после drain обязан выдать ОБА хвоста, иначе
+        // вторая lane навсегда уснёт (регрессия: drained lifecycle batch
+        // без сопровождающего admission pass).
+        a1.complete(OutboundCompletion::Success);
+        b1.complete(OutboundCompletion::Success);
+
+        // Никаких команд между получениями хвостов: завершение первого
+        // permit'а само бы разбудило actor и замаскировало регрессию
+        // (admission после этого события выдал бы и второй хвост).
+        let a2_permit = tokio::time::timeout(Duration::from_secs(1), a2).await.unwrap().unwrap();
+        let wait_b2 = tokio::time::timeout(Duration::from_secs(1), b2);
+        tokio::pin!(wait_b2);
+        // Прокручиваем время после создания deadline, чтобы регрессия
+        // упала на timeout, а не висела (paused clock не тикает сам).
+        tokio::time::advance(Duration::from_secs(2)).await;
+        let b2_permit = wait_b2.await.unwrap().unwrap();
+        a2_permit.complete(OutboundCompletion::Success);
+        b2_permit.complete(OutboundCompletion::Success);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn drained_set_limits_wakes_newly_admissible_jobs() {
+        let queue = OutboundQueue::new_spawn(settings_with(
+            vec![window(2, Duration::from_secs(60))],
+            Vec::new(),
+        ))
+        .unwrap();
+        let handle = queue.handle();
+
+        // used = 2 (два permit'а weight 1); pending weight 2 не влезает.
+        let h1 = handle.acquire(global_metadata(OutboundPriority::NORMAL, 1)).await.unwrap();
+        let h2 = handle.acquire(global_metadata(OutboundPriority::NORMAL, 1)).await.unwrap();
+        let pending = handle.acquire(global_metadata(OutboundPriority::NORMAL, 2));
+        tokio::pin!(pending);
+        assert!(futures::poll!(pending.as_mut()).is_pending());
+        for _ in 0..100 {
+            tokio::task::yield_now().await;
+            let snapshot = handle.snapshot().await.unwrap();
+            if snapshot.pending == 1 {
+                break;
+            }
+        }
+        assert_eq!(handle.snapshot().await.unwrap().pending, 1);
+
+        // Синхронная пара: complete уходит в `select!`, set_limits — в
+        // следующий lifecycle drain. После h1.complete used=1, и даже
+        // с ним pending (weight 2) не влезает в окно capacity 2; только
+        // drained set_limits(capacity 4) делает job допустимым — admission
+        // после drain обязан выдать его (регрессия: drained batch без
+        // сопровождающего admission pass усыпила бы actor).
+        h1.complete(OutboundCompletion::Success);
+        let set = handle.set_limits(OutboundLimits {
+            global: vec![window(4, Duration::from_secs(60))],
+            chat: Vec::new(),
+        });
+        tokio::pin!(set);
+        let _ = futures::poll!(set.as_mut()); // команда отправлена, ответ не получен
+
+        let wait = tokio::time::timeout(Duration::from_secs(1), pending);
+        tokio::pin!(wait);
+        tokio::time::advance(Duration::from_secs(2)).await;
+        let permit = wait.await.unwrap().unwrap();
+        permit.complete(OutboundCompletion::Success);
+        tokio::time::timeout(Duration::from_secs(1), set).await.unwrap().unwrap();
+        h2.complete(OutboundCompletion::Success);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn drained_cancellation_wakes_a_parked_reservation_job() {
+        let queue = OutboundQueue::new_spawn(settings_with(
+            vec![window(10, Duration::from_secs(60))],
+            Vec::new(),
+        ))
+        .unwrap();
+        let handle = queue.handle();
+
+        // used = 9; heavy (weight 10) становится owner резервации окна,
+        // light (weight 1) паркуется за ней.
+        for _ in 0..9 {
+            let permit =
+                handle.acquire(global_metadata(OutboundPriority::NORMAL, 1)).await.unwrap();
+            permit.complete(OutboundCompletion::Success);
+        }
+        // Барьер: все завершения обработаны (иначе heavy был бы выдан как
+        // permit, а не стал бы блокированным owner резервации).
+        for _ in 0..100 {
+            tokio::task::yield_now().await;
+            let snapshot = handle.snapshot().await.unwrap();
+            if snapshot.in_flight == 0 {
+                break;
+            }
+        }
+        assert_eq!(handle.snapshot().await.unwrap().in_flight, 0);
+        let mut heavy = Box::pin(handle.acquire(global_metadata(OutboundPriority::NORMAL, 10)));
+        let light = handle.acquire(global_metadata(OutboundPriority::NORMAL, 1));
+        tokio::pin!(light);
+        tokio::task::yield_now().await;
+        assert!(futures::poll!(heavy.as_mut()).is_pending());
+        assert!(futures::poll!(light.as_mut()).is_pending());
+        for _ in 0..100 {
+            tokio::task::yield_now().await;
+            let snapshot = handle.snapshot().await.unwrap();
+            if snapshot.pending == 2 {
+                break;
+            }
+        }
+        assert_eq!(handle.snapshot().await.unwrap().pending, 2);
+
+        // Синхронная пара: no-op penalize уходит в `select!`, cancel
+        // владельца резервации (drop acquire-будущего) — в следующий
+        // lifecycle drain. Admission после drain обязан немедленно выдать
+        // parked light.
+        handle.penalize(OutboundScope::Global, Duration::ZERO);
+        drop(heavy);
+
+        let wait = tokio::time::timeout(Duration::from_secs(1), light);
+        tokio::pin!(wait);
+        tokio::time::advance(Duration::from_secs(2)).await;
+        let permit = wait.await.unwrap().unwrap();
         permit.complete(OutboundCompletion::Success);
     }
 
@@ -1336,7 +1580,7 @@ mod tests {
             weight: NonZeroU32::new(10).unwrap(),
             ..metadata(OutboundPriority::NORMAL)
         };
-        let holder = handle.acquire(heavy).await.unwrap();
+        let holder = handle.acquire(heavy.clone()).await.unwrap();
         let pending = handle.acquire(heavy);
         tokio::task::yield_now().await;
 

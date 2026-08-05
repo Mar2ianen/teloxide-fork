@@ -7,6 +7,7 @@
 
 use std::{
     num::NonZeroU32,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -41,24 +42,34 @@ impl OutboundPriority {
 }
 
 /// Where a request applies and which rate limits it consumes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum OutboundScope {
     Global,
     Chat(OutboundChatKey),
 }
 
-/// Chat identifier used for per-chat windows and penalties.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct OutboundChatKey(u64);
+/// Chat identity used for per-chat windows and penalties.
+///
+/// Numeric chats keep their raw signed `ChatId`; channel usernames are
+/// stored **as text** (canonical lower-case form without the leading `@`),
+/// never as a hash: two different usernames can never collide into one
+/// scheduling identity, and the key stays readable in diagnostics.
+///
+/// A username and the numeric id of the same chat are intentionally
+/// separate identities and are accounted independently (spec §11.2).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum OutboundChatKey {
+    /// A numeric chat identifier (the original signed `ChatId`).
+    Id(i64),
+    /// A channel username addressed by `Recipient::ChannelUsername`,
+    /// canonicalized to lower case without the leading `@`.
+    Username(Arc<str>),
+}
 
 impl OutboundChatKey {
-    pub const fn new(value: u64) -> Self {
-        Self(value)
-    }
-
-    pub const fn get(self) -> u64 {
-        self.0
+    pub const fn new(chat_id: i64) -> Self {
+        Self::Id(chat_id)
     }
 }
 
@@ -91,7 +102,7 @@ pub(crate) struct JobId(pub(crate) u64);
 /// Full request metadata known at enqueue time, including the ordering
 /// lane. Built by the actor from the caller's [`OutboundMetadata`] and the
 /// lane (if any) the acquire was issued through.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct OutboundMeta {
     pub(crate) scope: OutboundScope,
     pub(crate) lane: Option<OutboundLaneKey>,
@@ -101,7 +112,7 @@ pub(crate) struct OutboundMeta {
 }
 
 /// Caller-provided metadata of an acquire.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutboundMetadata {
     pub scope: OutboundScope,
     pub class: OutboundClass,
@@ -159,7 +170,7 @@ pub(crate) struct EnqueueOutcome {
 }
 
 /// Why an enqueue was rejected. The scheduler state is left unchanged.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum EnqueueError {
     /// The pending backlog is at capacity and this enqueue would grow it
     /// (a latest-wins replacement does not grow the backlog and is admitted
@@ -179,7 +190,7 @@ pub(crate) enum EnqueueError {
 
 /// Why a queue could not be constructed, or why a settings update was
 /// rejected. The settings are invalid.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SchedulerConfigError {
     /// A window with zero capacity can never admit any request.
@@ -213,7 +224,7 @@ pub(crate) struct Grant {
 /// This is the public completion contract of an
 /// [`crate::outbound::OutboundPermit`]; the actor converts the `RetryAfter`
 /// duration into an absolute penalty deadline.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum OutboundCompletion {
     Success,
@@ -276,8 +287,21 @@ pub struct OutboundSettings {
     pub aging: AgingPolicy,
 }
 
+impl Default for OutboundSettings {
+    /// Default settings: no rate windows, a 1024-job backlog and the
+    /// minimum aging configuration required by the anti-starvation
+    /// guarantee. Suitable for an immediately usable queue.
+    fn default() -> Self {
+        Self {
+            limits: OutboundLimits { global: Vec::new(), chat: Vec::new() },
+            queue_capacity: 1024,
+            aging: AgingPolicy { quantum: Duration::from_secs(1), max_boost: u8::MAX },
+        }
+    }
+}
+
 /// Actor-level errors.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum OutboundQueueError {
     /// The queue actor is shut down or dead; the operation was not
@@ -294,7 +318,7 @@ pub enum OutboundQueueError {
 }
 
 /// Errors of an acquire future.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum OutboundAcquireError {
     /// The queue actor is shut down or dead.
@@ -312,7 +336,7 @@ pub enum OutboundAcquireError {
 }
 
 /// Errors of [`OutboundQueueHandle::set_limits`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum OutboundSetLimitsError {
     /// The queue actor is shut down or dead; the update was not performed.
@@ -320,6 +344,27 @@ pub enum OutboundSetLimitsError {
     /// The limits are invalid; the previous limits stay in effect.
     Invalid(SchedulerConfigError),
 }
+
+impl std::fmt::Display for OutboundAcquireError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Closed => write!(f, "the outbound queue is shut down or dead"),
+            Self::QueueFull => write!(f, "the outbound queue backlog is at capacity"),
+            Self::WeightExceedsWindow { scope, weight, capacity } => write!(
+                f,
+                "request weight {weight} exceeds the capacity {capacity} of a window that applies \
+                 to {scope:?}"
+            ),
+            Self::IncompatibleCoalesceMetadata => write!(
+                f,
+                "a latest-wins acquire changed the accounting metadata of an existing slot"
+            ),
+            Self::Superseded => write!(f, "the pending job was replaced by a latest-wins acquire"),
+        }
+    }
+}
+
+impl std::error::Error for OutboundAcquireError {}
 
 impl From<OutboundQueueError> for OutboundAcquireError {
     fn from(error: OutboundQueueError) -> Self {

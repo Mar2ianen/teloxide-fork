@@ -1,4 +1,4 @@
-# Outbound scheduler — design note (Commits 1–2)
+# Outbound scheduler — design note (Commits 1–3)
 
 Deterministic outbound scheduling model in `crates/teloxide-core/src/outbound/`.
 
@@ -6,12 +6,19 @@ Deterministic outbound scheduling model in `crates/teloxide-core/src/outbound/`.
   actor. Time is passed as a parameter (`now: Instant`).
 - **Commit 2**: the Tokio actor (`OutboundActor`), the clone-friendly
   `OutboundQueue`/`OutboundQueueHandle`, `OutboundAcquire` (a future with
-  cancellation) and the completion-aware `OutboundPermit`. Public API:
-  `OutboundMetadata`, `OutboundPriority`, `OutboundScope`,
-  `OutboundCompletion`, `OutboundLimits`, `OutboundSettings`, `AgingPolicy`,
-  `OutboundQueueError`, `OutboundAcquireError`, `OutboundSnapshot`,
-  `SchedulerConfigError`. Draft quality: naming and shape are expected to be
-  refined during the architectural review of each commit.
+  cancellation) and the completion-aware `OutboundPermit`.
+- **Commit 3**: the `Outbound<R>` requester adaptor and `ScheduledRequest<R>`
+  — the vertical slice that wires real typed requests through the queue
+  without any automatic retry (see "Requester adaptor (Commit 3)" below).
+  Public API: `OutboundMetadata`, `OutboundPriority`, `OutboundScope`,
+  `OutboundCompletion`, `OutboundLimits`, `OutboundSettings` (with
+  `OutboundSettings::default()`), `AgingPolicy`, `OutboundQueueError`,
+  `OutboundAcquireError` (now `Display` + `std::error::Error`),
+  `OutboundSnapshot`, `SchedulerConfigError`, `Outbound`, `ScheduledRequest`,
+  `OutboundRequestError<E>`, `outbound::class`. Draft quality: naming and
+  shape are expected to be refined during the architectural review of each
+  commit. `OutboundScope`/`OutboundChatKey`/`OutboundMetadata` are
+  intentionally not `Copy` (the chat key stores the username as text).
 
 ## Scope
 
@@ -207,11 +214,14 @@ quadratic regressions.
 
 `OutboundQueue::new(settings)` returns the queue plus the actor future;
 `new_spawn` spawns it on the current runtime. The handle speaks command
-RPC (`Enqueue`, `Cancel`, `Complete`, `Penalize`, `GetLimits`, `SetLimits`,
-`GetSnapshot`, `Shutdown`) through an unbounded channel; the actor is the
-sole owner of the scheduler state. The actor clock derives `now` from the
-Tokio clock, so `#[tokio::test(start_paused = true)]` drives the scheduler
-deterministically.
+RPC: `Enqueue` goes through a **bounded** channel of capacity
+`OutboundSettings::queue_capacity` (fail-fast `QueueFull`), while lifecycle
+commands (`Cancel`, `Complete`, `Penalize`, `GetLimits`, `SetLimits`,
+`GetSnapshot`, `Shutdown`) ride a separate **unbounded** channel so that
+`Drop`-based completions can never await a bounded send and a saturated
+ingress cannot delay them. The actor is the sole owner of the scheduler
+state. The actor clock derives `now` from the Tokio clock, so
+`#[tokio::test(start_paused = true)]` drives the scheduler deterministically.
 
 ### Acquire lifecycle
 
@@ -229,9 +239,13 @@ deterministically.
   after the grant was already buffered in its channel — drops a live permit,
   which reports `CancelledAfterGrant`. A permit can never be lost: it either
   reaches the caller or completes the job itself.
-- The actor keeps a handle clone to mint permits; as a consequence it exits
-  only on an explicit shutdown or a contained panic (dropping the external
-  handles alone does not end the task).
+- The actor mints permits with its own **lifecycle** sender (never an
+  enqueue sender), so dropping the last external handle and any
+  outstanding acquire futures closes the enqueue ingress and the actor
+  ends by itself (pending waiters resolve with `OutboundAcquireError::Closed`;
+  permits already granted stay valid until dropped). `shutdown()` resolves
+  the waiters the same way and remains available for explicit
+  termination.
 - `OutboundPermit::complete(outcome)` reports the terminal outcome;
   `RetryAfter` carries an **explicit scope** and a duration (the actor
   converts it to an absolute penalty deadline). Dropping the permit without
@@ -293,8 +307,101 @@ not retroactively constrain grants that already expired under the old
 windows; shrinking a window may temporarily hold more history than its
 capacity (the debit is never refunded) until it expires.
 
+## Requester adaptor (Commit 3)
+
+`Outbound<R>` wraps any `Requester` and returns `ScheduledRequest<R::Method>`
+values from a small representative method set (`get_me`, `send_message`,
+`send_rich_message`, `edit_message_text`, `send_chat_action`). A
+`ScheduledRequest<Req>` is itself a `Request`: it holds the inner request,
+the queue and the `OutboundMetadata` policy, and its `Send` future runs
+the vertical slice:
+
+```text
+recompute the scope from the final payload (adaptor requests)
+  ->  acquire permit (lane or queue handle)
+  ->  ONLY NOW create and poll the inner request (send())
+  ->  classify the outcome
+        Ok(_)                   -> Success
+        Err(RetryAfter(secs))   -> RetryAfter { explicit scope, duration }
+        Err(_)                  -> Failed
+  ->  complete the permit with a completion barrier
+  ->  return the original outcome unchanged
+```
+
+Key restrictions of the slice:
+
+- **No automatic retry**: the queue records the penalty; retry policy stays
+  in the calling layer.
+- **The inner send future is created after the grant**: the request object
+  itself is built by the adaptor call (`inner.send_message(...)`), but its
+  `send()` future is created and polled only once the permit is held —
+  nothing about it (e.g. a timeout captured at construction) starts
+  before that. Dropping the scheduled request before the grant cancels
+  the pending job; dropping it while the inner send future runs releases
+  the permit as `CancelledAfterGrant` (the lane is freed, the next lane
+  job proceeds).
+- **The scope follows the payload actually sent**: the payload is publicly
+  mutable until `send` (teloxide's `send_ref` flow changes `chat_id` before
+  sending), so adaptor-created requests recompute the scope from the final
+  payload at send time via a per-payload scope function. Class, priority
+  and weight are policy fixed at construction; admission, rate windows and
+  `RetryAfter` penalties always follow the chat that actually receives
+  the request. Ordering lanes are an explicitly assigned policy
+  (`ScheduledRequest::on_lane`) and do not move with the payload.
+  Channel usernames are not collapsed into the global scope: `@name` is
+  stored **as text** in its own `OutboundChatKey::Username` (canonical
+  lower-case form without the leading `@`), so a `RetryAfter` from one
+  channel never blocks unrelated channels or numeric chats, and two
+  usernames can never collide into one scheduling identity. A username
+  and the numeric id of the same chat are intentionally separate
+  identities (spec §11.2).
+- **Completion barrier**: the adaptor completes the permit with
+  `OutboundPermit::complete_and_await`, which resolves only after the actor
+  applied the outcome. A `RetryAfter` penalty is therefore registered
+  before the scheduled future returns, and a subsequent acquire from the
+  same caller cannot overtake it (see the actor note below).
+- **`OutboundRequestError<E>`** is the generic error of a scheduled
+  request: `Acquire(OutboundAcquireError)` reports queue-level failures
+  (closed, full, superseded) where the inner request never ran, and
+  `Inner(E)` returns the original inner error untouched. The adaptor is
+  generic over `E: AsResponseParameters`, so custom requesters with their
+  own error types (not only `RequestError`) compose with the queue.
+- **`retry_after_scope`** is the single classifier that maps a
+  `RetryAfter` outcome to a penalty scope, receiving the request context
+  (metadata + error) instead of copying `metadata.scope` at the call site.
+  The current policy is explicit and temporary: the penalty follows the
+  request's own scope. Classification reads the `RetryAfter` duration
+  through `AsResponseParameters::retry_after` (the same trait the base
+  `Request` already requires from `Err`), so it works for any inner error
+  type. A future global-flood flag or a chat-to-global promotion policy
+  plugs in here without touching the execution path.
+- The `class` module holds draft request classes (`READ`, `MESSAGE_SEND`,
+  `MESSAGE_MUTATION`, `CHAT_ACTION`) that payload classification will refine
+  in a later commit.
+
+Actor note (Commit 2 refinement): causal ordering of completions is
+guaranteed by two mechanisms instead of a channel bias:
+
+1. **Bounded lifecycle drain**: before the fair `select!`, the actor drains
+   up to `LIFECYCLE_DRAIN_BATCH` (64) already-arrived lifecycle commands.
+   Both sends are synchronous, so a completion sent before a subsequent
+   acquire from the same caller is in its channel first and is applied by
+   the drain before the acquire is even considered.
+2. **Per-request completion barrier**: the adaptor uses
+   `OutboundPermit::complete_and_await`, which waits until the actor
+   applied the outcome. The scheduled future does not resolve before the
+   penalty is registered, so a caller that awaits the request result and
+   then acquires again is ordered deterministically.
+
+A strict `biased` select was rejected: the public handle exposes
+`penalize`/`snapshot`/`limits` with no admission, so an absolute lifecycle
+priority would let a busy lifecycle producer starve the enqueue ingress.
+The bounded drain keeps the causal ordering for same-caller sequences
+while the fair `select!` guarantees enqueue progress under any lifecycle
+load.
+
 ## Out of scope (later commits)
 
-`Requester` adapter, payload classification, `OrderedStart` lanes (Commit 2
-is serial-only), `Throttle` and `Drafter` migration, durable outbox,
-observability hooks.
+Payload classification for the full method set, `OrderedStart` lanes
+(Commit 2 is serial-only), `Bot::outbound`-style extension sugar,
+`Throttle` and `Drafter` migration, durable outbox, observability hooks.

@@ -1,8 +1,17 @@
-# Outbound scheduler — design note (Commit 1)
+# Outbound scheduler — design note (Commits 1–2)
 
 Deterministic outbound scheduling model in `crates/teloxide-core/src/outbound/`.
-Internal draft: no Tokio, no actor, no public API yet. Time is passed as a
-parameter (`now: Instant`); everything is a pure state machine.
+
+- **Commit 1**: the pure state machine (`SchedulerState`) — no Tokio, no
+  actor. Time is passed as a parameter (`now: Instant`).
+- **Commit 2**: the Tokio actor (`OutboundActor`), the clone-friendly
+  `OutboundQueue`/`OutboundQueueHandle`, `OutboundAcquire` (a future with
+  cancellation) and the completion-aware `OutboundPermit`. Public API:
+  `OutboundMetadata`, `OutboundPriority`, `OutboundScope`,
+  `OutboundCompletion`, `OutboundLimits`, `OutboundSettings`, `AgingPolicy`,
+  `OutboundQueueError`, `OutboundAcquireError`, `OutboundSnapshot`,
+  `SchedulerConfigError`. Draft quality: naming and shape are expected to be
+  refined during the architectural review of each commit.
 
 ## Scope
 
@@ -194,10 +203,98 @@ is linear in the number of ticks. The
 (50k jobs at capacity 1 over 50k ticks; 100k promoted jobs) guard against
 quadratic regressions.
 
-## Out of scope for Commit 1
+## Actor (Commit 2)
 
-Actor + `OutboundPermit` (with `Drop` -> `CancelledAfterGrant`), `QueueFull`,
-`Closed` and `Superseded` errors, shutdown with an explicit error, bounded
-backlog, settings updates, `Requester` adapter, payload classification,
-`OrderedStart` lanes (Commit 1 is serial-only), `Throttle` and `Drafter`
-migration — all later commits.
+`OutboundQueue::new(settings)` returns the queue plus the actor future;
+`new_spawn` spawns it on the current runtime. The handle speaks command
+RPC (`Enqueue`, `Cancel`, `Complete`, `Penalize`, `GetLimits`, `SetLimits`,
+`GetSnapshot`, `Shutdown`) through an unbounded channel; the actor is the
+sole owner of the scheduler state. The actor clock derives `now` from the
+Tokio clock, so `#[tokio::test(start_paused = true)]` drives the scheduler
+deterministically.
+
+### Acquire lifecycle
+
+- `acquire(metadata)` enqueues a FIFO request; `acquire_latest_wins(metadata,
+  user_key)` uses a latest-wins slot. `serial_lane()` allocates a strict FIFO
+  ordering lane (`OutboundLane`); at most one lane request is in flight and
+  the lane is served in enqueue order.
+- `OutboundAcquire` resolves with `OutboundPermit` or an error. The grant
+  receiver is owned by the future from the moment of creation (it is not
+  nested inside the enqueue reply), and the **permit is minted by the actor
+  at grant time and travels through the waiter channel**. The permit's own
+  `Drop` is therefore the universal safety net: dropping the acquire future
+  in any state — while the enqueue command is still in flight (the failed
+  enqueue reply cancels the pending job), while waiting for a grant, or
+  after the grant was already buffered in its channel — drops a live permit,
+  which reports `CancelledAfterGrant`. A permit can never be lost: it either
+  reaches the caller or completes the job itself.
+- The actor keeps a handle clone to mint permits; as a consequence it exits
+  only on an explicit shutdown or a contained panic (dropping the external
+  handles alone does not end the task).
+- `OutboundPermit::complete(outcome)` reports the terminal outcome;
+  `RetryAfter` carries an **explicit scope** and a duration (the actor
+  converts it to an absolute penalty deadline). Dropping the permit without
+  completion reports `CancelledAfterGrant` (best effort).
+
+### Backpressure and shutdown
+
+- The enqueue ingress is a **bounded channel** of capacity
+  `OutboundSettings::queue_capacity`: an acquire that cannot be admitted
+  fails fast with `OutboundQueueError::QueueFull` (`try_send`, the actor
+  never sees the command). Inside the scheduler the backlog is bounded the
+  same way — the check lives in `SchedulerState::enqueue`, so a latest-wins
+  replacement (which removes the superseded job and does not grow the
+  backlog) is admitted even at capacity, while a brand-new job at capacity
+  fails fast.
+- Lifecycle commands (cancel, complete, penalize, limits, snapshot,
+  shutdown) flow through a separate **unbounded** channel: `Drop`-based
+  completions are synchronous and can never await a bounded send, and a
+  saturated ingress must not delay them. The actor `select!`s both channels
+  fairly (tokio select semantics; no strict priority between them).
+- The actor mints permits with its own lifecycle sender, never an enqueue
+  sender: dropping the last external handle **and any outstanding acquire
+  futures** (each acquire holds a handle clone, i.e. an enqueue sender)
+  closes the ingress and the actor ends by itself (pending waiters resolve
+  with `OutboundAcquireError::Closed`; permits already granted stay valid
+  until dropped, their completions are best-effort). `shutdown()` resolves
+  the waiters the same way and is still available for explicit
+  termination. Panics inside the actor loop are contained: the task ends,
+  waiters resolve with `Closed`.
+
+### Wake-up
+
+After every command batch and every timer tick the actor runs one admission
+pass and resets its timer to `next_deadline`. `Immediate` (an invariant
+breach: `grant_ready` left an admissible candidate behind) maps to an
+immediate wake-up — a visible busy loop, not a silent year-long deadlock;
+`ExternalEvent` parks the timer until a command arrives.
+
+### `set_limits`
+
+Replaces the windows while **keeping the already debited grant history**: a
+grant is never refunded, so a same-value update must not enable a fresh
+burst — `set_limits` changes the limits, it does not reset the rate budget.
+Every pending job must still fit the new windows (otherwise the update is
+rejected as a whole with
+`SchedulerConfigError::PendingWeightExceedsWindow` and the previous limits
+stay in effect). Blocked and parked candidates are **re-armed**: their
+deadlines were derived from the old windows and must not delay candidates
+under the new limits. The actor is woken by the command, so newly admissible
+candidates are granted without waiting for a stale deadline. Invalid limits
+are reported as `OutboundSetLimitsError::Invalid(SchedulerConfigError)`.
+
+History carry-over follows an explicitly **prospective policy**: the old
+windows are pruned at the update instant (deterministically, independent of
+whether an admission happened to prune earlier), then the ledger is taken
+from the longest old window, which retains every event any not-longer new
+window could still cover. Lengthening a window beyond the old maximum does
+not retroactively constrain grants that already expired under the old
+windows; shrinking a window may temporarily hold more history than its
+capacity (the debit is never refunded) until it expires.
+
+## Out of scope (later commits)
+
+`Requester` adapter, payload classification, `OrderedStart` lanes (Commit 2
+is serial-only), `Throttle` and `Drafter` migration, durable outbox,
+observability hooks.

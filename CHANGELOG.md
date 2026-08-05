@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Optional `drafter` feature for asynchronous latest-wins preview/final delivery, shared rate limiting, segment lifecycle, cleanup policies and delivery certainty
+- Optional `rich-text` feature with one semantic Rich Text pipeline and explicit HTML, Developer Markdown, LLM Markdown and Standard Markdown frontends
+- Shared Rich Text bindings and render context for localized time, trusted link aliases and bound custom emoji, with common Telegram/fallback rendering
+- Parsed Rich Text APIs expose aliases, literal destinations and bare URL spans so applications can enforce URL provenance before delivery
+- `DispatcherBuilder::worker_error_handler` to handle abnormal worker infrastructure events observed during dispatch: contained handler panics, worker task deaths and undeliverable updates
 - `ParticipantIdInvalid` and `ChatAdminRequired` variants to `ApiError` ([#1349](https://github.com/teloxide/teloxide/issues/1349))
 - Support for TBA 10.0
   - Add request methods introduced in TBA 9.3 through 10.0, including live photos, message drafts, guest queries, managed bots, prepared keyboard buttons, chat gifts, profile photos, story reposting and reaction deletion
@@ -20,9 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Bound LLM time-marker scanning to local syntax and skip URI/code/link destinations without treating ordinary ISO dates as malformed markers
+- Keep raw-text URL scanning limited to explicit URI schemes, leaving ordinary dotted text such as versions and filenames unchanged
+- Reject semantic time, custom-emoji and nested-link nodes inside link labels that Telegram cannot represent safely
+- Preserve absolute source spans for nested frontend errors and escape readable fallback text for the selected frontend
+- Keep final delivery classification conservative for segment commits and clean temporary previews after confirmed final rejection
 - Make sure `postgres-storage-rustls` feature actually enables rustls-based postgres storage ([#1400](https://github.com/teloxide/teloxide/pull/1400))
 - Escape `@` mentions in `markdown::user_mention_or_link` ([#1411](https://github.com/teloxide/teloxide/pull/1411))
 - Add local TBA file downloading support in `crate::net::download` ([#1173](https://github.com/teloxide/teloxide/pull/1173))
+- Contain panics inside dispatcher workers and user-supplied dispatcher callbacks (handlers, the worker error policy, the update listener error handler and the distribution function) so that queued updates are not lost, respawn dead workers and retry the dispatch once, and report abnormal worker events through `DispatcherBuilder::worker_error_handler` instead of panicking
 
 - Added schema and rust types checking ([#1396](https://github.com/teloxide/teloxide/pull/1396)) [**BC**]
   - `delete_chat_photo` method now returns `True`, not `String`
@@ -43,6 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `time-rendering` remains a feature-level compatibility alias for `rich-text`; the former time-only formatter constructors and methods were replaced by the shared semantic API
+- Applications using the fork-specific layers should pin the full teloxide commit and refresh `Cargo.lock` before publishing
 - Some dependencies were bumped: `derive_more` to `2.0.1`, `deadpool-redis` to `0.22.0` ([#1408](https://github.com/teloxide/teloxide/pull/1408))
 
 ## 0.17.0 - 2025-07-11

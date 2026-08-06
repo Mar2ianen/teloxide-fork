@@ -2064,7 +2064,7 @@ mod tests {
         let a = fifo(
             &mut s,
             meta(
-                OutboundScope::Chat(OutboundChatKey::new(1)),
+                OutboundScope::Chat(OutboundChatKey::id(1)),
                 Some(OutboundLaneKey(1)),
                 OutboundPriority::NORMAL,
             ),
@@ -2073,7 +2073,7 @@ mod tests {
         let b = fifo(
             &mut s,
             meta(
-                OutboundScope::Chat(OutboundChatKey::new(2)),
+                OutboundScope::Chat(OutboundChatKey::id(2)),
                 Some(OutboundLaneKey(2)),
                 OutboundPriority::NORMAL,
             ),
@@ -2087,7 +2087,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::id(1));
         let a = fifo(&mut s, meta(chat.clone(), lane, OutboundPriority::NORMAL), t0);
         let b = fifo(&mut s, meta(chat.clone(), lane, OutboundPriority::NORMAL), t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
@@ -2108,7 +2108,7 @@ mod tests {
         let t0 = base();
         let a = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::id(1)), None, OutboundPriority::NORMAL),
             t0,
         );
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
@@ -2116,7 +2116,7 @@ mod tests {
         // chat 2's window is free, but the global window is exhausted
         let b = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey::new(2)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::id(2)), None, OutboundPriority::NORMAL),
             t0,
         );
         assert!(s.grant_ready(t0).is_empty());
@@ -2125,7 +2125,7 @@ mod tests {
         let t1 = t0 + Duration::from_millis(501);
         let c = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::id(1)), None, OutboundPriority::NORMAL),
             t1,
         );
         assert_eq!(jobs(&s.grant_ready(t1)), vec![b]);
@@ -2162,7 +2162,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::id(1));
         let a = fifo(&mut s, meta(chat.clone(), lane, OutboundPriority::NORMAL), t0);
         let b = fifo(&mut s, meta(chat.clone(), lane, OutboundPriority::NORMAL), t0);
         s.cancel(a, t0);
@@ -2231,7 +2231,7 @@ mod tests {
     fn penalty_extension_keeps_the_later_deadline() {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
-        let scope = OutboundScope::Chat(OutboundChatKey::new(1));
+        let scope = OutboundScope::Chat(OutboundChatKey::id(1));
         s.penalize(scope.clone(), t0 + Duration::from_secs(5));
         s.penalize(scope.clone(), t0 + Duration::from_secs(3)); // shorter: ignored
         let a = fifo(&mut s, meta(scope.clone(), None, OutboundPriority::CRITICAL), t0);
@@ -2247,15 +2247,15 @@ mod tests {
         let t0 = base();
         let _a = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::id(1)), None, OutboundPriority::NORMAL),
             t0,
         );
         let b = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey::new(2)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::id(2)), None, OutboundPriority::NORMAL),
             t0,
         );
-        s.penalize(OutboundScope::Chat(OutboundChatKey::new(1)), t0 + Duration::from_secs(60));
+        s.penalize(OutboundScope::Chat(OutboundChatKey::id(1)), t0 + Duration::from_secs(60));
         // the penalized chat 1 job must not block the same-priority chat 2 job
         assert_eq!(jobs(&s.grant_ready(t0)), vec![b]);
     }
@@ -2272,13 +2272,13 @@ mod tests {
         let t0 = base();
         let a = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::id(1)), None, OutboundPriority::NORMAL),
             t0,
         );
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]); // chat 1 window exhausted
         let b = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey::new(2)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::id(2)), None, OutboundPriority::NORMAL),
             t0,
         );
         assert_eq!(jobs(&s.grant_ready(t0)), vec![b]); // chat 2 unaffected
@@ -2290,15 +2290,15 @@ mod tests {
         let t0 = base();
         let _a = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::CRITICAL),
+            meta(OutboundScope::Chat(OutboundChatKey::id(1)), None, OutboundPriority::CRITICAL),
             t0,
         );
         let b = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey::new(2)), None, OutboundPriority::BACKGROUND),
+            meta(OutboundScope::Chat(OutboundChatKey::id(2)), None, OutboundPriority::BACKGROUND),
             t0,
         );
-        s.penalize(OutboundScope::Chat(OutboundChatKey::new(1)), t0 + Duration::from_secs(60));
+        s.penalize(OutboundScope::Chat(OutboundChatKey::id(1)), t0 + Duration::from_secs(60));
         assert_eq!(jobs(&s.grant_ready(t0)), vec![b]);
         assert!(s.grant_ready(t0).is_empty());
     }
@@ -2308,7 +2308,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::id(1));
         let a = fifo(&mut s, meta(chat.clone(), lane, OutboundPriority::NORMAL), t0);
         let b = fifo(&mut s, meta(chat.clone(), lane, OutboundPriority::CRITICAL), t0);
         // the lane is strictly FIFO: the critical job cannot overtake
@@ -2322,7 +2322,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::id(1));
         let not_before = t0 + Duration::from_secs(5);
         let a = s
             .enqueue(
@@ -2347,7 +2347,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::id(1));
         let a = fifo(&mut s, meta(chat.clone(), lane, OutboundPriority::NORMAL), t0);
         let b = fifo(&mut s, meta(chat.clone(), lane, OutboundPriority::NORMAL), t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
@@ -2372,7 +2372,7 @@ mod tests {
         let mut s = scheduler(limits(2), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let scope = OutboundScope::Chat(OutboundChatKey::new(1));
+        let scope = OutboundScope::Chat(OutboundChatKey::id(1));
         let a = fifo(&mut s, meta(scope.clone(), lane, OutboundPriority::NORMAL), t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
 
@@ -2390,7 +2390,7 @@ mod tests {
     fn retry_after_completion_penalizes_the_reported_scope() {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
-        let chat = OutboundChatKey::new(1);
+        let chat = OutboundChatKey::id(1);
         let a = fifo(
             &mut s,
             meta(OutboundScope::Chat(chat.clone()), None, OutboundPriority::NORMAL),
@@ -2420,7 +2420,7 @@ mod tests {
         let t0 = base();
         let a = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::id(1)), None, OutboundPriority::NORMAL),
             t0,
         );
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
@@ -2436,7 +2436,7 @@ mod tests {
         // the global penalty blocks every scope
         let b = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey::new(2)), None, OutboundPriority::CRITICAL),
+            meta(OutboundScope::Chat(OutboundChatKey::id(2)), None, OutboundPriority::CRITICAL),
             t0,
         );
         assert!(s.grant_ready(t0 + Duration::from_secs(4)).is_empty());
@@ -2481,7 +2481,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let scope = OutboundScope::Chat(OutboundChatKey::new(1));
+        let scope = OutboundScope::Chat(OutboundChatKey::id(1));
         let old = replace(&mut s, meta(scope.clone(), lane, OutboundPriority::NORMAL), 1, t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![old.job]);
 
@@ -2500,7 +2500,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let scope = OutboundScope::Chat(OutboundChatKey::new(1));
+        let scope = OutboundScope::Chat(OutboundChatKey::id(1));
         let old = replace(&mut s, meta(scope.clone(), lane, OutboundPriority::NORMAL), 1, t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![old.job]);
 
@@ -2532,7 +2532,7 @@ mod tests {
     fn replacement_keeps_the_penalty_scope() {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
-        let scope = OutboundScope::Chat(OutboundChatKey::new(1));
+        let scope = OutboundScope::Chat(OutboundChatKey::id(1));
         let a = replace(&mut s, meta(scope.clone(), None, OutboundPriority::NORMAL), 1, t0);
         s.penalize(scope.clone(), t0 + Duration::from_secs(60));
         let outcome = replace(&mut s, meta(scope.clone(), None, OutboundPriority::NORMAL), 1, t0);
@@ -2583,8 +2583,8 @@ mod tests {
     fn replacement_does_not_break_fifo_of_other_lanes() {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
-        let scope_a = OutboundScope::Chat(OutboundChatKey::new(1));
-        let scope_b = OutboundScope::Chat(OutboundChatKey::new(2));
+        let scope_a = OutboundScope::Chat(OutboundChatKey::id(1));
+        let scope_b = OutboundScope::Chat(OutboundChatKey::id(2));
         let a1 = replace(
             &mut s,
             meta(scope_a.clone(), Some(OutboundLaneKey(1)), OutboundPriority::NORMAL),
@@ -2621,14 +2621,14 @@ mod tests {
         let t0 = base();
         let a = replace(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::id(1)), None, OutboundPriority::NORMAL),
             7,
             t0,
         );
         // the same user key with a different scope is a different slot
         let b = replace(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey::new(2)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::id(2)), None, OutboundPriority::NORMAL),
             7,
             t0,
         );
@@ -2638,7 +2638,7 @@ mod tests {
         let c = replace(
             &mut s,
             meta_with_class(
-                OutboundScope::Chat(OutboundChatKey::new(1)),
+                OutboundScope::Chat(OutboundChatKey::id(1)),
                 None,
                 OutboundPriority::NORMAL,
                 9,
@@ -2772,11 +2772,11 @@ mod tests {
         let t0 = base();
         let a = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::id(1)), None, OutboundPriority::NORMAL),
             t0,
         );
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
-        assert!(s.chat_window_sets.contains_key(&OutboundChatKey::new(1)));
+        assert!(s.chat_window_sets.contains_key(&OutboundChatKey::id(1)));
         // after the window expires, the idle set is pruned
         s.grant_ready(t0 + Duration::from_secs(2));
         assert!(s.chat_window_sets.is_empty());
@@ -2794,13 +2794,13 @@ mod tests {
         let t0 = base();
         let a = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::id(1)), None, OutboundPriority::NORMAL),
             t0,
         );
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]); // chat 1 window exhausted
         let _b = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::id(1)), None, OutboundPriority::NORMAL),
             t0,
         );
         assert!(s.grant_ready(t0).is_empty());
@@ -2891,7 +2891,7 @@ mod tests {
         let t0 = base();
         let a = fifo(
             &mut s,
-            meta(OutboundScope::Chat(OutboundChatKey::new(1)), None, OutboundPriority::NORMAL),
+            meta(OutboundScope::Chat(OutboundChatKey::id(1)), None, OutboundPriority::NORMAL),
             t0,
         );
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
@@ -2960,7 +2960,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let scope = OutboundScope::Chat(OutboundChatKey::new(1));
+        let scope = OutboundScope::Chat(OutboundChatKey::id(1));
         let old_outcome = s
             .enqueue(
                 meta(scope.clone(), lane, OutboundPriority::NORMAL),
@@ -3021,7 +3021,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = OutboundLaneKey(1);
-        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::id(1));
         // make the lane's own order counter wrap around
         s.lanes.insert(
             lane,
@@ -3052,7 +3052,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = OutboundLaneKey(1);
-        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::id(1));
         let head = fifo(&mut s, meta(chat.clone(), Some(lane), OutboundPriority::NORMAL), t0);
         // churn behind the head: superseded records stay as stale entries
         let mut live = None;
@@ -3085,7 +3085,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = OutboundLaneKey(1);
-        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::id(1));
         let a = fifo(&mut s, meta(chat.clone(), Some(lane), OutboundPriority::NORMAL), t0);
         s.cancel(a, t0);
         assert!(s.lanes.contains_key(&lane));
@@ -3146,7 +3146,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::id(1));
         // a live delayed lane head blocks the lane and the compaction
         let _head = s
             .enqueue(
@@ -3432,8 +3432,8 @@ mod tests {
         let mut s = scheduler(limits(1), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat1 = OutboundScope::Chat(OutboundChatKey::new(1));
-        let chat2 = OutboundScope::Chat(OutboundChatKey::new(2));
+        let chat1 = OutboundScope::Chat(OutboundChatKey::id(1));
+        let chat2 = OutboundScope::Chat(OutboundChatKey::id(2));
         // a chat-1 job fills both windows
         let a = fifo(&mut s, meta(chat1.clone(), None, OutboundPriority::NORMAL), t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
@@ -3456,7 +3456,7 @@ mod tests {
     fn replacing_a_queued_lane_head_rekeys_the_candidate() {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
-        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::id(1));
         // a critical lane head is queued, then replaced by a low-priority
         // job while it is already in the candidate heap
         let old = s
@@ -3494,7 +3494,7 @@ mod tests {
     fn repeatedly_replacing_a_queued_lane_head_rekeys_the_candidate() {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
-        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::id(1));
         // CRITICAL -> LOWEST -> CRITICAL replacements of the queued head
         let a = s
             .enqueue(
@@ -3559,7 +3559,7 @@ mod tests {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::id(1));
         // a live unlaned job holds sequence 0
         let live = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
         // two lane jobs; the head is cancelled and stays as a stale entry
@@ -3624,7 +3624,7 @@ mod tests {
             aging(),
         );
         let t0 = base();
-        let chat1 = OutboundScope::Chat(OutboundChatKey::new(1));
+        let chat1 = OutboundScope::Chat(OutboundChatKey::id(1));
         let a = fifo(&mut s, meta(chat1.clone(), None, OutboundPriority::NORMAL), t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
         // a global job is blocked by the global window: the global hold
@@ -3649,7 +3649,7 @@ mod tests {
         let t1 = t0 + Duration::from_secs(1);
         assert_eq!(jobs(&s.grant_ready(t1)), vec![g]);
         assert_eq!(
-            s.reservations.get(&WindowRef::Chat(OutboundChatKey::new(1))).map(|r| r.queue.len()),
+            s.reservations.get(&WindowRef::Chat(OutboundChatKey::id(1))).map(|r| r.queue.len()),
             Some(1),
             "the candidate must join the active chat hold"
         );
@@ -3666,7 +3666,7 @@ mod tests {
         let mut s = scheduler(limits(1), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::id(1));
         // Заполнить окно, чтобы голова lane была заблокирована.
         let a = fifo(&mut s, meta(chat.clone(), None, OutboundPriority::NORMAL), t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
@@ -3696,7 +3696,7 @@ mod tests {
         }
         s.grant_ready(t0); // used = 9
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::id(1));
         let heavy = OutboundMeta {
             weight: NonZeroU32::new(10).unwrap(),
             ..meta(chat.clone(), lane, OutboundPriority::NORMAL)
@@ -3716,7 +3716,7 @@ mod tests {
         let mut s = scheduler(limits(1), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::id(1));
         let a = fifo(&mut s, meta(chat.clone(), None, OutboundPriority::NORMAL), t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
         let b = fifo(&mut s, meta(chat.clone(), lane, OutboundPriority::NORMAL), t0);
@@ -3738,7 +3738,7 @@ mod tests {
         }
         s.grant_ready(t0); // used = 9
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::id(1));
         let heavy = OutboundMeta {
             weight: NonZeroU32::new(10).unwrap(),
             ..meta(chat.clone(), lane, OutboundPriority::NORMAL)
@@ -3764,7 +3764,7 @@ mod tests {
         let mut s = scheduler(limits(1), aging());
         let t0 = base();
         let lane = Some(OutboundLaneKey(1));
-        let chat = OutboundScope::Chat(OutboundChatKey::new(1));
+        let chat = OutboundScope::Chat(OutboundChatKey::id(1));
         let a = fifo(&mut s, meta(chat.clone(), None, OutboundPriority::NORMAL), t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]); // окно full
         let b = fifo(&mut s, meta(chat.clone(), lane, OutboundPriority::NORMAL), t0);

@@ -58,8 +58,17 @@ pub enum OutboundScope {
 ///
 /// A username and the numeric id of the same chat are intentionally
 /// separate identities and are accounted independently (spec §11.2).
+///
+/// The representation is closed: identity is only created through
+/// [`OutboundChatKey::id`] and [`OutboundChatKey::username`], and the
+/// username constructor canonicalizes, so `@Foo`, `foo` and `@FOO` always
+/// produce the same key — the invariant cannot be bypassed through a
+/// public API.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum OutboundChatKey {
+pub struct OutboundChatKey(OutboundChatKeyInner);
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum OutboundChatKeyInner {
     /// A numeric chat identifier (the original signed `ChatId`).
     Id(i64),
     /// A channel username addressed by `Recipient::ChannelUsername`,
@@ -68,8 +77,18 @@ pub enum OutboundChatKey {
 }
 
 impl OutboundChatKey {
-    pub const fn new(chat_id: i64) -> Self {
-        Self::Id(chat_id)
+    /// A numeric chat identity (the original signed `ChatId`).
+    pub const fn id(chat_id: i64) -> Self {
+        Self(OutboundChatKeyInner::Id(chat_id))
+    }
+
+    /// A channel-username identity. The username is canonicalized (single
+    /// optional leading `@` stripped, ASCII lower-cased), so every
+    /// spelling of the same Telegram channel maps to the same key.
+    pub fn username(username: impl AsRef<str>) -> Self {
+        Self(OutboundChatKeyInner::Username(Arc::from(
+            crate::outbound::classify::canonical_username(username.as_ref()),
+        )))
     }
 }
 
@@ -111,6 +130,30 @@ pub(crate) struct OutboundMeta {
     pub(crate) weight: NonZeroU32,
 }
 
+/// Classification of a payload for outbound scheduling.
+///
+/// Implemented for every Bot API payload (generated from the schema). The
+/// adaptor computes the hint from the FINAL payload at send time, so
+/// setter calls and payload mutations are always reflected in admission,
+/// ordering lanes and `RetryAfter` penalties.
+pub trait OutboundPayload {
+    /// Classifies the payload as it is about to be sent.
+    fn outbound_hint(&self) -> OutboundHint;
+}
+
+/// What a payload says about itself to the scheduler.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutboundHint {
+    /// The chat (or user) identity the request applies to.
+    pub scope: OutboundScope,
+    /// Draft request class (message send, mutation, chat action, ...).
+    pub class: OutboundClass,
+    /// Base priority; callers may override it per request.
+    pub priority: OutboundPriority,
+    /// Accounting weight in window capacity units.
+    pub weight: NonZeroU32,
+}
+
 /// Caller-provided metadata of an acquire.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutboundMetadata {
@@ -122,6 +165,25 @@ pub struct OutboundMetadata {
     /// scope, otherwise the acquire fails with
     /// [`OutboundQueueError::WeightExceedsWindow`].
     pub weight: NonZeroU32,
+}
+
+/// Per-request scheduling overrides applied on top of the payload
+/// classification.
+///
+/// [`OutboundPayload::outbound_hint`] decides the base classification of a
+/// payload; a caller that needs different scheduling for the same payload
+/// (a Drafter preview vs a final commit, an interactive retry, ...)
+/// overrides priority/weight/class here. Scope is deliberately NOT
+/// overridable: it is tied to the actual payload target and must never
+/// drift from what is sent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OutboundOverrides {
+    /// Overrides [`OutboundHint::priority`].
+    pub priority: Option<OutboundPriority>,
+    /// Overrides [`OutboundHint::weight`].
+    pub weight: Option<NonZeroU32>,
+    /// Overrides [`OutboundHint::class`].
+    pub class: Option<OutboundClass>,
 }
 
 /// Stable user-provided correlation id carried by an acquire.

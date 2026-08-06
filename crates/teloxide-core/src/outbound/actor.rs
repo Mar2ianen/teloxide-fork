@@ -783,7 +783,7 @@ mod tests {
 
     fn chat_metadata(chat: i64, priority: OutboundPriority) -> OutboundMetadata {
         OutboundMetadata {
-            scope: OutboundScope::Chat(OutboundChatKey::new(chat)),
+            scope: OutboundScope::Chat(OutboundChatKey::id(chat)),
             class: OutboundClass::new(0),
             priority,
             weight: NonZeroU32::new(1).unwrap(),
@@ -875,7 +875,7 @@ mod tests {
         // Chat 1 consumes its window and then reports a chat-scoped penalty.
         let permit = handle.acquire(chat_metadata(1, OutboundPriority::NORMAL)).await.unwrap();
         permit.complete(OutboundCompletion::RetryAfter {
-            scope: OutboundScope::Chat(OutboundChatKey::new(1)),
+            scope: OutboundScope::Chat(OutboundChatKey::id(1)),
             duration: Duration::from_secs(60),
         });
 

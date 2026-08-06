@@ -12,6 +12,7 @@
 
 mod actor;
 mod adaptor;
+pub(crate) mod classify;
 mod scheduler;
 mod types;
 
@@ -21,7 +22,7 @@ pub use actor::{
 pub use adaptor::{class, Outbound, OutboundRequestError, ScheduledRequest};
 pub use types::{
     AgingPolicy, OutboundAcquireError, OutboundChatKey, OutboundClass, OutboundCompletion,
-    OutboundCorrelationId, OutboundLimits, OutboundMetadata, OutboundPriority, OutboundQueueError,
-    OutboundScope, OutboundSetLimitsError, OutboundSettings, OutboundSnapshot,
-    SchedulerConfigError, WindowLimit,
+    OutboundCorrelationId, OutboundHint, OutboundLimits, OutboundMetadata, OutboundOverrides,
+    OutboundPayload, OutboundPriority, OutboundQueueError, OutboundScope, OutboundSetLimitsError,
+    OutboundSettings, OutboundSnapshot, SchedulerConfigError, WindowLimit,
 };

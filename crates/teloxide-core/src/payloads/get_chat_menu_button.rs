@@ -14,3 +14,17 @@ impl_payload! {
         }
     }
 }
+
+impl crate::outbound::OutboundPayload for GetChatMenuButton {
+    fn outbound_hint(&self) -> crate::outbound::OutboundHint {
+        crate::outbound::OutboundHint {
+            scope: match self.chat_id {
+                Some(chat_id) => crate::outbound::classify::chat_id_scope(chat_id),
+                None => crate::outbound::OutboundScope::Global,
+            },
+            class: crate::outbound::OutboundClass::new(crate::outbound::class::READ),
+            priority: crate::outbound::OutboundPriority::NORMAL,
+            weight: std::num::NonZeroU32::new(1).unwrap(),
+        }
+    }
+}

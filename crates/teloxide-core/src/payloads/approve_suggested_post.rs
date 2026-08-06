@@ -23,3 +23,14 @@ impl_payload! {
         }
     }
 }
+
+impl crate::outbound::OutboundPayload for ApproveSuggestedPost {
+    fn outbound_hint(&self) -> crate::outbound::OutboundHint {
+        crate::outbound::OutboundHint {
+            scope: crate::outbound::classify::chat_id_scope(self.chat_id),
+            class: crate::outbound::OutboundClass::new(crate::outbound::class::OTHER),
+            priority: crate::outbound::OutboundPriority::NORMAL,
+            weight: std::num::NonZeroU32::new(1).unwrap(),
+        }
+    }
+}

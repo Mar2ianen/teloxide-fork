@@ -40,7 +40,7 @@ use super::types::{
     AgingPolicy, EnqueueError, EnqueueOutcome, Grant, JobId, OutboundChatKey, OutboundClass,
     OutboundCompletion, OutboundEnqueueMode, OutboundLaneKey, OutboundLimits, OutboundMeta,
     OutboundPriority, OutboundScope, OutboundSnapshot, SchedulerConfigError, SchedulerWakeup,
-    WindowLimit,
+    WindowChatKind, WindowLimit,
 };
 
 /// A granted job whose permit is still in flight. The lane is released on
@@ -240,8 +240,15 @@ struct WindowSet {
 }
 
 impl WindowSet {
-    fn new(limits: &[WindowLimit]) -> Self {
-        Self { windows: limits.iter().copied().map(RollingWindow::new).collect() }
+    fn new(limits: &[WindowLimit], kind: WindowChatKind) -> Self {
+        Self {
+            windows: limits
+                .iter()
+                .filter(|limit| limit.kind == WindowChatKind::Any || limit.kind == kind)
+                .copied()
+                .map(RollingWindow::new)
+                .collect(),
+        }
     }
 
     fn can_consume(&mut self, now: Instant, weight: u32) -> bool {
@@ -448,6 +455,12 @@ impl SchedulerState {
                 return Err(SchedulerConfigError::ZeroWindowDuration);
             }
         }
+        // Global windows apply to every request regardless of its chat
+        // kind; a kind-specific global window would be silently filtered
+        // out for one kind, so it is a configuration error.
+        if limits.global.iter().any(|w| w.kind != WindowChatKind::Any) {
+            return Err(SchedulerConfigError::KindSpecificGlobalWindow);
+        }
         if aging.quantum.is_zero() {
             return Err(SchedulerConfigError::ZeroAgingQuantum);
         }
@@ -463,7 +476,7 @@ impl SchedulerState {
         }
         let global_limits = limits.global;
         let chat_limits = limits.chat;
-        let global_windows = WindowSet::new(&global_limits);
+        let global_windows = WindowSet::new(&global_limits, WindowChatKind::Any);
         Ok(Self {
             jobs: HashMap::new(),
             candidates: BinaryHeap::new(),
@@ -512,8 +525,14 @@ impl SchedulerState {
                 capacity: window.capacity,
             });
         }
-        if let OutboundScope::Chat(_) = meta.scope {
-            if let Some(window) = self.chat_limits.iter().find(|w| weight > w.capacity) {
+        if let OutboundScope::Chat(chat) = &meta.scope {
+            let kind = chat.window_chat_kind();
+            if let Some(window) = self
+                .chat_limits
+                .iter()
+                .filter(|w| w.kind == WindowChatKind::Any || w.kind == kind)
+                .find(|w| weight > w.capacity)
+            {
                 return Err(EnqueueError::WeightExceedsWindow {
                     scope: meta.scope,
                     weight: meta.weight,
@@ -1586,7 +1605,7 @@ impl SchedulerState {
             let windows = self
                 .chat_window_sets
                 .entry(chat.clone())
-                .or_insert_with(|| WindowSet::new(&self.chat_limits));
+                .or_insert_with(|| WindowSet::new(&self.chat_limits, chat.window_chat_kind()));
             if !windows.can_consume(now, weight) {
                 until = until.max(windows.earliest_for(now, weight).unwrap_or(now));
                 if reserve.is_none() {
@@ -1620,7 +1639,7 @@ impl SchedulerState {
         if let OutboundScope::Chat(chat) = &job.meta.scope {
             self.chat_window_sets
                 .entry(chat.clone())
-                .or_insert_with(|| WindowSet::new(&self.chat_limits))
+                .or_insert_with(|| WindowSet::new(&self.chat_limits, chat.window_chat_kind()))
                 .consume(now, job.meta.weight.get());
         }
         self.in_flight.insert(candidate.job, InFlight { lane: job.meta.lane });
@@ -1628,8 +1647,18 @@ impl SchedulerState {
 
     /// Finishes a granted job and releases its lane exactly once (a repeated
     /// completion is a no-op). A `RetryAfter` completion penalizes the
-    /// reported scope until the reported instant.
-    pub(crate) fn complete(&mut self, job: JobId, completion: OutboundCompletion, now: Instant) {
+    /// reported scope until `penalty_observed_at + duration`: the deadline
+    /// is anchored at the moment the CALLER observed the error (the legacy
+    /// worker freezes until the absolute `until` computed at the error
+    /// site), so a completion processed late by the actor cannot extend a
+    /// freeze — a freeze whose deadline already passed is a no-op.
+    pub(crate) fn complete(
+        &mut self,
+        job: JobId,
+        completion: OutboundCompletion,
+        now: Instant,
+        penalty_observed_at: Instant,
+    ) {
         let Some(in_flight) = self.in_flight.remove(&job) else { return };
         if let Some(lane) = in_flight.lane {
             let has_pending = match self.lanes.get_mut(&lane) {
@@ -1648,7 +1677,7 @@ impl SchedulerState {
         }
         if let OutboundCompletion::RetryAfter { scope, duration } = completion {
             if !duration.is_zero() {
-                self.penalize(scope, now + duration);
+                self.penalize(scope, penalty_observed_at + duration);
             }
         }
     }
@@ -1695,6 +1724,12 @@ impl SchedulerState {
                 return Err(SchedulerConfigError::ZeroWindowDuration);
             }
         }
+        // Global windows apply to every request regardless of its chat
+        // kind (mirrors `SchedulerState::new`): a kind-specific global
+        // window would be silently filtered out for one kind.
+        if limits.global.iter().any(|window| window.kind != WindowChatKind::Any) {
+            return Err(SchedulerConfigError::KindSpecificGlobalWindow);
+        }
         // A pending job that does not fit any new window could never be
         // granted (weight > capacity): the admission pass would stall it
         // forever or trip the consume debug assertion. Reject the update
@@ -1708,8 +1743,14 @@ impl SchedulerState {
                     capacity: window.capacity,
                 });
             }
-            if let OutboundScope::Chat(_) = job.meta.scope {
-                if let Some(window) = limits.chat.iter().find(|w| weight > w.capacity) {
+            if let OutboundScope::Chat(chat) = &job.meta.scope {
+                let kind = chat.window_chat_kind();
+                if let Some(window) = limits
+                    .chat
+                    .iter()
+                    .filter(|w| w.kind == WindowChatKind::Any || w.kind == kind)
+                    .find(|w| weight > w.capacity)
+                {
                     return Err(SchedulerConfigError::PendingWeightExceedsWindow {
                         scope: job.meta.scope.clone(),
                         weight,
@@ -1747,7 +1788,7 @@ impl SchedulerState {
             })
             .collect();
         self.global_limits = limits.global;
-        self.global_windows = WindowSet::new(&self.global_limits);
+        self.global_windows = WindowSet::new(&self.global_limits, WindowChatKind::Any);
         for (at, weight) in global_events {
             self.global_windows.insert_at(now, at, weight);
         }
@@ -1757,7 +1798,7 @@ impl SchedulerState {
             if events.is_empty() {
                 continue;
             }
-            let mut set = WindowSet::new(&self.chat_limits);
+            let mut set = WindowSet::new(&self.chat_limits, chat.window_chat_kind());
             for (at, weight) in events {
                 set.insert_at(now, at, weight);
             }
@@ -2005,8 +2046,8 @@ mod tests {
 
     fn limits(capacity: u32) -> OutboundLimits {
         OutboundLimits {
-            global: vec![WindowLimit { capacity, window: Duration::from_secs(1) }],
-            chat: vec![WindowLimit { capacity, window: Duration::from_secs(1) }],
+            global: vec![WindowLimit::new(capacity, Duration::from_secs(1))],
+            chat: vec![WindowLimit::new(capacity, Duration::from_secs(1))],
         }
     }
 
@@ -2092,7 +2133,7 @@ mod tests {
         let b = fifo(&mut s, meta(chat.clone(), lane, OutboundPriority::NORMAL), t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
         assert!(s.grant_ready(t0).is_empty());
-        s.complete(a, OutboundCompletion::Success, t0);
+        s.complete(a, OutboundCompletion::Success, t0, t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![b]);
     }
 
@@ -2100,8 +2141,8 @@ mod tests {
     fn global_and_chat_windows_apply_together() {
         let mut s = scheduler(
             OutboundLimits {
-                global: vec![WindowLimit { capacity: 1, window: Duration::from_millis(500) }],
-                chat: vec![WindowLimit { capacity: 1, window: Duration::from_secs(10) }],
+                global: vec![WindowLimit::new(1, Duration::from_millis(500))],
+                chat: vec![WindowLimit::new(1, Duration::from_secs(10))],
             },
             aging(),
         );
@@ -2264,8 +2305,8 @@ mod tests {
     fn same_priority_chat_window_block_does_not_block_other_scopes() {
         let mut s = scheduler(
             OutboundLimits {
-                global: vec![WindowLimit { capacity: 100, window: Duration::from_secs(1) }],
-                chat: vec![WindowLimit { capacity: 1, window: Duration::from_secs(60) }],
+                global: vec![WindowLimit::new(100, Duration::from_secs(1))],
+                chat: vec![WindowLimit::new(1, Duration::from_secs(60))],
             },
             aging(),
         );
@@ -2282,6 +2323,65 @@ mod tests {
             t0,
         );
         assert_eq!(jobs(&s.grant_ready(t0)), vec![b]); // chat 2 unaffected
+    }
+
+    #[test]
+    fn kind_specific_chat_windows_apply_only_to_matching_chats() {
+        let mut s = scheduler(
+            OutboundLimits {
+                global: vec![WindowLimit::new(100, Duration::from_secs(1))],
+                chat: vec![
+                    WindowLimit::new(30, Duration::from_secs(1)),
+                    WindowLimit::for_chat_kind(
+                        20,
+                        Duration::from_secs(60),
+                        WindowChatKind::NonChannel,
+                    ),
+                    WindowLimit::for_chat_kind(
+                        10,
+                        Duration::from_secs(60),
+                        WindowChatKind::ChannelOrSupergroup,
+                    ),
+                ],
+            },
+            aging(),
+        );
+        let t0 = base();
+        let channel = OutboundScope::Chat(OutboundChatKey::id(-1001234567890));
+        let regular = OutboundScope::Chat(OutboundChatKey::id(123));
+
+        // 11 jobs to a channel: only 10 fit the 10/min window.
+        let mut channel_jobs = Vec::new();
+        for _ in 0..11 {
+            channel_jobs.push(fifo(
+                &mut s,
+                meta(channel.clone(), None, OutboundPriority::NORMAL),
+                t0,
+            ));
+        }
+        assert_eq!(jobs(&s.grant_ready(t0)), channel_jobs[..10].to_vec());
+        // The 11th is blocked until the first entry expires.
+        assert!(matches!(
+            s.next_deadline(t0),
+            SchedulerWakeup::At(at) if at == t0 + Duration::from_secs(60)
+        ));
+
+        // The same 11 jobs to a regular chat all fit the 20/min window.
+        let mut regular_jobs = Vec::new();
+        for _ in 0..11 {
+            regular_jobs.push(fifo(
+                &mut s,
+                meta(regular.clone(), None, OutboundPriority::NORMAL),
+                t0,
+            ));
+        }
+        assert_eq!(jobs(&s.grant_ready(t0)), regular_jobs);
+
+        // The regular chat's window set must NOT contain the channel's
+        // 10/min window: a 12th regular job (11 already granted) still
+        // fits the 20/min window and is granted immediately.
+        let extra = fifo(&mut s, meta(regular, None, OutboundPriority::NORMAL), t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![extra]);
     }
 
     #[test]
@@ -2313,7 +2413,7 @@ mod tests {
         let b = fifo(&mut s, meta(chat.clone(), lane, OutboundPriority::CRITICAL), t0);
         // the lane is strictly FIFO: the critical job cannot overtake
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
-        s.complete(a, OutboundCompletion::Success, t0);
+        s.complete(a, OutboundCompletion::Success, t0, t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![b]);
     }
 
@@ -2338,7 +2438,7 @@ mod tests {
         // the delayed head blocks the lane regardless of the later priority
         assert!(s.grant_ready(t0).is_empty());
         assert_eq!(jobs(&s.grant_ready(not_before)), vec![a]);
-        s.complete(a, OutboundCompletion::Success, not_before);
+        s.complete(a, OutboundCompletion::Success, not_before, not_before);
         assert_eq!(jobs(&s.grant_ready(not_before)), vec![b]);
     }
 
@@ -2351,8 +2451,8 @@ mod tests {
         let a = fifo(&mut s, meta(chat.clone(), lane, OutboundPriority::NORMAL), t0);
         let b = fifo(&mut s, meta(chat.clone(), lane, OutboundPriority::NORMAL), t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
-        s.complete(a, OutboundCompletion::Success, t0);
-        s.complete(a, OutboundCompletion::Success, t0); // no-op
+        s.complete(a, OutboundCompletion::Success, t0, t0);
+        s.complete(a, OutboundCompletion::Success, t0, t0); // no-op
         assert_eq!(jobs(&s.grant_ready(t0)), vec![b]);
     }
 
@@ -2362,7 +2462,7 @@ mod tests {
         let t0 = base();
         let a = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
-        s.complete(a, OutboundCompletion::Failed, t0);
+        s.complete(a, OutboundCompletion::Failed, t0, t0);
         let _b = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
         assert!(s.grant_ready(t0).is_empty());
     }
@@ -2377,7 +2477,7 @@ mod tests {
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
 
         // the permit was dropped without an explicit completion
-        s.complete(a, OutboundCompletion::CancelledAfterGrant, t0);
+        s.complete(a, OutboundCompletion::CancelledAfterGrant, t0, t0);
 
         // the lane is released, but the window budget is not refunded
         let b = fifo(&mut s, meta(scope.clone(), lane, OutboundPriority::NORMAL), t0);
@@ -2403,6 +2503,7 @@ mod tests {
                 scope: OutboundScope::Chat(chat.clone()),
                 duration: Duration::from_secs(5),
             },
+            t0,
             t0,
         );
         let b = fifo(
@@ -2431,6 +2532,7 @@ mod tests {
                 scope: OutboundScope::Global,
                 duration: Duration::from_secs(5),
             },
+            t0,
             t0,
         );
         // the global penalty blocks every scope
@@ -2491,7 +2593,7 @@ mod tests {
         assert!(s.grant_ready(t0).is_empty()); // lane is locked
 
         // after the old completes, the latest pending runs
-        s.complete(old.job, OutboundCompletion::Success, t0);
+        s.complete(old.job, OutboundCompletion::Success, t0, t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![fresh.job]);
     }
 
@@ -2511,7 +2613,7 @@ mod tests {
         assert_eq!(b.superseded, Some(a.job));
         assert_eq!(c.superseded, Some(b.job));
 
-        s.complete(old.job, OutboundCompletion::Success, t0);
+        s.complete(old.job, OutboundCompletion::Success, t0, t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![c.job]);
     }
 
@@ -2786,8 +2888,8 @@ mod tests {
     fn next_deadline_does_not_return_now_for_a_blocked_candidate() {
         let mut s = scheduler(
             OutboundLimits {
-                global: vec![WindowLimit { capacity: 100, window: Duration::from_secs(1) }],
-                chat: vec![WindowLimit { capacity: 1, window: Duration::from_secs(10) }],
+                global: vec![WindowLimit::new(100, Duration::from_secs(1))],
+                chat: vec![WindowLimit::new(1, Duration::from_secs(10))],
             },
             aging(),
         );
@@ -2810,6 +2912,118 @@ mod tests {
             SchedulerWakeup::At(at) => assert_eq!(at, t0 + Duration::from_secs(10)),
             other => panic!("expected a future wake-up, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn set_limits_rejects_kind_specific_global_windows() {
+        let mut s = scheduler(limits(100), aging());
+        let t0 = base();
+        let bad = OutboundLimits {
+            global: vec![WindowLimit::for_chat_kind(
+                10,
+                Duration::from_secs(1),
+                WindowChatKind::ChannelOrSupergroup,
+            )],
+            chat: Vec::new(),
+        };
+        assert_eq!(s.set_limits(bad, t0), Err(SchedulerConfigError::KindSpecificGlobalWindow));
+        // The previous limits stay in effect.
+        assert_eq!(s.global_limits(), &[WindowLimit::new(100, Duration::from_secs(1))]);
+    }
+
+    #[test]
+    fn set_limits_pending_weight_validation_ignores_irrelevant_chat_kinds() {
+        let mut s = scheduler(
+            OutboundLimits {
+                global: vec![WindowLimit::new(100, Duration::from_secs(1))],
+                chat: vec![
+                    WindowLimit::new(30, Duration::from_secs(1)),
+                    WindowLimit::for_chat_kind(
+                        20,
+                        Duration::from_secs(60),
+                        WindowChatKind::NonChannel,
+                    ),
+                    WindowLimit::for_chat_kind(
+                        10,
+                        Duration::from_secs(60),
+                        WindowChatKind::ChannelOrSupergroup,
+                    ),
+                ],
+            },
+            aging(),
+        );
+        let t0 = base();
+        // A pending weight-12 job in a REGULAR chat: the new limits keep
+        // the NonChannel window at 20, so the update must be accepted even
+        // though the ChannelOrSupergroup window drops to 8 (it does not
+        // apply to this chat).
+        let heavy = OutboundMeta {
+            weight: NonZeroU32::new(12).unwrap(),
+            scope: OutboundScope::Chat(OutboundChatKey::id(123)),
+            ..global(OutboundPriority::NORMAL)
+        };
+        assert!(s.enqueue(heavy, OutboundEnqueueMode::Fifo, usize::MAX, None, t0).is_ok());
+        let ok = OutboundLimits {
+            global: vec![WindowLimit::new(100, Duration::from_secs(1))],
+            chat: vec![
+                WindowLimit::new(30, Duration::from_secs(1)),
+                WindowLimit::for_chat_kind(20, Duration::from_secs(60), WindowChatKind::NonChannel),
+                WindowLimit::for_chat_kind(
+                    8,
+                    Duration::from_secs(60),
+                    WindowChatKind::ChannelOrSupergroup,
+                ),
+            ],
+        };
+        assert!(s.set_limits(ok, t0).is_ok(), "irrelevant kind must not block the update");
+    }
+
+    #[test]
+    fn set_limits_pending_weight_validation_applies_to_the_matching_kind() {
+        let mut s = scheduler(
+            OutboundLimits {
+                global: vec![WindowLimit::new(100, Duration::from_secs(1))],
+                chat: vec![
+                    WindowLimit::new(30, Duration::from_secs(1)),
+                    WindowLimit::for_chat_kind(
+                        20,
+                        Duration::from_secs(60),
+                        WindowChatKind::NonChannel,
+                    ),
+                    WindowLimit::for_chat_kind(
+                        10,
+                        Duration::from_secs(60),
+                        WindowChatKind::ChannelOrSupergroup,
+                    ),
+                ],
+            },
+            aging(),
+        );
+        let t0 = base();
+        // A pending weight-9 job in a CHANNEL chat fits the current 10/min
+        // window but not a new ChannelOrSupergroup window of 8.
+        let heavy_channel = OutboundMeta {
+            weight: NonZeroU32::new(9).unwrap(),
+            scope: OutboundScope::Chat(OutboundChatKey::id(-1001234567890)),
+            ..global(OutboundPriority::NORMAL)
+        };
+        assert!(s.enqueue(heavy_channel, OutboundEnqueueMode::Fifo, usize::MAX, None, t0).is_ok());
+        let bad = OutboundLimits {
+            global: vec![WindowLimit::new(100, Duration::from_secs(1))],
+            chat: vec![
+                WindowLimit::new(30, Duration::from_secs(1)),
+                WindowLimit::for_chat_kind(20, Duration::from_secs(60), WindowChatKind::NonChannel),
+                WindowLimit::for_chat_kind(
+                    8,
+                    Duration::from_secs(60),
+                    WindowChatKind::ChannelOrSupergroup,
+                ),
+            ],
+        };
+        assert!(matches!(
+            s.set_limits(bad, t0),
+            Err(SchedulerConfigError::PendingWeightExceedsWindow { .. })
+        ));
     }
 
     #[test]
@@ -2853,7 +3067,7 @@ mod tests {
         assert!(matches!(
             SchedulerState::new(
                 OutboundLimits {
-                    global: vec![WindowLimit { capacity: 0, window: Duration::from_secs(1) }],
+                    global: vec![WindowLimit::new(0, Duration::from_secs(1))],
                     chat: vec![],
                 },
                 aging(),
@@ -2862,10 +3076,7 @@ mod tests {
         ));
         assert!(matches!(
             SchedulerState::new(
-                OutboundLimits {
-                    global: vec![WindowLimit { capacity: 1, window: Duration::ZERO }],
-                    chat: vec![],
-                },
+                OutboundLimits { global: vec![WindowLimit::new(1, Duration::ZERO)], chat: vec![] },
                 aging(),
             ),
             Err(SchedulerConfigError::ZeroWindowDuration)
@@ -2883,7 +3094,7 @@ mod tests {
     fn empty_chat_window_set_admits_everything() {
         let mut s = scheduler(
             OutboundLimits {
-                global: vec![WindowLimit { capacity: 1, window: Duration::from_secs(1) }],
+                global: vec![WindowLimit::new(1, Duration::from_secs(1))],
                 chat: vec![],
             },
             aging(),
@@ -2904,8 +3115,8 @@ mod tests {
         let mut s = scheduler(
             OutboundLimits {
                 global: vec![
-                    WindowLimit { capacity: 1, window: Duration::from_secs(1) },
-                    WindowLimit { capacity: 1, window: Duration::from_secs(5) },
+                    WindowLimit::new(1, Duration::from_secs(1)),
+                    WindowLimit::new(1, Duration::from_secs(5)),
                 ],
                 chat: vec![],
             },
@@ -2987,7 +3198,12 @@ mod tests {
         // the delayed lane head blocks the whole lane regardless of priority
         assert!(s.grant_ready(t0 + Duration::from_secs(10)).is_empty());
         assert_eq!(jobs(&s.grant_ready(t0 + Duration::from_secs(20))), vec![fresh]);
-        s.complete(fresh, OutboundCompletion::Success, t0 + Duration::from_secs(20));
+        s.complete(
+            fresh,
+            OutboundCompletion::Success,
+            t0 + Duration::from_secs(20),
+            t0 + Duration::from_secs(20),
+        );
         assert_eq!(jobs(&s.grant_ready(t0 + Duration::from_secs(20))), vec![later]);
     }
 
@@ -3041,9 +3257,9 @@ mod tests {
         let c = fifo(&mut s, meta(chat.clone(), Some(lane), OutboundPriority::NORMAL), t0);
         // the lane is strictly FIFO across the counter wraparound
         assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
-        s.complete(a, OutboundCompletion::Success, t0);
+        s.complete(a, OutboundCompletion::Success, t0, t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![b]);
-        s.complete(b, OutboundCompletion::Success, t0);
+        s.complete(b, OutboundCompletion::Success, t0, t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![c]);
     }
 
@@ -3074,9 +3290,9 @@ mod tests {
         let fresh = fifo(&mut s, meta(chat.clone(), Some(lane), OutboundPriority::NORMAL), t0);
         // the dense rebase keeps the FIFO order across the wrap
         assert_eq!(jobs(&s.grant_ready(t0)), vec![head]);
-        s.complete(head, OutboundCompletion::Success, t0);
+        s.complete(head, OutboundCompletion::Success, t0, t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![live.unwrap()]);
-        s.complete(live.unwrap(), OutboundCompletion::Success, t0);
+        s.complete(live.unwrap(), OutboundCompletion::Success, t0, t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![fresh]);
     }
 
@@ -3361,7 +3577,7 @@ mod tests {
     fn heavy_aged_job_is_not_starved_by_light_traffic() {
         let mut s = scheduler(
             OutboundLimits {
-                global: vec![WindowLimit { capacity: 10, window: Duration::from_secs(1) }],
+                global: vec![WindowLimit::new(10, Duration::from_secs(1))],
                 chat: vec![],
             },
             AgingPolicy { quantum: Duration::from_millis(1), max_boost: u8::MAX },
@@ -3407,7 +3623,7 @@ mod tests {
     fn gradual_drain_of_many_jobs_stays_linear() {
         let mut s = scheduler(
             OutboundLimits {
-                global: vec![WindowLimit { capacity: 1, window: Duration::from_millis(1) }],
+                global: vec![WindowLimit::new(1, Duration::from_millis(1))],
                 chat: vec![],
             },
             aging(),
@@ -3618,8 +3834,8 @@ mod tests {
     fn parked_candidates_join_an_active_reservation_not_an_expired_one() {
         let mut s = scheduler(
             OutboundLimits {
-                global: vec![WindowLimit { capacity: 1, window: Duration::from_secs(1) }],
-                chat: vec![WindowLimit { capacity: 1, window: Duration::from_secs(60) }],
+                global: vec![WindowLimit::new(1, Duration::from_secs(1))],
+                chat: vec![WindowLimit::new(1, Duration::from_secs(60))],
             },
             aging(),
         );

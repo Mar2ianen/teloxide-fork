@@ -24,5 +24,5 @@ pub use types::{
     AgingPolicy, OutboundAcquireError, OutboundChatKey, OutboundClass, OutboundCompletion,
     OutboundCorrelationId, OutboundHint, OutboundLimits, OutboundMetadata, OutboundOverrides,
     OutboundPayload, OutboundPriority, OutboundQueueError, OutboundScope, OutboundSetLimitsError,
-    OutboundSettings, OutboundSnapshot, SchedulerConfigError, WindowLimit,
+    OutboundSettings, OutboundSnapshot, SchedulerConfigError, WindowChatKind, WindowLimit,
 };

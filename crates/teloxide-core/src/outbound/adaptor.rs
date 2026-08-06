@@ -409,9 +409,9 @@ fn effective_metadata(hint: OutboundHint, overrides: OutboundOverrides) -> Outbo
 
 /// Classifies the penalty scope of a `RetryAfter` outcome.
 ///
-/// This is the single place where the scope decision lives: it receives the
-/// request context (metadata plus the actual error) instead of copying
-/// `metadata.scope` at the call site.
+/// This is the single place where the default scope decision lives: it
+/// receives the request context (metadata plus the actual error) instead
+/// of copying `metadata.scope` at the call site.
 ///
 /// The current policy is explicit and temporary: the penalty follows the
 /// request's own scope (`metadata.scope`). A future policy that promotes
@@ -1643,7 +1643,7 @@ mod tests {
     }
 
     fn window(capacity: u32, window: Duration) -> WindowLimit {
-        WindowLimit { capacity, window }
+        WindowLimit::new(capacity, window)
     }
 
     fn chat_metadata(chat: i64) -> OutboundMetadata {

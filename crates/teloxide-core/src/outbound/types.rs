@@ -90,6 +90,21 @@ impl OutboundChatKey {
             crate::outbound::classify::canonical_username(username.as_ref()),
         )))
     }
+
+    /// The Telegram chat kind of this identity: channel usernames are
+    /// always channels, numeric ids follow
+    /// [`ChatId::is_channel_or_supergroup`].
+    pub(crate) fn window_chat_kind(&self) -> WindowChatKind {
+        match &self.0 {
+            OutboundChatKeyInner::Id(id)
+                if crate::types::ChatId(*id).is_channel_or_supergroup() =>
+            {
+                WindowChatKind::ChannelOrSupergroup
+            }
+            OutboundChatKeyInner::Id(_) => WindowChatKind::NonChannel,
+            OutboundChatKeyInner::Username(_) => WindowChatKind::ChannelOrSupergroup,
+        }
+    }
 }
 
 /// Draft ordering-lane identifier: at most one in-flight request per lane,
@@ -273,6 +288,9 @@ pub enum SchedulerConfigError {
     /// update is rejected as a whole and the previous limits stay in
     /// effect.
     PendingWeightExceedsWindow { scope: OutboundScope, weight: u32, capacity: u32 },
+    /// A global window with a chat-kind filter would be silently skipped
+    /// for one kind of chats; global windows must apply to every chat.
+    KindSpecificGlobalWindow,
 }
 
 /// One granted job handed to the caller.
@@ -320,11 +338,43 @@ pub struct AgingPolicy {
     pub max_boost: u8,
 }
 
+/// Which chat identities a [`WindowLimit`] applies to.
+///
+/// The legacy `Throttle` distinguishes channels/supergroups from other
+/// chats (`messages_per_min_channel_or_supergroup` vs
+/// `messages_per_min_chat`); a window with a specific kind is only
+/// enforced for chats of that kind, while [`WindowChatKind::Any`] applies
+/// everywhere.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowChatKind {
+    /// Every chat identity (the default).
+    Any,
+    /// Only channels and supergroups: numeric `-100…` ids and channel
+    /// usernames.
+    ChannelOrSupergroup,
+    /// Only non-channel chats: users, basic groups and private chats.
+    NonChannel,
+}
+
 /// Sliding-window rate limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowLimit {
     pub capacity: u32,
     pub window: Duration,
+    /// Which chats this window applies to.
+    pub kind: WindowChatKind,
+}
+
+impl WindowLimit {
+    /// A window applying to every chat.
+    pub const fn new(capacity: u32, window: Duration) -> Self {
+        Self { capacity, window, kind: WindowChatKind::Any }
+    }
+
+    /// A window applying only to chats of `kind`.
+    pub const fn for_chat_kind(capacity: u32, window: Duration, kind: WindowChatKind) -> Self {
+        Self { capacity, window, kind }
+    }
 }
 
 /// Global and per-chat window limits. Each entry is one window of a

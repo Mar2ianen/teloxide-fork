@@ -1,8 +1,10 @@
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
     pin::pin,
-    time::{Duration, Instant},
+    time::Duration,
 };
+
+use tokio::time::Instant;
 
 use either::Either;
 use futures::{future, FutureExt as _};
@@ -348,7 +350,7 @@ async fn freeze(
                  telegram"
             );
 
-            tokio::time::sleep_until(until.into()).await;
+            tokio::time::sleep_until(until).await;
 
             log::warn!("unfreezing the bot");
         }

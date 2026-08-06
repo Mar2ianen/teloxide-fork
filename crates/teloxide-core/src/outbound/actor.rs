@@ -26,7 +26,7 @@
 //! deterministically.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     future::Future,
     panic::AssertUnwindSafe,
     pin::Pin,
@@ -56,7 +56,7 @@ use super::{
 /// Clone-friendly facade over the [`OutboundQueueHandle`]; the actor task is
 /// spawned by [`OutboundQueue::new_spawn`] or driven by the caller via the
 /// future returned from [`OutboundQueue::new`].
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct OutboundQueue {
     handle: OutboundQueueHandle,
 }
@@ -94,6 +94,13 @@ enum OutboundCommand {
         metadata: OutboundMetadata,
         lane: Option<OutboundLaneKey>,
         mode: OutboundEnqueueMode,
+        /// Unique cancellation identity of the acquire future. The caller
+        /// can cancel a job with `Cancel { token }` BEFORE the actor has
+        /// mapped the token to a `JobId` (the enqueue command may still be
+        /// in flight): the actor keeps both directions (`pending_tokens`
+        /// for accepted jobs, `canceled_tokens` for cancels that arrived
+        /// first).
+        token: u64,
         /// Resolves with the job id (or the enqueue error).
         response: oneshot::Sender<Result<JobId, OutboundQueueError>>,
         /// Resolves when the job is granted (or superseded, or closed).
@@ -104,11 +111,17 @@ enum OutboundCommand {
         granted: oneshot::Sender<AcquireResult>,
     },
     Cancel {
-        job_id: JobId,
+        token: u64,
     },
     Complete {
         job_id: JobId,
         outcome: OutboundCompletion,
+        /// When the caller observed the outcome, on the Tokio clock. The
+        /// `RetryAfter` penalty deadline is anchored HERE, so a completion
+        /// processed late by the actor cannot extend a freeze beyond what
+        /// the caller saw (the legacy worker freezes until the absolute
+        /// `until` computed at the error site).
+        observed_at: tokio::time::Instant,
         /// Resolved once the completion is applied; used by
         /// [`OutboundPermit::complete_and_await`] as a per-request barrier.
         ack: Option<oneshot::Sender<()>>,
@@ -151,11 +164,12 @@ enum AcquireResult {
 /// shutdown. The actor exits when every external enqueue sender is dropped
 /// (the lifecycle channel may stay open — the actor mints permits with its
 /// own lifecycle sender, but that never keeps the ingress alive).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct OutboundQueueHandle {
     enqueue: mpsc::Sender<OutboundCommand>,
     lifecycle: mpsc::UnboundedSender<OutboundCommand>,
     next_lane_id: Arc<AtomicU64>,
+    next_token: Arc<AtomicU64>,
 }
 
 impl OutboundQueueHandle {
@@ -177,10 +191,13 @@ impl OutboundQueueHandle {
             enqueue,
             lifecycle: lifecycle.clone(),
             next_lane_id: Arc::new(AtomicU64::new(0)),
+            next_token: Arc::new(AtomicU64::new(0)),
         };
         let actor = OutboundActor {
             scheduler,
             waiters: HashMap::new(),
+            pending_tokens: HashMap::new(),
+            canceled_tokens: HashSet::new(),
             enqueue: enqueue_rx,
             lifecycle: lifecycle_rx,
             // The actor mints permits with this lifecycle sender. It is
@@ -202,6 +219,22 @@ impl OutboundQueueHandle {
     /// future before it resolves cancels the pending job.
     pub fn acquire(&self, metadata: OutboundMetadata) -> OutboundAcquire {
         self.acquire_inner(metadata, None, OutboundEnqueueMode::Fifo)
+    }
+
+    /// Starts a TWO-PHASE acquire for an independent request (no ordering
+    /// lane): the returned future resolves once the ACTOR ACCEPTED the job
+    /// into the scheduler backlog — before any rate-limit wait — and hands
+    /// the caller an [`OutboundGrant`] to await for the actual permit. The
+    /// admission point is observable separately from the grant, e.g. to
+    /// report a full backlog the moment the LAST slot is accepted, before
+    /// the request is granted. Dropping the future before it resolves
+    /// cancels the pending job.
+    ///
+    /// `pub(crate)` for now: only the `ThrottleCompat` layer needs the
+    /// admission point; make it public (and re-export the phase types)
+    /// when a second caller appears.
+    pub(crate) fn enqueue(&self, metadata: OutboundMetadata) -> OutboundEnqueue {
+        self.enqueue_inner(metadata, None, OutboundEnqueueMode::Fifo)
     }
 
     /// Acquires a permit for a latest-wins slot: while the job is still
@@ -231,9 +264,22 @@ impl OutboundQueueHandle {
         lane: Option<OutboundLaneKey>,
         mode: OutboundEnqueueMode,
     ) -> OutboundAcquire {
+        OutboundAcquire { inner: AcquireInner::Enqueuing(self.enqueue_inner(metadata, lane, mode)) }
+    }
+
+    fn enqueue_inner(
+        &self,
+        metadata: OutboundMetadata,
+        lane: Option<OutboundLaneKey>,
+        mode: OutboundEnqueueMode,
+    ) -> OutboundEnqueue {
         let (response, response_rx) = oneshot::channel();
         let (granted, granted_rx) = oneshot::channel();
-        let command = OutboundCommand::Enqueue { metadata, lane, mode, response, granted };
+        // The token is minted BEFORE the enqueue is sent: a `Cancel`
+        // racing the acceptance references this identity, so the actor can
+        // match it to the job whichever side arrives first.
+        let token = self.next_token();
+        let command = OutboundCommand::Enqueue { metadata, lane, mode, token, response, granted };
         match self.enqueue.try_send(command) {
             Ok(()) => {}
             Err(mpsc::error::TrySendError::Full(command)) => {
@@ -249,10 +295,11 @@ impl OutboundQueueHandle {
                 // through the dropped response receiver.
             }
         }
-        OutboundAcquire {
+        OutboundEnqueue {
             handle: self.clone(),
-            granted: granted_rx,
-            state: AcquireState::Enqueuing(response_rx),
+            token,
+            granted: Some(granted_rx),
+            state: EnqueueState::Enqueuing(response_rx),
         }
     }
 
@@ -300,8 +347,12 @@ impl OutboundQueueHandle {
         let _ = self.lifecycle.send(OutboundCommand::Shutdown);
     }
 
-    fn cancel(&self, job_id: JobId) {
-        let _ = self.lifecycle.send(OutboundCommand::Cancel { job_id });
+    fn cancel(&self, token: u64) {
+        let _ = self.lifecycle.send(OutboundCommand::Cancel { token });
+    }
+
+    fn next_token(&self) -> u64 {
+        self.next_token.fetch_add(1, Ordering::Relaxed)
     }
 }
 
@@ -336,17 +387,135 @@ impl OutboundLane {
     }
 }
 
-/// The pending state of an [`OutboundAcquire`].
-enum AcquireState {
+/// The pending state of an [`OutboundEnqueue`].
+enum EnqueueState {
     /// The enqueue command was sent; waiting for the actor's response.
     Enqueuing(oneshot::Receiver<Result<JobId, OutboundQueueError>>),
-    /// The job is enqueued; waiting for the grant (or supersede, or close).
-    Waiting { job_id: JobId },
     /// The future resolved; polling it again is a panic.
     Done,
 }
 
-/// A future that resolves with a permit once the scheduler grants the job.
+/// The FIRST phase of a two-phase acquire (see
+/// [`OutboundQueueHandle::enqueue`]): resolves once the actor ACCEPTED the
+/// job into the scheduler backlog and hands the caller an
+/// [`OutboundGrant`] to await for the actual permit. Errors (`QueueFull`,
+/// `Closed`, ...) are resolved on this phase, exactly like the combined
+/// acquire.
+///
+/// The grant receiver is owned by the future from the moment of creation,
+/// not nested inside the enqueue reply: dropping the future in ANY state
+/// drops the receiver, so a grant delivered afterwards is detected by the
+/// actor (its waiter send fails) and the job is completed as cancelled
+/// instead of leaking an in-flight slot or a lane lock.
+pub(crate) struct OutboundEnqueue {
+    handle: OutboundQueueHandle,
+    token: u64,
+    granted: Option<oneshot::Receiver<AcquireResult>>,
+    state: EnqueueState,
+}
+
+impl Future for OutboundEnqueue {
+    type Output = Result<OutboundGrant, OutboundAcquireError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        // Take the state out so that the response channel can be polled
+        // without holding a borrow across the state transition.
+        let state = std::mem::replace(&mut this.state, EnqueueState::Done);
+        match state {
+            EnqueueState::Enqueuing(mut response) => match response.poll_unpin(cx) {
+                Poll::Ready(Ok(Ok(_job_id))) => {
+                    let granted = this
+                        .granted
+                        .take()
+                        .expect("the grant receiver is present until acceptance");
+                    Poll::Ready(Ok(OutboundGrant {
+                        handle: this.handle.clone(),
+                        token: this.token,
+                        granted,
+                        resolved: false,
+                    }))
+                }
+                Poll::Ready(Ok(Err(error))) => Poll::Ready(Err(error.into())),
+                Poll::Ready(Err(_)) => {
+                    // The actor died before answering.
+                    Poll::Ready(Err(OutboundAcquireError::Closed))
+                }
+                Poll::Pending => {
+                    this.state = EnqueueState::Enqueuing(response);
+                    Poll::Pending
+                }
+            },
+            EnqueueState::Done => panic!("polled an outbound enqueue after completion"),
+        }
+    }
+}
+
+impl Drop for OutboundEnqueue {
+    fn drop(&mut self) {
+        // The job id is unknown until the acceptance, so the cancel
+        // references the CLIENT TOKEN: the actor applies it whether the
+        // enqueue was already processed (`pending_tokens`) or not yet
+        // (`canceled_tokens`). A resolved future (`Done`) must not cancel
+        // anything — its token was handed to the `OutboundGrant` or the
+        // job never existed.
+        if matches!(self.state, EnqueueState::Enqueuing(_)) {
+            self.handle.cancel(self.token);
+        }
+    }
+}
+
+/// The SECOND phase of a two-phase acquire: the job is accepted and
+/// pending; this future resolves with the permit once the scheduler grants
+/// it, or with `Closed`/`Superseded`. Dropping it cancels the pending job.
+pub(crate) struct OutboundGrant {
+    handle: OutboundQueueHandle,
+    token: u64,
+    granted: oneshot::Receiver<AcquireResult>,
+    resolved: bool,
+}
+
+impl Future for OutboundGrant {
+    type Output = Result<OutboundPermit, OutboundAcquireError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        if this.resolved {
+            panic!("polled an outbound grant after completion");
+        }
+        match this.granted.poll_unpin(cx) {
+            Poll::Ready(Ok(AcquireResult::Granted(permit))) => {
+                this.resolved = true;
+                Poll::Ready(Ok(permit))
+            }
+            Poll::Ready(Ok(AcquireResult::Superseded)) => {
+                this.resolved = true;
+                Poll::Ready(Err(OutboundAcquireError::Superseded))
+            }
+            Poll::Ready(Ok(AcquireResult::Closed)) | Poll::Ready(Err(_)) => {
+                this.resolved = true;
+                Poll::Ready(Err(OutboundAcquireError::Closed))
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl Drop for OutboundGrant {
+    fn drop(&mut self) {
+        // After a successful resolution the grant is marked resolved; while
+        // it is pending the job can be cancelled through its client token
+        // (the actor maps it to the `JobId`; a cancel that races the
+        // acceptance is remembered and applied on enqueue).
+        if !self.resolved {
+            self.handle.cancel(self.token);
+        }
+    }
+}
+
+/// A future that resolves with a permit once the scheduler grants the job:
+/// the combined single-future form of [`OutboundEnqueue`] +
+/// [`OutboundGrant`].
 ///
 /// The grant receiver is owned by the future from the moment of creation,
 /// not nested inside the enqueue reply: dropping the future in ANY state
@@ -354,9 +523,13 @@ enum AcquireState {
 /// actor (its waiter send fails) and the job is completed as cancelled
 /// instead of leaking an in-flight slot or a lane lock.
 pub struct OutboundAcquire {
-    handle: OutboundQueueHandle,
-    granted: oneshot::Receiver<AcquireResult>,
-    state: AcquireState,
+    inner: AcquireInner,
+}
+
+enum AcquireInner {
+    Enqueuing(OutboundEnqueue),
+    Waiting(OutboundGrant),
+    Done,
 }
 
 impl Future for OutboundAcquire {
@@ -364,54 +537,38 @@ impl Future for OutboundAcquire {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-        loop {
-            // Take the state out so that the response channel can be polled
-            // without holding a borrow across the state transition.
-            let state = std::mem::replace(&mut this.state, AcquireState::Done);
-            this.state = match state {
-                AcquireState::Enqueuing(mut response) => match response.poll_unpin(cx) {
-                    Poll::Ready(Ok(Ok(job_id))) => AcquireState::Waiting { job_id },
-                    Poll::Ready(Ok(Err(error))) => return Poll::Ready(Err(error.into())),
-                    Poll::Ready(Err(_)) => {
-                        // The actor died before answering.
-                        return Poll::Ready(Err(OutboundAcquireError::Closed));
-                    }
-                    Poll::Pending => {
-                        this.state = AcquireState::Enqueuing(response);
-                        return Poll::Pending;
-                    }
-                },
-                AcquireState::Waiting { job_id } => match this.granted.poll_unpin(cx) {
-                    Poll::Ready(Ok(AcquireResult::Granted(permit))) => {
-                        return Poll::Ready(Ok(permit));
-                    }
-                    Poll::Ready(Ok(AcquireResult::Superseded)) => {
-                        return Poll::Ready(Err(OutboundAcquireError::Superseded));
-                    }
-                    Poll::Ready(Ok(AcquireResult::Closed)) | Poll::Ready(Err(_)) => {
-                        return Poll::Ready(Err(OutboundAcquireError::Closed));
-                    }
-                    Poll::Pending => {
-                        this.state = AcquireState::Waiting { job_id };
-                        return Poll::Pending;
-                    }
-                },
-                AcquireState::Done => panic!("polled an outbound acquire after completion"),
-            };
+        // Take the state out so that the response channel can be polled
+        // without holding a borrow across the state transition.
+        let inner = std::mem::replace(&mut this.inner, AcquireInner::Done);
+        match inner {
+            AcquireInner::Enqueuing(mut enqueue) => match enqueue.poll_unpin(cx) {
+                Poll::Ready(Ok(grant)) => poll_grant(cx, &mut this.inner, grant),
+                Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
+                Poll::Pending => {
+                    this.inner = AcquireInner::Enqueuing(enqueue);
+                    Poll::Pending
+                }
+            },
+            AcquireInner::Waiting(grant) => poll_grant(cx, &mut this.inner, grant),
+            AcquireInner::Done => panic!("polled an outbound acquire after completion"),
         }
     }
 }
 
-impl Drop for OutboundAcquire {
-    fn drop(&mut self) {
-        // After a successful resolution the state is `Done`; while it is
-        // `Waiting` the job is still pending and can be cancelled. In the
-        // `Enqueuing` state the job id is not known yet, but the dropped
-        // `granted` receiver is observed by the actor: a pending job is
-        // cancelled via the failed enqueue reply, a granted one is
-        // completed as cancelled via the failed waiter send.
-        if let AcquireState::Waiting { job_id } = self.state {
-            self.handle.cancel(job_id);
+/// Polls a grant that may have been delivered in the SAME poll as the
+/// acceptance (the actor runs enqueue and admission in one loop
+/// iteration): the combined acquire resolves without an extra caller
+/// poll. A pending grant is parked back in the acquire state.
+fn poll_grant(
+    cx: &mut Context<'_>,
+    inner: &mut AcquireInner,
+    mut grant: OutboundGrant,
+) -> Poll<Result<OutboundPermit, OutboundAcquireError>> {
+    match grant.poll_unpin(cx) {
+        Poll::Ready(result) => Poll::Ready(result),
+        Poll::Pending => {
+            *inner = AcquireInner::Waiting(grant);
+            Poll::Pending
         }
     }
 }
@@ -442,11 +599,28 @@ impl OutboundPermit {
     /// A `RetryAfter` completion penalizes the reported scope for the
     /// reported duration (a chat-scoped request may report a global flood
     /// penalty). The rate budget consumed by the grant is never refunded.
-    pub fn complete(mut self, outcome: OutboundCompletion) {
+    pub fn complete(self, outcome: OutboundCompletion) {
+        self.complete_observed_at(outcome, tokio::time::Instant::now());
+    }
+
+    /// Like [`OutboundPermit::complete`], but the caller pins the moment
+    /// the outcome was OBSERVED: the scheduler anchors a `RetryAfter`
+    /// penalty at `observed_at + duration`, so a completion delivered
+    /// late (the actor was busy) cannot extend a freeze whose deadline
+    /// already passed. Callers that keep their own copy of the observed
+    /// timestamp (e.g. to sleep until the freeze ends) must use this
+    /// variant so that the scheduler penalty, the local deadline and any
+    /// compat-side state share ONE anchor.
+    pub(crate) fn complete_observed_at(
+        mut self,
+        outcome: OutboundCompletion,
+        observed_at: tokio::time::Instant,
+    ) {
         self.completed = true;
         let _ = self.lifecycle.send(OutboundCommand::Complete {
             job_id: self.job_id,
             outcome,
+            observed_at,
             ack: None,
         });
     }
@@ -465,6 +639,7 @@ impl OutboundPermit {
         let sent = self.lifecycle.send(OutboundCommand::Complete {
             job_id: self.job_id,
             outcome,
+            observed_at: tokio::time::Instant::now(),
             ack: Some(ack_tx),
         });
         if sent.is_err() {
@@ -484,6 +659,7 @@ impl Drop for OutboundPermit {
             let _ = self.lifecycle.send(OutboundCommand::Complete {
                 job_id: self.job_id,
                 outcome: OutboundCompletion::CancelledAfterGrant,
+                observed_at: tokio::time::Instant::now(),
                 ack: None,
             });
         }
@@ -495,6 +671,15 @@ pub(crate) struct OutboundActor {
     scheduler: SchedulerState,
     /// Waiters of enqueued jobs: resolved on grant, supersede or shutdown.
     waiters: HashMap<JobId, oneshot::Sender<AcquireResult>>,
+    /// Client token -> job id of every accepted, still-pending acquire.
+    /// Lets a `Cancel { token }` find the job BEFORE the grant; the token
+    /// is the cancellation identity known to the caller from the moment
+    /// the enqueue was sent (see [`OutboundCommand::Enqueue`]).
+    pending_tokens: HashMap<u64, JobId>,
+    /// Cancels that arrived before their enqueue was processed. The actor
+    /// cannot know the `JobId` yet, so the token is remembered and applied
+    /// when the enqueue command is handled.
+    canceled_tokens: HashSet<u64>,
     enqueue: mpsc::Receiver<OutboundCommand>,
     lifecycle: mpsc::UnboundedReceiver<OutboundCommand>,
     /// Used to mint permits at grant time; see
@@ -523,9 +708,22 @@ impl OutboundActor {
         self.started_at + (at - self.base)
     }
 
+    /// Converts a caller-observed Tokio timestamp into the scheduler's
+    /// `std` timeline (the inverse of [`Self::to_tokio`]).
+    fn to_std(&self, at: tokio::time::Instant) -> Instant {
+        self.base + (at - self.started_at)
+    }
+
+    /// Drops the client-token mapping of a job that no longer exists
+    /// (e.g. superseded by a latest-wins replacement): the acquire future
+    /// of the superseded job resolved and will never send its `Cancel`.
+    fn forget_job(&mut self, job_id: JobId) {
+        self.pending_tokens.retain(|_, job| *job != job_id);
+    }
+
     fn handle_command(&mut self, command: OutboundCommand) {
         match command {
-            OutboundCommand::Enqueue { metadata, lane, mode, response, granted } => {
+            OutboundCommand::Enqueue { metadata, lane, mode, token, response, granted } => {
                 let meta = OutboundMeta {
                     scope: metadata.scope,
                     lane,
@@ -539,6 +737,7 @@ impl OutboundActor {
                             if let Some(waiter) = self.waiters.remove(&superseded) {
                                 let _ = waiter.send(AcquireResult::Superseded);
                             }
+                            self.forget_job(superseded);
                         }
                         if response.send(Ok(outcome.job)).is_err() {
                             // The acquire future was dropped before the reply
@@ -547,9 +746,19 @@ impl OutboundActor {
                             // loop iteration), so cancel it: nobody can ever
                             // own the permit, and leaving the job would leak
                             // an in-flight slot and a lane block.
+                            self.pending_tokens.remove(&token);
                             self.scheduler.cancel(outcome.job, self.now());
                             return;
                         }
+                        if self.canceled_tokens.remove(&token) {
+                            // The acquire was cancelled BEFORE the acceptance
+                            // (its `Drop` raced the actor and could not know
+                            // the job id yet): the job must not sit pending
+                            // for a grant that can never be observed.
+                            self.scheduler.cancel(outcome.job, self.now());
+                            return;
+                        }
+                        self.pending_tokens.insert(token, outcome.job);
                         self.waiters.insert(outcome.job, granted);
                     }
                     Err(EnqueueError::QueueFull) => {
@@ -568,12 +777,19 @@ impl OutboundActor {
                     }
                 }
             }
-            OutboundCommand::Cancel { job_id } => {
-                self.waiters.remove(&job_id);
-                self.scheduler.cancel(job_id, self.now());
+            OutboundCommand::Cancel { token } => {
+                if let Some(job_id) = self.pending_tokens.remove(&token) {
+                    self.waiters.remove(&job_id);
+                    self.scheduler.cancel(job_id, self.now());
+                } else {
+                    // The enqueue command has not been processed yet (or
+                    // the token was already consumed): remember the cancel
+                    // so the job is cancelled the moment it is accepted.
+                    self.canceled_tokens.insert(token);
+                }
             }
-            OutboundCommand::Complete { job_id, outcome, ack } => {
-                self.scheduler.complete(job_id, outcome, self.now());
+            OutboundCommand::Complete { job_id, outcome, observed_at, ack } => {
+                self.scheduler.complete(job_id, outcome, self.now(), self.to_std(observed_at));
                 if let Some(ack) = ack {
                     let _ = ack.send(());
                 }
@@ -801,7 +1017,7 @@ mod tests {
 
     /// One window of `capacity` units per `window` seconds.
     fn window(capacity: u32, window: Duration) -> WindowLimit {
-        WindowLimit { capacity, window }
+        WindowLimit::new(capacity, window)
     }
 
     #[tokio::test(start_paused = true)]
@@ -1527,6 +1743,57 @@ mod tests {
         };
         assert_eq!(error, OutboundAcquireError::QueueFull);
         drop(acquires);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn dropping_enqueue_before_observing_acceptance_cancels_the_job() {
+        // The actor resolves the enqueue reply and keeps the job pending
+        // even if the caller never polls the `OutboundEnqueue` again: a
+        // `Drop` in that window must cancel the job through its CLIENT
+        // TOKEN (the `JobId` is unknown to the caller until the
+        // acceptance is observed). Without this the job would sit
+        // ghost-pending until its own grant and block the backlog.
+        let (queue, actor) =
+            OutboundQueue::new(settings_with(Vec::new(), vec![window(1, Duration::from_secs(1))]))
+                .unwrap();
+        let handle = queue.handle();
+        let mut actor = Box::pin(actor);
+
+        // R0 consumes the per-chat window at t=0 and stays in flight.
+        let r0 = handle.acquire(chat_metadata(1, OutboundPriority::NORMAL));
+        tokio::pin!(r0);
+        let _ = futures::poll!(r0.as_mut());
+        let _ = futures::poll!(actor.as_mut());
+        match futures::poll!(r0.as_mut()) {
+            Poll::Ready(Ok(_permit0)) => {}
+            _other => panic!("R0 должен получить grant"),
+        }
+
+        // R1 is accepted but its grant is blocked by the window: the
+        // enqueue future is polled ONCE and dropped WITHOUT observing the
+        // acceptance reply. (`Box::pin`, not `tokio::pin!`: the drop must
+        // reach the future itself, not just the pinning wrapper.)
+        let mut enq = Box::pin(handle.enqueue(chat_metadata(1, OutboundPriority::NORMAL)));
+        let _ = futures::poll!(enq.as_mut());
+        let _ = futures::poll!(actor.as_mut()); // acceptance: reply sent, job pending
+        drop(enq); // dropped after acceptance, before the reply is observed
+
+        let snapshot = handle.snapshot();
+        tokio::pin!(snapshot);
+        // Drive the actor until the cancel and the snapshot reply are
+        // processed (a bounded loop: each command is handled by one
+        // poll).
+        let mut snapshot_value = None;
+        for _ in 0..8 {
+            let _ = futures::poll!(actor.as_mut());
+            if snapshot_value.is_none() {
+                if let Poll::Ready(Some(value)) = futures::poll!(snapshot.as_mut()) {
+                    snapshot_value = Some(value);
+                }
+            }
+        }
+        let snapshot = snapshot_value.expect("snapshot должен ответить");
+        assert_eq!(snapshot.pending, 0, "ghost-job отменён через клиентский token: {snapshot:?}");
     }
 
     #[tokio::test]

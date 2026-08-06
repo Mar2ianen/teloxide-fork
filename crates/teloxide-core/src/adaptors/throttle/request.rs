@@ -2,8 +2,9 @@ use std::{
     future::{Future, IntoFuture},
     pin::Pin,
     sync::Arc,
-    time::Instant,
 };
+
+use tokio::time::Instant;
 
 use futures::{
     future::BoxFuture,
@@ -212,7 +213,7 @@ where
 
             if retry {
                 log::warn!("Freezing, before retrying: {retry_after:?}");
-                tokio::time::sleep_until(until.into()).await;
+                tokio::time::sleep_until(until).await;
             }
         }
 

@@ -23,8 +23,8 @@ use super::{
     DraftPushError, DraftRevision, DraftStartError, DrafterAcquireError, DrafterBackend,
     DrafterCapabilities, DrafterErrorClass, DrafterErrorDisposition, DrafterEvent,
     DrafterEventKind, DrafterObserver, DrafterOperation, DrafterPermit, DrafterPermitCompletion,
-    DrafterPriority, DrafterRateLimiter, DrafterRequestClass, DrafterRequestContext, PreviewAck,
-    PreviewSource, ReplacePreview,
+    DrafterPriority, DrafterRateLimitKey, DrafterRateLimiter, DrafterRequestClass,
+    DrafterRequestContext, PreviewAck, PreviewSource, ReplacePreview,
 };
 
 /// A cloneable synchronous producer handle.
@@ -528,22 +528,31 @@ where
         };
 
         if !self.source.is_running() {
-            complete_permit(&self.limiter, permit, DrafterPermitCompletion::CancelledAfterGrant)
-                .await;
+            complete_permit(&self.limiter, permit, DrafterPermitCompletion::NoRequest).await;
             return PreviewRunResult::Continue;
         }
 
         // The state is intentionally read only now. Updates that arrived while
         // waiting for the shared limiter therefore replace the stale payload.
         let Some(snapshot) = self.source.snapshot() else {
-            complete_permit(&self.limiter, permit, DrafterPermitCompletion::CancelledAfterGrant)
-                .await;
+            complete_permit(&self.limiter, permit, DrafterPermitCompletion::NoRequest).await;
             self.last_delivered = current_revision;
             self.source.mark_delivered(current_revision);
             self.next_watchdog = None;
             self.complete_flushes();
             return PreviewRunResult::Continue;
         };
+        if request_scheduling
+            && self.backend.as_ref().is_some_and(|backend| {
+                backend.may_skip_preview() && backend.preview_is_noop(&snapshot.preview)
+            })
+        {
+            complete_permit(&self.limiter, permit, DrafterPermitCompletion::NoRequest).await;
+            self.last_delivered = self.last_delivered.max(snapshot.revision);
+            self.source.mark_delivered(snapshot.revision);
+            self.complete_flushes();
+            return PreviewRunResult::Continue;
+        }
         let (mut permit, request_context) = if request_scheduling {
             split_request_context(&self.limiter, permit, key, priority, self.config.request_timeout)
         } else {
@@ -860,6 +869,7 @@ where
                                 DrafterPermitCompletion::Success,
                             )
                             .await;
+                            self.run_success_cleanup(key).await;
                             break TerminalOutcome::Success(output);
                         }
                         TerminalCall::Completed(Err(error)) => {
@@ -1222,6 +1232,7 @@ where
                                 DrafterPermitCompletion::Success,
                             )
                             .await;
+                            self.run_success_cleanup(key).await;
                             break TerminalOutcome::Success(output);
                         }
                         TerminalCall::Completed(Err(error)) => {
@@ -1566,6 +1577,95 @@ where
         }
     }
 
+    async fn run_success_cleanup(&mut self, key: DrafterRateLimitKey) {
+        let request_scheduling = request_scheduler_enabled(&self.limiter, self.backend.as_ref());
+        let cleanup_possible =
+            self.backend.as_ref().is_some_and(DrafterBackend::cleanup_after_delivery_possible);
+        if !cleanup_possible {
+            return;
+        }
+
+        let cleanup_deadline = Instant::now() + self.config.request_timeout;
+        if request_scheduling {
+            match tokio::time::timeout_at(
+                cleanup_deadline,
+                acquire_request_context(
+                    &self.limiter,
+                    key,
+                    DrafterPriority::ChangedPreview,
+                    DrafterRequestClass::Mutation,
+                    self.config.request_timeout,
+                ),
+            )
+            .await
+            {
+                Ok(Ok(context)) => {
+                    self.backend
+                        .as_mut()
+                        .expect("backend exists for successful cleanup")
+                        .set_request_context(Some(context));
+                    let result = {
+                        let backend =
+                            self.backend.as_mut().expect("backend exists for successful cleanup");
+                        tokio::time::timeout_at(cleanup_deadline, backend.cleanup_after_delivery())
+                            .await
+                    };
+                    self.backend
+                        .as_mut()
+                        .expect("backend exists after successful cleanup")
+                        .set_request_context(None);
+                    self.observe_success_cleanup_result(result);
+                }
+                Ok(Err(_error)) => {
+                    self.record(
+                        DrafterEventKind::CleanupError,
+                        None,
+                        Some(DrafterOperation::Cleanup),
+                    );
+                }
+                Err(_) => {
+                    self.record_cleanup_timeout();
+                }
+            }
+        } else {
+            self.backend
+                .as_mut()
+                .expect("backend exists for successful cleanup")
+                .set_request_context(None);
+            let result = {
+                let backend = self.backend.as_mut().expect("backend exists for cleanup");
+                tokio::time::timeout(self.config.request_timeout, backend.cleanup_after_delivery())
+                    .await
+            };
+            self.observe_success_cleanup_result(result);
+        }
+    }
+
+    fn observe_success_cleanup_result(
+        &mut self,
+        result: Result<Result<(), B::Error>, tokio::time::error::Elapsed>,
+    ) {
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                let (disposition, preview_message_id) = {
+                    let backend = self.backend.as_ref().expect("backend exists after cleanup");
+                    (
+                        backend.classify_error(DrafterOperation::Cleanup, &error),
+                        backend.preview_message_id(),
+                    )
+                };
+                self.observe_cleanup_disposition(disposition, preview_message_id);
+            }
+            Err(_) => self.record_cleanup_timeout(),
+        }
+    }
+
+    fn record_cleanup_timeout(&self) {
+        self.record(DrafterEventKind::BackendTimeout, None, Some(DrafterOperation::Cleanup));
+        self.record(DrafterEventKind::CleanupError, None, Some(DrafterOperation::Cleanup));
+    }
+
     fn reset_segment_state(&mut self) {
         self.last_delivered = DraftRevision::default();
         self.last_attempt = None;
@@ -1882,7 +1982,9 @@ mod tests {
         DraftAccumulator, DrafterMode, DrafterOutboundLimiter, DrafterRateLimitKey,
         DrafterRateLimitScope, DrafterRequestError, InProcessRateLimiter,
     };
-    use teloxide_core::outbound::{AgingPolicy, OutboundLimits, OutboundQueue, OutboundSettings};
+    use teloxide_core::outbound::{
+        AgingPolicy, OutboundLimits, OutboundQueue, OutboundSettings, WindowLimit,
+    };
 
     #[derive(Clone, Default)]
     struct NoopLimiter;
@@ -2039,10 +2141,288 @@ mod tests {
         }
     }
 
-    fn queue_backed_drafter_limiter() -> DrafterOutboundLimiter {
+    struct CleanupContextBackend {
+        context: Option<DrafterRequestContext>,
+        primary_requests: Arc<AtomicUsize>,
+        cleanup_requests: Arc<AtomicUsize>,
+    }
+
+    impl DrafterBackend for CleanupContextBackend {
+        type Preview = String;
+        type Final = String;
+        type SegmentOutput = String;
+        type Output = String;
+        type Error = DrafterRequestError;
+
+        fn capabilities(&self) -> DrafterCapabilities {
+            DrafterCapabilities {
+                mode: DrafterMode::EditInPlace,
+                expires_without_refresh: false,
+                supports_draft_thinking: false,
+                supports_rich_preview: false,
+            }
+        }
+
+        fn supports_request_scheduler(&self) -> bool {
+            true
+        }
+
+        fn cleanup_after_delivery_possible(&self) -> bool {
+            true
+        }
+
+        fn is_request_timeout(&self, error: &Self::Error) -> bool {
+            matches!(error, DrafterRequestError::Timeout)
+        }
+
+        fn set_request_context(&mut self, context: Option<DrafterRequestContext>) {
+            self.context = context;
+        }
+
+        async fn update(&mut self, _preview: String) -> Result<PreviewAck, Self::Error> {
+            if let Some(context) = self.context.take() {
+                context.cancel_unused().await;
+            }
+            Ok(PreviewAck)
+        }
+
+        async fn commit_segment(&mut self, final_payload: &String) -> Result<String, Self::Error> {
+            Ok(final_payload.clone())
+        }
+
+        async fn finish(&mut self, final_payload: &String) -> Result<String, Self::Error> {
+            let mut context = self.context.take().expect("primary request context");
+            let primary_requests = Arc::clone(&self.primary_requests);
+            context
+                .execute(DrafterRequestClass::Send, move || async move {
+                    primary_requests.fetch_add(1, Ordering::Relaxed);
+                    Ok(())
+                })
+                .await
+                .map(|_| final_payload.clone())
+        }
+
+        async fn cleanup_after_delivery(&mut self) -> Result<(), Self::Error> {
+            let mut context = self.context.take().expect("cleanup request context");
+            let cleanup_requests = Arc::clone(&self.cleanup_requests);
+            context
+                .execute(DrafterRequestClass::Mutation, move || async move {
+                    cleanup_requests.fetch_add(1, Ordering::Relaxed);
+                    Ok(())
+                })
+                .await
+                .map(|_| ())
+        }
+
+        async fn abort(&mut self) -> Result<(), Self::Error> {
+            if let Some(context) = self.context.take() {
+                context.cancel_unused().await;
+            }
+            Ok(())
+        }
+
+        fn classify_error(
+            &self,
+            _operation: DrafterOperation,
+            _error: &Self::Error,
+        ) -> DrafterErrorDisposition {
+            DrafterErrorDisposition {
+                class: DrafterErrorClass::Permanent,
+                delivery: DeliveryCertainty::NotAttempted,
+            }
+        }
+    }
+
+    struct PostGrantNoopBackend {
+        context: Option<DrafterRequestContext>,
+        noop_checks: Arc<AtomicUsize>,
+        requests_started: Arc<AtomicUsize>,
+    }
+
+    impl DrafterBackend for PostGrantNoopBackend {
+        type Preview = String;
+        type Final = String;
+        type SegmentOutput = String;
+        type Output = String;
+        type Error = DrafterRequestError;
+
+        fn capabilities(&self) -> DrafterCapabilities {
+            DrafterCapabilities {
+                mode: DrafterMode::EditInPlace,
+                expires_without_refresh: false,
+                supports_draft_thinking: false,
+                supports_rich_preview: false,
+            }
+        }
+
+        fn supports_request_scheduler(&self) -> bool {
+            true
+        }
+
+        fn may_skip_preview(&self) -> bool {
+            true
+        }
+
+        fn preview_is_noop(&self, _preview: &String) -> bool {
+            self.noop_checks.fetch_add(1, Ordering::Relaxed) > 0
+        }
+
+        fn set_request_context(&mut self, context: Option<DrafterRequestContext>) {
+            self.context = context;
+        }
+
+        async fn update(&mut self, _preview: String) -> Result<PreviewAck, Self::Error> {
+            self.requests_started.fetch_add(1, Ordering::Relaxed);
+            if let Some(context) = self.context.take() {
+                context.cancel_unused().await;
+            }
+            Ok(PreviewAck)
+        }
+
+        async fn commit_segment(&mut self, final_payload: &String) -> Result<String, Self::Error> {
+            Ok(final_payload.clone())
+        }
+
+        async fn finish(&mut self, final_payload: &String) -> Result<String, Self::Error> {
+            Ok(final_payload.clone())
+        }
+
+        async fn abort(&mut self) -> Result<(), Self::Error> {
+            if let Some(context) = self.context.take() {
+                context.cancel_unused().await;
+            }
+            Ok(())
+        }
+
+        fn classify_error(
+            &self,
+            _operation: DrafterOperation,
+            _error: &Self::Error,
+        ) -> DrafterErrorDisposition {
+            DrafterErrorDisposition {
+                class: DrafterErrorClass::Permanent,
+                delivery: DeliveryCertainty::NotAttempted,
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn post_grant_preview_noop_refunds_scheduler_budget() {
+        let queue = OutboundQueue::new_spawn(OutboundSettings {
+            limits: OutboundLimits {
+                global: vec![WindowLimit::new(2, Duration::from_secs(60))],
+                chat: Vec::new(),
+            },
+            queue_capacity: 16,
+            aging: AgingPolicy { quantum: Duration::from_secs(1), max_boost: u8::MAX },
+        })
+        .unwrap();
+        let limiter = DrafterOutboundLimiter::new(queue);
+        let blocker = limiter
+            .acquire(
+                DrafterRateLimitKey { chat_id: teloxide_core::types::ChatId(1) },
+                DrafterPriority::ChangedPreview,
+                DrafterRequestClass::Send,
+            )
+            .await
+            .unwrap();
+        let noop_checks = Arc::new(AtomicUsize::new(0));
+        let requests_started = Arc::new(AtomicUsize::new(0));
+        let backend = PostGrantNoopBackend {
+            context: None,
+            noop_checks: Arc::clone(&noop_checks),
+            requests_started: Arc::clone(&requests_started),
+        };
+        let (drafter, sink) = Drafter::snapshots(
+            backend,
+            limiter.clone(),
+            DraftConfig {
+                coalesce_window: Duration::from_millis(1),
+                min_update_interval: Duration::from_millis(1),
+                ..DraftConfig::default()
+            },
+        )
+        .unwrap();
+
+        sink.update("preview".to_owned()).unwrap();
+        tokio::time::advance(Duration::from_millis(2)).await;
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+            if noop_checks.load(Ordering::Relaxed) >= 1 {
+                break;
+            }
+        }
+        assert_eq!(noop_checks.load(Ordering::Relaxed), 1);
+        assert_eq!(requests_started.load(Ordering::Relaxed), 0);
+
+        blocker.complete(DrafterPermitCompletion::Success).await;
+        drafter.flush().await.unwrap();
+        assert_eq!(noop_checks.load(Ordering::Relaxed), 2);
+        assert_eq!(requests_started.load(Ordering::Relaxed), 0);
+
+        let next = limiter
+            .acquire(
+                DrafterRateLimitKey { chat_id: teloxide_core::types::ChatId(1) },
+                DrafterPriority::Final,
+                DrafterRequestClass::Send,
+            )
+            .await
+            .unwrap();
+        next.complete(DrafterPermitCompletion::Success).await;
+        let _ = drafter.abort().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn successful_final_is_not_changed_by_cleanup_admission_deadline() {
+        let primary_requests = Arc::new(AtomicUsize::new(0));
+        let cleanup_requests = Arc::new(AtomicUsize::new(0));
+        let queue = OutboundQueue::new_spawn(OutboundSettings {
+            limits: OutboundLimits {
+                global: vec![teloxide_core::outbound::WindowLimit::new(1, Duration::from_secs(60))],
+                chat: Vec::new(),
+            },
+            queue_capacity: 16,
+            aging: AgingPolicy { quantum: Duration::from_secs(1), max_boost: u8::MAX },
+        })
+        .unwrap();
+        let backend = CleanupContextBackend {
+            context: None,
+            primary_requests: Arc::clone(&primary_requests),
+            cleanup_requests: Arc::clone(&cleanup_requests),
+        };
+        let (drafter, _sink) = Drafter::snapshots(
+            backend,
+            DrafterOutboundLimiter::new(queue),
+            DraftConfig {
+                request_timeout: Duration::from_millis(20),
+                terminal_timeout: Duration::from_millis(10),
+                ..DraftConfig::default()
+            },
+        )
+        .unwrap();
+
+        let finish = tokio::spawn(async move { drafter.finish("final".to_owned()).await });
+        for _ in 0..5 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(primary_requests.load(Ordering::Relaxed), 1);
+        tokio::time::advance(Duration::from_millis(21)).await;
+        let result = tokio::time::timeout(Duration::from_secs(1), finish)
+            .await
+            .expect("cleanup admission must be bounded")
+            .unwrap();
+
+        assert_eq!(result.unwrap(), "final");
+        assert_eq!(cleanup_requests.load(Ordering::Relaxed), 0);
+    }
+
+    fn queue_backed_drafter_limiter_with_global_window() -> DrafterOutboundLimiter {
         DrafterOutboundLimiter::new(
             OutboundQueue::new_spawn(OutboundSettings {
-                limits: OutboundLimits { global: Vec::new(), chat: Vec::new() },
+                limits: OutboundLimits {
+                    global: vec![WindowLimit::new(1, Duration::from_secs(60))],
+                    chat: Vec::new(),
+                },
                 queue_capacity: 16,
                 aging: AgingPolicy { quantum: Duration::from_secs(1), max_boost: u8::MAX },
             })
@@ -2589,7 +2969,7 @@ mod tests {
         let (drafter, sink) = Drafter::accumulating(
             NoneOnceAccumulator { snapshot_calls: Arc::clone(&snapshot_calls) },
             backend,
-            queue_backed_drafter_limiter(),
+            queue_backed_drafter_limiter_with_global_window(),
             DraftConfig {
                 coalesce_window: Duration::from_millis(1),
                 min_update_interval: Duration::from_millis(1),

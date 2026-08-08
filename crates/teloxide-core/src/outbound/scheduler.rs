@@ -12,7 +12,8 @@
 //! - at most one in-flight request per ordering lane, and only the lane head
 //!   can be granted;
 //! - cancelling a waiting job removes it without a phantom lock;
-//! - rolling-window budget is debited at grant time and never refunded;
+//! - rolling-window budget is debited at grant time; it is refunded only for an
+//!   explicit `NoRequest` completion when no outbound request started;
 //! - `RetryAfter` penalties carry an explicit scope and are never derived from
 //!   the request scope;
 //! - the scheduler never retries requests on its own;
@@ -48,6 +49,8 @@ use super::types::{
 /// is not stored here.
 struct InFlight {
     lane: Option<OutboundLaneKey>,
+    scope: OutboundScope,
+    weight: u32,
 }
 
 /// A live job that has not been granted yet.
@@ -162,12 +165,14 @@ struct InternalCoalesceKey {
     user_key: u64,
 }
 
+type WindowEvent = (Instant, u32, Option<JobId>);
+
 /// Sliding window with weighted entries. The budget is debited at grant time
-/// and never refunded.
+/// and refunded only for an explicitly confirmed local no-op.
 struct RollingWindow {
     capacity: u32,
     window: Duration,
-    history: VecDeque<(Instant, u32)>,
+    history: VecDeque<WindowEvent>,
     used: u64,
 }
 
@@ -178,7 +183,7 @@ impl RollingWindow {
 
     fn prune(&mut self, now: Instant) {
         let Some(cutoff) = now.checked_sub(self.window) else { return };
-        while let Some(&(at, weight)) = self.history.front() {
+        while let Some(&(at, weight, _job)) = self.history.front() {
             if at <= cutoff {
                 self.used -= u64::from(weight);
                 self.history.pop_front();
@@ -198,20 +203,35 @@ impl RollingWindow {
         self.used + u64::from(weight) <= u64::from(self.capacity)
     }
 
-    fn consume(&mut self, now: Instant, weight: u32) {
+    fn consume(&mut self, now: Instant, weight: u32, job: JobId) {
         debug_assert!(
             self.can_consume(now, weight),
             "window budget must be admitted before consumption"
         );
-        self.history.push_back((now, weight));
+        self.history.push_back((now, weight, Some(job)));
         self.used += u64::from(weight);
+    }
+
+    fn refund(&mut self, now: Instant, job: JobId, weight: u32) {
+        self.prune(now);
+        let Some(index) = self
+            .history
+            .iter()
+            .position(|&(_, debited, owner)| owner == Some(job) && debited == weight)
+        else {
+            // The event may already have expired or been removed while limits
+            // were rebuilt; in either case there is nothing left to refund.
+            return;
+        };
+        let (_, debited, _) = self.history.remove(index).expect("history index exists");
+        self.used -= u64::from(debited);
     }
 
     /// Inserts a debited event without an admission check. Used when the
     /// windows are rebuilt with new limits: the carried history may
     /// legitimately exceed the new capacity (a grant is never refunded).
-    fn insert(&mut self, at: Instant, weight: u32) {
-        self.history.push_back((at, weight));
+    fn insert(&mut self, at: Instant, weight: u32, job: Option<JobId>) {
+        self.history.push_back((at, weight, job));
         self.used += u64::from(weight);
     }
 
@@ -224,7 +244,7 @@ impl RollingWindow {
             return Some(now);
         }
         let mut remaining = self.used;
-        for &(at, w) in &self.history {
+        for &(at, w, _job) in &self.history {
             remaining -= u64::from(w);
             if remaining + u64::from(weight) <= u64::from(self.capacity) {
                 return Some(at + self.window);
@@ -255,19 +275,29 @@ impl WindowSet {
         self.windows.iter_mut().all(|window| window.can_consume(now, weight))
     }
 
-    fn consume(&mut self, now: Instant, weight: u32) {
+    fn consume(&mut self, now: Instant, weight: u32, job: JobId) {
         for window in &mut self.windows {
-            window.consume(now, weight);
+            window.consume(now, weight, job);
         }
+    }
+
+    fn refund(&mut self, now: Instant, job: JobId, weight: u32) {
+        for window in &mut self.windows {
+            window.refund(now, job, weight);
+        }
+    }
+
+    fn is_idle(&mut self, now: Instant) -> bool {
+        self.windows.iter_mut().all(|window| window.is_idle(now))
     }
 
     /// Carries a debited event over to every window of the set that still
     /// covers it.
-    fn insert_at(&mut self, now: Instant, at: Instant, weight: u32) {
+    fn insert_at(&mut self, now: Instant, at: Instant, weight: u32, job: Option<JobId>) {
         for window in &mut self.windows {
             match now.checked_sub(window.window) {
                 Some(cutoff) if at <= cutoff => continue, // already expired
-                _ => window.insert(at, weight),
+                _ => window.insert(at, weight, job),
             }
         }
     }
@@ -1634,14 +1664,17 @@ impl SchedulerState {
             debug_assert!(lane_state.in_flight.is_none(), "a lane is admitted only when free");
             lane_state.in_flight = Some(candidate.job);
         }
-        self.global_windows.consume(now, job.meta.weight.get());
+        self.global_windows.consume(now, job.meta.weight.get(), candidate.job);
         if let OutboundScope::Chat(chat) = &job.meta.scope {
             self.chat_window_sets
                 .entry(chat.clone())
                 .or_insert_with(|| WindowSet::new(&self.chat_limits, chat.window_chat_kind()))
-                .consume(now, job.meta.weight.get());
+                .consume(now, job.meta.weight.get(), candidate.job);
         }
-        self.in_flight.insert(candidate.job, InFlight { lane: job.meta.lane });
+        self.in_flight.insert(
+            candidate.job,
+            InFlight { lane: job.meta.lane, scope: job.meta.scope, weight: job.meta.weight.get() },
+        );
     }
 
     /// Finishes a granted job and releases its lane exactly once (a repeated
@@ -1659,6 +1692,7 @@ impl SchedulerState {
         penalty_observed_at: Instant,
     ) {
         let Some(in_flight) = self.in_flight.remove(&job) else { return };
+        let refund = matches!(&completion, OutboundCompletion::NoRequest);
         if let Some(lane) = in_flight.lane {
             let has_pending = match self.lanes.get_mut(&lane) {
                 Some(state) => {
@@ -1672,6 +1706,19 @@ impl SchedulerState {
                 self.push_lane_head_candidate(lane, now);
             } else {
                 self.lanes.remove(&lane);
+            }
+        }
+        if refund {
+            self.global_windows.refund(now, job, in_flight.weight);
+            if let OutboundScope::Chat(chat) = &in_flight.scope {
+                let remove_chat_window =
+                    self.chat_window_sets.get_mut(chat).is_some_and(|windows| {
+                        windows.refund(now, job, in_flight.weight);
+                        windows.is_idle(now)
+                    });
+                if remove_chat_window {
+                    self.chat_window_sets.remove(chat);
+                }
             }
         }
         if let OutboundCompletion::RetryAfter { scope, duration } = completion {
@@ -1761,7 +1808,7 @@ impl SchedulerState {
 
         // Carry the debited history over to the new windows.
         let global_events = self.collect_global_events(now);
-        let chat_events: Vec<(OutboundChatKey, Vec<(Instant, u32)>)> = self
+        let chat_events: Vec<(OutboundChatKey, Vec<WindowEvent>)> = self
             .chat_window_sets
             .iter()
             .map(|(chat, set)| {
@@ -1778,8 +1825,8 @@ impl SchedulerState {
                         window
                             .history
                             .iter()
-                            .filter(|(at, _)| cutoff.is_none_or(|cutoff| *at > cutoff))
-                            .copied()
+                            .filter(|(at, _, _)| cutoff.is_none_or(|cutoff| *at > cutoff))
+                            .map(|(at, weight, job)| (*at, *weight, *job))
                             .collect()
                     })
                     .unwrap_or_default();
@@ -1788,8 +1835,8 @@ impl SchedulerState {
             .collect();
         self.global_limits = limits.global;
         self.global_windows = WindowSet::new(&self.global_limits, WindowChatKind::Any);
-        for (at, weight) in global_events {
-            self.global_windows.insert_at(now, at, weight);
+        for (at, weight, job) in global_events {
+            self.global_windows.insert_at(now, at, weight, job);
         }
         self.chat_limits = limits.chat;
         self.chat_window_sets.clear();
@@ -1798,8 +1845,8 @@ impl SchedulerState {
                 continue;
             }
             let mut set = WindowSet::new(&self.chat_limits, chat.window_chat_kind());
-            for (at, weight) in events {
-                set.insert_at(now, at, weight);
+            for (at, weight, job) in events {
+                set.insert_at(now, at, weight, job);
             }
             if set.windows.iter().any(|window| !window.history.is_empty()) {
                 self.chat_window_sets.insert(chat, set);
@@ -1818,7 +1865,7 @@ impl SchedulerState {
     /// could still cover (`WindowSet::insert_at` filters per new window).
     /// Lengthening a window beyond the old maximum does not retroactively
     /// constrain grants that already expired under the old windows.
-    fn collect_global_events(&mut self, now: Instant) -> Vec<(Instant, u32)> {
+    fn collect_global_events(&mut self, now: Instant) -> Vec<WindowEvent> {
         for window in &mut self.global_windows.windows {
             window.prune(now);
         }
@@ -1826,7 +1873,9 @@ impl SchedulerState {
             .windows
             .iter()
             .max_by_key(|window| window.window)
-            .map(|window| window.history.iter().copied().collect())
+            .map(|window| {
+                window.history.iter().map(|(at, weight, job)| (*at, *weight, *job)).collect()
+            })
             .unwrap_or_default()
     }
 
@@ -2483,6 +2532,33 @@ mod tests {
         assert_eq!(jobs(&s.grant_ready(t0)), vec![b]);
         let _c = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
         assert!(s.grant_ready(t0).is_empty());
+    }
+
+    #[test]
+    fn explicit_no_request_refunds_the_window_budget() {
+        let mut s = scheduler(limits(1), aging());
+        let t0 = base();
+        let a = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
+
+        s.complete(a, OutboundCompletion::NoRequest, t0, t0);
+
+        let b = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![b]);
+    }
+
+    #[test]
+    fn no_request_refund_survives_limit_rebuild() {
+        let mut s = scheduler(limits(1), aging());
+        let t0 = base();
+        let a = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
+
+        s.set_limits(limits(1), t0).unwrap();
+        s.complete(a, OutboundCompletion::NoRequest, t0, t0);
+
+        let b = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![b]);
     }
 
     #[test]

@@ -1018,9 +1018,6 @@ where
             &mut context,
         )
         .await;
-        if result.is_ok() {
-            self.cleanup_preview(&mut context).await;
-        }
         result
     }
 
@@ -1029,27 +1026,28 @@ where
         final_payload: &InputRichMessage,
     ) -> Result<Message, DrafterRequestError> {
         let mut context = self.request_context.take();
-        let result = send_rich(
+        send_rich(
             &self.bot,
             self.chat_id,
             final_payload.clone(),
             &self.final_send_options,
             &mut context,
         )
-        .await;
-        if result.is_ok() && self.cleanup == StatusCleanup::DeleteAfterFinalSuccess {
-            if let Some(message_id) = self.preview_message_id {
-                if let Err(error) =
-                    delete_message(&self.bot, self.chat_id, message_id, &mut context).await
-                {
-                    self.cleanup_failure = Some(CleanupFailure { message_id, error });
-                    self.preview_message_id = None;
-                } else {
-                    self.preview_message_id = None;
-                }
-            }
+        .await
+    }
+
+    async fn cleanup_after_delivery(&mut self) -> Result<(), DrafterRequestError> {
+        let mut context = self.request_context.take();
+        if self.cleanup == StatusCleanup::DeleteAfterFinalSuccess {
+            self.cleanup_preview(&mut context).await;
+        } else {
+            cancel_unused_context(context).await;
         }
-        result
+        Ok(())
+    }
+
+    fn cleanup_after_delivery_possible(&self) -> bool {
+        self.cleanup == StatusCleanup::DeleteAfterFinalSuccess && self.preview_message_id.is_some()
     }
 
     async fn abort(&mut self) -> Result<(), DrafterRequestError> {
@@ -1279,35 +1277,33 @@ where
             &mut context,
         )
         .await;
-        if result.is_ok() {
-            self.cleanup_preview(&mut context).await;
-        }
         result
     }
 
     async fn finish(&mut self, final_payload: &String) -> Result<Message, DrafterRequestError> {
         let mut context = self.request_context.take();
-        let result = send_text(
+        send_text(
             &self.bot,
             self.chat_id,
             final_payload.clone(),
             &self.final_send_options,
             &mut context,
         )
-        .await;
-        if result.is_ok() && self.cleanup == StatusCleanup::DeleteAfterFinalSuccess {
-            if let Some(message_id) = self.preview_message_id {
-                if let Err(error) =
-                    delete_message(&self.bot, self.chat_id, message_id, &mut context).await
-                {
-                    self.cleanup_failure = Some(CleanupFailure { message_id, error });
-                    self.preview_message_id = None;
-                } else {
-                    self.preview_message_id = None;
-                }
-            }
+        .await
+    }
+
+    async fn cleanup_after_delivery(&mut self) -> Result<(), DrafterRequestError> {
+        let mut context = self.request_context.take();
+        if self.cleanup == StatusCleanup::DeleteAfterFinalSuccess {
+            self.cleanup_preview(&mut context).await;
+        } else {
+            cancel_unused_context(context).await;
         }
-        result
+        Ok(())
+    }
+
+    fn cleanup_after_delivery_possible(&self) -> bool {
+        self.cleanup == StatusCleanup::DeleteAfterFinalSuccess && self.preview_message_id.is_some()
     }
 
     async fn abort(&mut self) -> Result<(), DrafterRequestError> {

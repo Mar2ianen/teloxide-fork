@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shared Rich Text bindings and render context for localized time, trusted link aliases and bound custom emoji, with common Telegram/fallback rendering
 - Parsed Rich Text APIs expose aliases, literal destinations and bare URL spans so applications can enforce URL provenance before delivery
 - `DispatcherBuilder::worker_error_handler` to handle abnormal worker infrastructure events observed during dispatch: contained handler panics, worker task deaths and undeliverable updates
+- Completion-aware Drafter request scheduling, including per-request permits for Telegram cleanup and the explicit `NoRequest` completion for proven local no-op paths
 - `ParticipantIdInvalid` and `ChatAdminRequired` variants to `ApiError` ([#1349](https://github.com/teloxide/teloxide/issues/1349))
 - Support for TBA 10.0
   - Add request methods introduced in TBA 9.3 through 10.0, including live photos, message drafts, guest queries, managed bots, prepared keyboard buttons, chat gifts, profile photos, story reposting and reaction deletion
@@ -34,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Escape `@` mentions in `markdown::user_mention_or_link` ([#1411](https://github.com/teloxide/teloxide/pull/1411))
 - Add local TBA file downloading support in `crate::net::download` ([#1173](https://github.com/teloxide/teloxide/pull/1173))
 - Contain panics inside dispatcher workers and user-supplied dispatcher callbacks (handlers, the worker error policy, the update listener error handler and the distribution function) so that queued updates are not lost, respawn dead workers and retry the dispatch once, and report abnormal worker events through `DispatcherBuilder::worker_error_handler` instead of panicking
+- Keep a confirmed Drafter final/segment delivery successful when best-effort cleanup admission reaches its separate deadline; expose cleanup failures through observability instead of converting them into delivery retries
 
 - Added schema and rust types checking ([#1396](https://github.com/teloxide/teloxide/pull/1396)) [**BC**]
   - `delete_chat_photo` method now returns `True`, not `String`

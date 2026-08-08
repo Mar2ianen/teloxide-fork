@@ -1,6 +1,6 @@
 //! Telegram Bot API delivery backends for the generic drafter runtime.
 
-use std::{future::Future, time::Duration};
+use std::{collections::VecDeque, future::Future, time::Duration};
 
 use teloxide_core::{
     errors::{ApiError, RequestError},
@@ -868,6 +868,7 @@ pub struct StatusThenRichBackend<R> {
     edit_options: TelegramEditOptions,
     cleanup: StatusCleanup,
     cleanup_failure: Option<CleanupFailure<DrafterRequestError>>,
+    pending_cleanup_message_ids: VecDeque<MessageId>,
     request_context: Option<DrafterRequestContext>,
 }
 
@@ -890,6 +891,7 @@ impl<R> StatusThenRichBackend<R> {
             edit_options: TelegramEditOptions::default(),
             cleanup: StatusCleanup::DeleteAfterFinalSuccess,
             cleanup_failure: None,
+            pending_cleanup_message_ids: VecDeque::new(),
             request_context: None,
         }
     }
@@ -1038,16 +1040,33 @@ where
 
     async fn cleanup_after_delivery(&mut self) -> Result<(), DrafterRequestError> {
         let mut context = self.request_context.take();
-        if self.cleanup == StatusCleanup::DeleteAfterFinalSuccess {
-            self.cleanup_preview(&mut context).await;
-        } else {
+        if self.cleanup != StatusCleanup::DeleteAfterFinalSuccess {
             cancel_unused_context(context).await;
+            return Ok(());
+        }
+        while let Some(message_id) = self.pending_cleanup_message_ids.front().copied() {
+            let result = delete_message(&self.bot, self.chat_id, message_id, &mut context).await;
+            self.pending_cleanup_message_ids.pop_front();
+            if let Err(error) = result {
+                self.cleanup_failure = Some(CleanupFailure { message_id, error });
+            }
         }
         Ok(())
     }
 
     fn cleanup_after_delivery_possible(&self) -> bool {
-        self.cleanup == StatusCleanup::DeleteAfterFinalSuccess && self.preview_message_id.is_some()
+        self.cleanup == StatusCleanup::DeleteAfterFinalSuccess
+            && (self.preview_message_id.is_some() || !self.pending_cleanup_message_ids.is_empty())
+    }
+
+    fn prepare_cleanup_after_delivery(&mut self) -> bool {
+        if self.cleanup != StatusCleanup::DeleteAfterFinalSuccess {
+            return false;
+        }
+        if let Some(message_id) = self.preview_message_id.take() {
+            self.pending_cleanup_message_ids.push_back(message_id);
+        }
+        !self.pending_cleanup_message_ids.is_empty()
     }
 
     async fn abort(&mut self) -> Result<(), DrafterRequestError> {
@@ -1056,16 +1075,23 @@ where
             cancel_unused_context(context).await;
             return Ok(());
         }
-        let Some(message_id) = self.preview_message_id else {
+        if let Some(message_id) = self.preview_message_id.take() {
+            self.pending_cleanup_message_ids.push_back(message_id);
+        }
+        if self.pending_cleanup_message_ids.is_empty() {
             cancel_unused_context(context).await;
             return Ok(());
-        };
-        delete_message(&self.bot, self.chat_id, message_id, &mut context).await?;
+        }
+        while let Some(message_id) = self.pending_cleanup_message_ids.front().copied() {
+            delete_message(&self.bot, self.chat_id, message_id, &mut context).await?;
+            self.pending_cleanup_message_ids.pop_front();
+        }
         Ok(())
     }
 
     fn abort_request_possible(&self) -> bool {
-        self.cleanup == StatusCleanup::DeleteAfterFinalSuccess && self.preview_message_id.is_some()
+        self.cleanup == StatusCleanup::DeleteAfterFinalSuccess
+            && (self.preview_message_id.is_some() || !self.pending_cleanup_message_ids.is_empty())
     }
 
     fn is_request_timeout(&self, error: &Self::Error) -> bool {
@@ -1100,28 +1126,6 @@ where
     }
 }
 
-impl<R> StatusThenRichBackend<R>
-where
-    R: Requester<Err = RequestError> + Clone + Send + Sync + 'static,
-    R::SendMessage: Send,
-    R::EditMessageText: Send,
-    R::DeleteMessage: Send,
-{
-    async fn cleanup_preview(&mut self, context: &mut Option<DrafterRequestContext>) {
-        if self.cleanup == StatusCleanup::Keep {
-            return;
-        }
-        if let Some(message_id) = self.preview_message_id {
-            if let Err(error) = delete_message(&self.bot, self.chat_id, message_id, context).await {
-                self.cleanup_failure = Some(CleanupFailure { message_id, error });
-                self.preview_message_id = None;
-            } else {
-                self.preview_message_id = None;
-            }
-        }
-    }
-}
-
 /// Plain status preview followed by a separate plain permanent message.
 pub struct StatusThenTextBackend<R> {
     bot: R,
@@ -1132,6 +1136,7 @@ pub struct StatusThenTextBackend<R> {
     edit_options: TelegramEditOptions,
     cleanup: StatusCleanup,
     cleanup_failure: Option<CleanupFailure<DrafterRequestError>>,
+    pending_cleanup_message_ids: VecDeque<MessageId>,
     request_context: Option<DrafterRequestContext>,
 }
 
@@ -1147,6 +1152,7 @@ impl<R> StatusThenTextBackend<R> {
             edit_options: TelegramEditOptions::default(),
             cleanup: StatusCleanup::DeleteAfterFinalSuccess,
             cleanup_failure: None,
+            pending_cleanup_message_ids: VecDeque::new(),
             request_context: None,
         }
     }
@@ -1294,16 +1300,33 @@ where
 
     async fn cleanup_after_delivery(&mut self) -> Result<(), DrafterRequestError> {
         let mut context = self.request_context.take();
-        if self.cleanup == StatusCleanup::DeleteAfterFinalSuccess {
-            self.cleanup_preview(&mut context).await;
-        } else {
+        if self.cleanup != StatusCleanup::DeleteAfterFinalSuccess {
             cancel_unused_context(context).await;
+            return Ok(());
+        }
+        while let Some(message_id) = self.pending_cleanup_message_ids.front().copied() {
+            let result = delete_message(&self.bot, self.chat_id, message_id, &mut context).await;
+            self.pending_cleanup_message_ids.pop_front();
+            if let Err(error) = result {
+                self.cleanup_failure = Some(CleanupFailure { message_id, error });
+            }
         }
         Ok(())
     }
 
     fn cleanup_after_delivery_possible(&self) -> bool {
-        self.cleanup == StatusCleanup::DeleteAfterFinalSuccess && self.preview_message_id.is_some()
+        self.cleanup == StatusCleanup::DeleteAfterFinalSuccess
+            && (self.preview_message_id.is_some() || !self.pending_cleanup_message_ids.is_empty())
+    }
+
+    fn prepare_cleanup_after_delivery(&mut self) -> bool {
+        if self.cleanup != StatusCleanup::DeleteAfterFinalSuccess {
+            return false;
+        }
+        if let Some(message_id) = self.preview_message_id.take() {
+            self.pending_cleanup_message_ids.push_back(message_id);
+        }
+        !self.pending_cleanup_message_ids.is_empty()
     }
 
     async fn abort(&mut self) -> Result<(), DrafterRequestError> {
@@ -1312,16 +1335,23 @@ where
             cancel_unused_context(context).await;
             return Ok(());
         }
-        let Some(message_id) = self.preview_message_id else {
+        if let Some(message_id) = self.preview_message_id.take() {
+            self.pending_cleanup_message_ids.push_back(message_id);
+        }
+        if self.pending_cleanup_message_ids.is_empty() {
             cancel_unused_context(context).await;
             return Ok(());
-        };
-        delete_message(&self.bot, self.chat_id, message_id, &mut context).await?;
+        }
+        while let Some(message_id) = self.pending_cleanup_message_ids.front().copied() {
+            delete_message(&self.bot, self.chat_id, message_id, &mut context).await?;
+            self.pending_cleanup_message_ids.pop_front();
+        }
         Ok(())
     }
 
     fn abort_request_possible(&self) -> bool {
-        self.cleanup == StatusCleanup::DeleteAfterFinalSuccess && self.preview_message_id.is_some()
+        self.cleanup == StatusCleanup::DeleteAfterFinalSuccess
+            && (self.preview_message_id.is_some() || !self.pending_cleanup_message_ids.is_empty())
     }
 
     fn is_request_timeout(&self, error: &Self::Error) -> bool {
@@ -1353,26 +1383,6 @@ where
 
     fn take_cleanup_failure(&mut self) -> Option<CleanupFailure<Self::Error>> {
         self.cleanup_failure.take()
-    }
-}
-
-impl<R> StatusThenTextBackend<R>
-where
-    R: Requester<Err = RequestError> + Clone + Send + Sync + 'static,
-    R::DeleteMessage: Send,
-{
-    async fn cleanup_preview(&mut self, context: &mut Option<DrafterRequestContext>) {
-        if self.cleanup == StatusCleanup::Keep {
-            return;
-        }
-        if let Some(message_id) = self.preview_message_id {
-            if let Err(error) = delete_message(&self.bot, self.chat_id, message_id, context).await {
-                self.cleanup_failure = Some(CleanupFailure { message_id, error });
-                self.preview_message_id = None;
-            } else {
-                self.preview_message_id = None;
-            }
-        }
     }
 }
 
@@ -2073,6 +2083,17 @@ mod tests {
         assert_eq!(request.protect_content, Some(true));
         assert_eq!(request.parse_mode, Some(ParseMode::Html));
         assert_eq!(request.reply_parameters, Some(ReplyParameters::new(MessageId(4))));
+    }
+
+    #[test]
+    fn status_cleanup_detaches_preview_before_admission() {
+        let mut backend = StatusThenTextBackend::new(Bot::new("token"), ChatId(1));
+        backend.preview_message_id = Some(MessageId(7));
+
+        assert!(backend.cleanup_after_delivery_possible());
+        assert!(backend.prepare_cleanup_after_delivery());
+        assert_eq!(backend.preview_message_id, None);
+        assert_eq!(backend.pending_cleanup_message_ids.front(), Some(&MessageId(7)));
     }
 
     #[test]

@@ -740,10 +740,11 @@ The shared queue replaces only admission, rate windows and ordering.
 Scheduler-aware Telegram backends pass the first granted permit to the first
 real typed request and acquire a separate permit for every subsequent request,
 including edits, native drafts and preview deletion. A backend that has
-confirmed final/segment delivery must expose optional cleanup through
-`DrafterBackend::cleanup_after_delivery`; the worker gives that cleanup its own
-best-effort admission/request deadline and never changes the already confirmed
-primary result because cleanup was delayed or rejected. Cleanup failures remain
+confirmed final/segment delivery must expose optional cleanup.
+`DrafterBackend::prepare_cleanup_after_delivery` first detaches the target from
+the active preview state, then `DrafterBackend::cleanup_after_delivery` gets
+its own best-effort admission/request deadline. The worker never changes the
+already confirmed primary result because cleanup was delayed or rejected. Cleanup failures remain
 visible through the existing observer and `take_cleanup_failure` path.
 
 `DrafterRequestContext::cancel_unused` reports `NoRequest`, which refunds the
@@ -752,7 +753,8 @@ retain the conservative `CancelledAfterGrant` behavior because cancellation
 may happen after a request began.
 
 Commit 6 also adds the following public Drafter surface: the
-`cleanup_after_delivery`/`cleanup_after_delivery_possible` backend hooks and
+`prepare_cleanup_after_delivery`, `cleanup_after_delivery` and
+`cleanup_after_delivery_possible` backend hooks and
 `DrafterPermitCompletion::NoRequest`. `DrafterRequestError` is now a public
 enum with `Inner`, `Acquire` and `Timeout` variants instead of the previous
 request-error alias; `DraftAbortError` has an explicit `RateLimiter` variant.
@@ -767,5 +769,5 @@ into the new hook when they issue cleanup requests.
 
 `OrderedStart` lanes (Commit 2 is serial-only), `Bot::outbound`-style
 extension sugar, class-aware window sets for the raw `Outbound` adaptor,
-the public `Throttle` switch-over and legacy worker removal, `Drafter`
-migration, durable outbox, observability hooks.
+the public `Throttle` switch-over and legacy worker removal, durable outbox,
+observability hooks.

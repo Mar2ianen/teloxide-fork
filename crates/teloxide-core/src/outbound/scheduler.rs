@@ -212,7 +212,7 @@ impl RollingWindow {
         self.used += u64::from(weight);
     }
 
-    fn refund(&mut self, now: Instant, job: JobId, weight: u32) {
+    fn refund(&mut self, now: Instant, job: JobId, weight: u32) -> bool {
         self.prune(now);
         let Some(index) = self
             .history
@@ -221,10 +221,11 @@ impl RollingWindow {
         else {
             // The event may already have expired or been removed while limits
             // were rebuilt; in either case there is nothing left to refund.
-            return;
+            return false;
         };
         let (_, debited, _) = self.history.remove(index).expect("history index exists");
         self.used -= u64::from(debited);
+        true
     }
 
     /// Inserts a debited event without an admission check. Used when the
@@ -281,10 +282,12 @@ impl WindowSet {
         }
     }
 
-    fn refund(&mut self, now: Instant, job: JobId, weight: u32) {
+    fn refund(&mut self, now: Instant, job: JobId, weight: u32) -> bool {
+        let mut refunded = false;
         for window in &mut self.windows {
-            window.refund(now, job, weight);
+            refunded |= window.refund(now, job, weight);
         }
+        refunded
     }
 
     fn is_idle(&mut self, now: Instant) -> bool {
@@ -1709,16 +1712,21 @@ impl SchedulerState {
             }
         }
         if refund {
-            self.global_windows.refund(now, job, in_flight.weight);
+            let mut refunded = self.global_windows.refund(now, job, in_flight.weight);
             if let OutboundScope::Chat(chat) = &in_flight.scope {
                 let remove_chat_window =
                     self.chat_window_sets.get_mut(chat).is_some_and(|windows| {
-                        windows.refund(now, job, in_flight.weight);
+                        refunded |= windows.refund(now, job, in_flight.weight);
                         windows.is_idle(now)
                     });
                 if remove_chat_window {
                     self.chat_window_sets.remove(chat);
                 }
+            }
+            if refunded {
+                // Any blocked/parked deadlines derived from this debit are
+                // stale now that the exact grant accounting was removed.
+                self.rearm_blocked_and_parked(now);
             }
         }
         if let OutboundCompletion::RetryAfter { scope, duration } = completion {
@@ -2544,6 +2552,20 @@ mod tests {
         s.complete(a, OutboundCompletion::NoRequest, t0, t0);
 
         let b = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![b]);
+    }
+
+    #[test]
+    fn no_request_refund_rearms_existing_blocked_jobs() {
+        let mut s = scheduler(limits(1), aging());
+        let t0 = base();
+        let a = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
+        let b = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
+        assert!(s.grant_ready(t0).is_empty());
+
+        s.complete(a, OutboundCompletion::NoRequest, t0, t0);
+
         assert_eq!(jobs(&s.grant_ready(t0)), vec![b]);
     }
 

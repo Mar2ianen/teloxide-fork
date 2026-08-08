@@ -1353,8 +1353,7 @@ impl SchedulerState {
         self.compact_lanes_if_needed();
 
         let mut grants = Vec::new();
-        loop {
-            let Some(candidate) = self.pop_candidate(now) else { break };
+        while let Some(candidate) = self.pop_candidate(now) {
             match self.admission(&candidate, now) {
                 Admission::Pass => {
                     // Rearm AFTER the grant consumed the window: the

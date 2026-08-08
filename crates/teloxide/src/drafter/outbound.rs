@@ -131,10 +131,11 @@ impl DrafterRequestContext {
 
     /// Cancels a transferred permit when the backend operation is known not to
     /// issue any request. This is the explicit completion path for local
-    /// no-op operations; dropping the context remains only a fallback.
+    /// no-op operations; dropping the context remains only a fallback for
+    /// unknown cancellation.
     pub async fn cancel_unused(mut self) {
         if let Some(permit) = self.initial_permit.take() {
-            permit.complete(DrafterPermitCompletion::CancelledAfterGrant).await;
+            permit.complete(DrafterPermitCompletion::NoRequest).await;
         }
     }
 
@@ -198,6 +199,7 @@ impl DrafterPermitLease for OutboundPermitLease {
                 OutboundCompletion::RetryAfter { scope: map_scope(scope), duration }
             }
             DrafterPermitCompletion::CancelledAfterGrant => OutboundCompletion::CancelledAfterGrant,
+            DrafterPermitCompletion::NoRequest => OutboundCompletion::NoRequest,
         };
         Box::pin(async move {
             self.permit.complete_and_await(outcome).await;

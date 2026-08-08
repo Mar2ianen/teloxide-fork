@@ -97,6 +97,17 @@ pub trait DrafterBackend: Send + 'static {
         false
     }
 
+    /// Detaches successful-delivery cleanup targets from the active preview
+    /// state before admission is attempted. This prevents a cleanup timeout
+    /// from making a later segment edit an older segment's preview.
+    ///
+    /// The default preserves the capability-only contract for custom backends;
+    /// stateful backends should override this together with
+    /// [`Self::cleanup_after_delivery`].
+    fn prepare_cleanup_after_delivery(&mut self) -> bool {
+        self.cleanup_after_delivery_possible()
+    }
+
     /// Classifies the first real request made by an operation. Scheduler-aware
     /// custom backends must override this when their first request differs from
     /// the default state-based Telegram backend classification.

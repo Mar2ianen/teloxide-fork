@@ -816,6 +816,30 @@ impl SchedulerState {
         self.next_sequence = max + 1;
     }
 
+    /// Releases a reservation owned by `owner` and wakes its parked FIFO.
+    ///
+    /// A job may own at most one reservation. This helper is also used when
+    /// an owner is re-evaluated and its blocking window changes, so an old
+    /// hold cannot become a phantom lock after the job moves to another
+    /// window.
+    fn release_reservation(&mut self, window: &WindowRef, owner: CandidateRef, now: Instant) {
+        if self.reservations.get(window).is_none_or(|reservation| reservation.owner != Some(owner))
+        {
+            return;
+        }
+        let Some(reservation) = self.reservations.remove(window) else { return };
+        for reference in reservation.queue {
+            if let CandidateRef::Job(job_id) = reference {
+                if let Some(job) = self.jobs.get_mut(&job_id) {
+                    if job.parked_in.as_ref() == Some(window) {
+                        job.parked_in = None;
+                    }
+                }
+            }
+            self.push_reference(reference, now);
+        }
+    }
+
     /// Removes a job that has not been granted yet. All removal is lazy:
     /// the delayed-heap, blocked-heap and candidate-heap entries are
     /// skipped when they surface, the lane-pending entry is dropped when it
@@ -851,13 +875,7 @@ impl SchedulerState {
             // The candidate the window was held back for is gone: release
             // the hold and wake every parked job now — the window state
             // may admit them immediately.
-            if self.reservations.get(&window).is_some_and(|r| r.owner == Some(owner)) {
-                if let Some(reservation) = self.reservations.remove(&window) {
-                    for reference in reservation.queue {
-                        self.push_reference(reference, now);
-                    }
-                }
-            }
+            self.release_reservation(&window, owner, now);
         }
         self.remove_coalesce_entry(job, coalesce_key);
         self.jobs.remove(&job);
@@ -1455,8 +1473,20 @@ impl SchedulerState {
                     grants.push(Grant { job });
                 }
                 Admission::Blocked { until, reserve } => {
+                    let reference = self.reference_of(&candidate);
+                    let previous_window =
+                        self.jobs.get(&candidate.job).and_then(|job| job.reservation_owner.clone());
+                    if previous_window.as_ref() != reserve.as_ref() {
+                        if let Some(previous_window) = previous_window {
+                            self.release_reservation(&previous_window, reference, now);
+                            if let Some(job) = self.jobs.get_mut(&candidate.job) {
+                                if job.reservation_owner.as_ref() == Some(&previous_window) {
+                                    job.reservation_owner = None;
+                                }
+                            }
+                        }
+                    }
                     if let Some(window) = reserve {
-                        let reference = self.reference_of(&candidate);
                         let reservation =
                             self.reservations.entry(window.clone()).or_insert_with(|| {
                                 Reservation { owner: None, until, queue: VecDeque::new(), stale: 0 }
@@ -2685,6 +2715,45 @@ mod tests {
             !s.in_flight.contains_key(&light),
             "parked newer traffic must not overtake the refunded reservation owner"
         );
+    }
+
+    #[test]
+    fn no_request_refund_releases_cross_window_reservation_on_reblock() {
+        let mut s = scheduler(
+            OutboundLimits {
+                global: vec![WindowLimit::new(2, Duration::from_secs(60))],
+                chat: vec![WindowLimit::new(1, Duration::from_secs(120))],
+            },
+            aging(),
+        );
+        let t0 = base();
+        let chat1 = OutboundScope::Chat(OutboundChatKey::id(1));
+        let chat2 = OutboundScope::Chat(OutboundChatKey::id(2));
+        let chat3 = OutboundScope::Chat(OutboundChatKey::id(3));
+        let first = fifo(&mut s, meta(chat1.clone(), None, OutboundPriority::NORMAL), t0);
+        let refund = fifo(&mut s, meta(chat2, None, OutboundPriority::NORMAL), t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![first, refund]);
+
+        let blocked = fifo(&mut s, meta(chat1, None, OutboundPriority::NORMAL), t0);
+        assert!(s.grant_ready(t0).is_empty());
+        assert_eq!(
+            s.reservations.get(&WindowRef::Global).and_then(|r| r.owner),
+            Some(CandidateRef::Job(blocked))
+        );
+
+        let parked = fifo(&mut s, meta(chat3, None, OutboundPriority::HIGHEST), t0);
+        assert!(s.grant_ready(t0).is_empty());
+
+        s.complete(refund, OutboundCompletion::NoRequest, t0, t0);
+
+        // The owner is now blocked by chat1 instead of global. Releasing the
+        // old global reservation wakes the parked chat3 request immediately.
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![parked]);
+        assert!(!s.reservations.contains_key(&WindowRef::Global));
+
+        s.cancel(blocked, t0);
+        assert!(!s.reservations.contains_key(&WindowRef::Global));
+        assert!(s.grant_ready(t0).is_empty());
     }
 
     #[test]

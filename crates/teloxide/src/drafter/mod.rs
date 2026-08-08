@@ -7,9 +7,11 @@
 //!
 //! Standard Telegram backends are available through [`TelegramDrafter`]. Pass
 //! one [`InProcessRateLimiter`] instance to all drafters that share a bot
-//! token. The `*_with_observer` constructors expose lifecycle events without
-//! recording preview payloads or user text; enabling the `tracing` feature
-//! installs the payload-free tracing observer by default.
+//! token, or create one [`DrafterOutboundLimiter`] per Drafter over a shared
+//! [`teloxide_core::outbound::OutboundQueue`]. The `*_with_observer`
+//! constructors expose lifecycle events without recording preview payloads or
+//! user text; enabling the `tracing` feature installs the payload-free tracing
+//! observer by default.
 //!
 //! Distributed rate limiting, persistence/recovery, automatic native-to-edit
 //! fallback, rich pagination and automatic semantic segment splitting are
@@ -21,6 +23,7 @@ mod error;
 mod limiter;
 mod machine;
 mod observer;
+mod outbound;
 mod source;
 mod telegram;
 
@@ -34,7 +37,8 @@ pub use error::{
     DrafterErrorDisposition, DrafterOperation,
 };
 pub use limiter::{
-    DrafterPermit, DrafterPriority, DrafterRateLimitKey, DrafterRateLimitScope, DrafterRateLimiter,
+    DrafterAcquireError, DrafterPermit, DrafterPermitCompletion, DrafterPriority,
+    DrafterRateLimitKey, DrafterRateLimitScope, DrafterRateLimiter, DrafterRequestClass,
     InProcessRateLimiter,
 };
 pub use machine::{DraftSink, Drafter};
@@ -44,6 +48,7 @@ pub use observer::{
     DrafterEvent, DrafterEventKind, DrafterMetricsCollector, DrafterMetricsSnapshot,
     DrafterObserver, NoopDrafterObserver,
 };
+pub use outbound::DrafterOutboundLimiter;
 pub use source::{
     AccumulatorSource, DraftAccumulator, PreviewSnapshot, PreviewSource, ReplacePreview,
 };

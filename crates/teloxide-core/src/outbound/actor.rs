@@ -26,12 +26,12 @@
 //! deterministically.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     future::Future,
     panic::AssertUnwindSafe,
     pin::Pin,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicU8, Ordering},
         Arc,
     },
     task::{Context, Poll},
@@ -88,6 +88,20 @@ impl OutboundQueue {
     }
 }
 
+const TOKEN_PENDING: u8 = 0;
+const TOKEN_CANCELLED: u8 = 1;
+const TOKEN_ACCEPTED: u8 = 2;
+const TOKEN_TERMINAL: u8 = 3;
+
+fn cancel_token(state: &AtomicU8) -> bool {
+    state
+        .compare_exchange(TOKEN_PENDING, TOKEN_CANCELLED, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+        || state
+            .compare_exchange(TOKEN_ACCEPTED, TOKEN_CANCELLED, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+}
+
 /// Command sent to the actor.
 enum OutboundCommand {
     Enqueue {
@@ -98,9 +112,11 @@ enum OutboundCommand {
         /// can cancel a job with `Cancel { token }` BEFORE the actor has
         /// mapped the token to a `JobId` (the enqueue command may still be
         /// in flight): the actor keeps both directions (`pending_tokens`
-        /// for accepted jobs, `canceled_tokens` for cancels that arrived
-        /// first).
+        /// in flight); the shared token state linearizes cancellation
+        /// against actor acceptance.
         token: u64,
+        /// Shared state linearizes cancellation against actor acceptance.
+        token_state: Arc<AtomicU8>,
         /// Resolves with the job id (or the enqueue error).
         response: oneshot::Sender<Result<JobId, OutboundQueueError>>,
         /// Resolves when the job is granted (or superseded, or closed).
@@ -115,6 +131,7 @@ enum OutboundCommand {
     },
     Complete {
         job_id: JobId,
+        token_state: Arc<AtomicU8>,
         outcome: OutboundCompletion,
         /// When the caller observed the outcome, on the Tokio clock. The
         /// `RetryAfter` penalty deadline is anchored HERE, so a completion
@@ -197,7 +214,8 @@ impl OutboundQueueHandle {
             scheduler,
             waiters: HashMap::new(),
             pending_tokens: HashMap::new(),
-            canceled_tokens: HashSet::new(),
+            job_tokens: HashMap::new(),
+            token_states: HashMap::new(),
             enqueue: enqueue_rx,
             lifecycle: lifecycle_rx,
             // The actor mints permits with this lifecycle sender. It is
@@ -280,7 +298,16 @@ impl OutboundQueueHandle {
         // racing the acceptance references this identity, so the actor can
         // match it to the job whichever side arrives first.
         let token = self.next_token();
-        let command = OutboundCommand::Enqueue { metadata, lane, mode, token, response, granted };
+        let token_state = Arc::new(AtomicU8::new(TOKEN_PENDING));
+        let command = OutboundCommand::Enqueue {
+            metadata,
+            lane,
+            mode,
+            token,
+            token_state: token_state.clone(),
+            response,
+            granted,
+        };
         let sent = match self.enqueue.try_send(command) {
             Ok(()) => true,
             Err(mpsc::error::TrySendError::Full(command)) => {
@@ -303,6 +330,7 @@ impl OutboundQueueHandle {
             token,
             granted: Some(granted_rx),
             state: EnqueueState::Enqueuing(response_rx),
+            token_state,
             sent,
         }
     }
@@ -416,6 +444,7 @@ pub(crate) struct OutboundEnqueue {
     token: u64,
     granted: Option<oneshot::Receiver<AcquireResult>>,
     state: EnqueueState,
+    token_state: Arc<AtomicU8>,
     /// Whether the enqueue command reached the bounded actor ingress.
     /// Rejected commands must not emit a later cancellation tombstone.
     sent: bool,
@@ -439,6 +468,7 @@ impl Future for OutboundEnqueue {
                     Poll::Ready(Ok(OutboundGrant {
                         handle: this.handle.clone(),
                         token: this.token,
+                        token_state: this.token_state.clone(),
                         granted,
                         resolved: false,
                     }))
@@ -463,10 +493,13 @@ impl Drop for OutboundEnqueue {
         // The job id is unknown until the acceptance, so the cancel
         // references the CLIENT TOKEN: the actor applies it whether the
         // enqueue was already processed (`pending_tokens`) or not yet
-        // (`canceled_tokens`). A resolved future (`Done`) must not cancel
+        // A resolved future (`Done`) must not cancel
         // anything — its token was handed to the `OutboundGrant` or the
         // job never existed.
-        if self.sent && matches!(self.state, EnqueueState::Enqueuing(_)) {
+        if self.sent
+            && matches!(self.state, EnqueueState::Enqueuing(_))
+            && cancel_token(&self.token_state)
+        {
             self.handle.cancel(self.token);
         }
     }
@@ -478,6 +511,7 @@ impl Drop for OutboundEnqueue {
 pub(crate) struct OutboundGrant {
     handle: OutboundQueueHandle,
     token: u64,
+    token_state: Arc<AtomicU8>,
     granted: oneshot::Receiver<AcquireResult>,
     resolved: bool,
 }
@@ -514,7 +548,7 @@ impl Drop for OutboundGrant {
         // it is pending the job can be cancelled through its client token
         // (the actor maps it to the `JobId`; a cancel that races the
         // acceptance is remembered and applied on enqueue).
-        if !self.resolved {
+        if !self.resolved && cancel_token(&self.token_state) {
             self.handle.cancel(self.token);
         }
     }
@@ -593,12 +627,17 @@ fn poll_grant(
 pub struct OutboundPermit {
     job_id: JobId,
     lifecycle: mpsc::UnboundedSender<OutboundCommand>,
+    token_state: Arc<AtomicU8>,
     completed: bool,
 }
 
 impl OutboundPermit {
-    fn new(job_id: JobId, lifecycle: mpsc::UnboundedSender<OutboundCommand>) -> Self {
-        Self { job_id, lifecycle, completed: false }
+    fn new(
+        job_id: JobId,
+        lifecycle: mpsc::UnboundedSender<OutboundCommand>,
+        token_state: Arc<AtomicU8>,
+    ) -> Self {
+        Self { job_id, lifecycle, token_state, completed: false }
     }
 
     /// Reports how the request ended and releases the permit.
@@ -624,8 +663,10 @@ impl OutboundPermit {
         observed_at: tokio::time::Instant,
     ) {
         self.completed = true;
+        self.token_state.store(TOKEN_TERMINAL, Ordering::Release);
         let _ = self.lifecycle.send(OutboundCommand::Complete {
             job_id: self.job_id,
+            token_state: self.token_state.clone(),
             outcome,
             observed_at,
             ack: None,
@@ -645,6 +686,7 @@ impl OutboundPermit {
         self.completed = true;
         let sent = self.lifecycle.send(OutboundCommand::Complete {
             job_id: self.job_id,
+            token_state: self.token_state.clone(),
             outcome,
             observed_at: tokio::time::Instant::now(),
             ack: Some(ack_tx),
@@ -665,6 +707,7 @@ impl Drop for OutboundPermit {
         if !self.completed {
             let _ = self.lifecycle.send(OutboundCommand::Complete {
                 job_id: self.job_id,
+                token_state: self.token_state.clone(),
                 outcome: OutboundCompletion::CancelledAfterGrant,
                 observed_at: tokio::time::Instant::now(),
                 ack: None,
@@ -683,10 +726,10 @@ pub(crate) struct OutboundActor {
     /// is the cancellation identity known to the caller from the moment
     /// the enqueue was sent (see [`OutboundCommand::Enqueue`]).
     pending_tokens: HashMap<u64, JobId>,
-    /// Cancels that arrived before their enqueue was processed. The actor
-    /// cannot know the `JobId` yet, so the token is remembered and applied
-    /// when the enqueue command is handled.
-    canceled_tokens: HashSet<u64>,
+    /// Reverse index used to remove token mappings in O(1) on completion.
+    job_tokens: HashMap<JobId, u64>,
+    /// Shared cancellation states of accepted jobs.
+    token_states: HashMap<u64, Arc<AtomicU8>>,
     enqueue: mpsc::Receiver<OutboundCommand>,
     lifecycle: mpsc::UnboundedReceiver<OutboundCommand>,
     /// Used to mint permits at grant time; see
@@ -725,12 +768,37 @@ impl OutboundActor {
     /// (e.g. superseded by a latest-wins replacement): the acquire future
     /// of the superseded job resolved and will never send its `Cancel`.
     fn forget_job(&mut self, job_id: JobId) {
-        self.pending_tokens.retain(|_, job| *job != job_id);
+        let Some(token) = self.job_tokens.remove(&job_id) else { return };
+        self.pending_tokens.remove(&token);
+        if let Some(state) = self.token_states.remove(&token) {
+            state.store(TOKEN_TERMINAL, Ordering::Release);
+        }
     }
 
     fn handle_command(&mut self, command: OutboundCommand) {
         match command {
-            OutboundCommand::Enqueue { metadata, lane, mode, token, response, granted } => {
+            OutboundCommand::Enqueue {
+                metadata,
+                lane,
+                mode,
+                token,
+                token_state,
+                response,
+                granted,
+            } => {
+                if token_state
+                    .compare_exchange(
+                        TOKEN_PENDING,
+                        TOKEN_ACCEPTED,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    )
+                    .is_err()
+                {
+                    token_state.store(TOKEN_TERMINAL, Ordering::Release);
+                    let _ = response.send(Err(OutboundQueueError::Closed));
+                    return;
+                }
                 let meta = OutboundMeta {
                     scope: metadata.scope,
                     lane,
@@ -746,6 +814,9 @@ impl OutboundActor {
                             }
                             self.forget_job(superseded);
                         }
+                        self.pending_tokens.insert(token, outcome.job);
+                        self.job_tokens.insert(outcome.job, token);
+                        self.token_states.insert(token, token_state);
                         if response.send(Ok(outcome.job)).is_err() {
                             // The acquire future was dropped before the reply
                             // was delivered. The job is still pending here
@@ -753,29 +824,23 @@ impl OutboundActor {
                             // loop iteration), so cancel it: nobody can ever
                             // own the permit, and leaving the job would leak
                             // an in-flight slot and a lane block.
-                            self.pending_tokens.remove(&token);
                             self.scheduler.cancel(outcome.job, self.now());
+                            self.forget_job(outcome.job);
                             return;
                         }
-                        if self.canceled_tokens.remove(&token) {
-                            // The acquire was cancelled BEFORE the acceptance
-                            // (its `Drop` raced the actor and could not know
-                            // the job id yet): the job must not sit pending
-                            // for a grant that can never be observed.
-                            self.scheduler.cancel(outcome.job, self.now());
-                            return;
-                        }
-                        self.pending_tokens.insert(token, outcome.job);
                         self.waiters.insert(outcome.job, granted);
                     }
                     Err(EnqueueError::QueueFull) => {
+                        token_state.store(TOKEN_TERMINAL, Ordering::Release);
                         let _ = response.send(Err(OutboundQueueError::QueueFull));
                     }
                     Err(EnqueueError::IncompatibleCoalesceMetadata) => {
+                        token_state.store(TOKEN_TERMINAL, Ordering::Release);
                         let _ =
                             response.send(Err(OutboundQueueError::IncompatibleCoalesceMetadata));
                     }
                     Err(EnqueueError::WeightExceedsWindow { scope, weight, capacity }) => {
+                        token_state.store(TOKEN_TERMINAL, Ordering::Release);
                         let _ = response.send(Err(OutboundQueueError::WeightExceedsWindow {
                             scope,
                             weight,
@@ -788,15 +853,12 @@ impl OutboundActor {
                 if let Some(job_id) = self.pending_tokens.remove(&token) {
                     self.waiters.remove(&job_id);
                     self.scheduler.cancel(job_id, self.now());
-                } else {
-                    // The enqueue command has not been processed yet (or
-                    // the token was already consumed): remember the cancel
-                    // so the job is cancelled the moment it is accepted.
-                    self.canceled_tokens.insert(token);
+                    self.forget_job(job_id);
                 }
             }
-            OutboundCommand::Complete { job_id, outcome, observed_at, ack } => {
+            OutboundCommand::Complete { token_state, job_id, outcome, observed_at, ack } => {
                 self.scheduler.complete(job_id, outcome, self.now(), self.to_std(observed_at));
+                token_state.store(TOKEN_TERMINAL, Ordering::Release);
                 // Keep the token mapping through grant delivery so a
                 // buffered grant dropped before polling can still send its
                 // cancellation without creating a permanent tombstone.
@@ -842,7 +904,10 @@ impl OutboundActor {
             // Keep the token mapping until completion: a buffered grant may
             // be dropped before polling and then emit a late cancellation.
             // Completion is the terminal point for the token lifecycle.
-            let permit = OutboundPermit::new(grant.job, self.lifecycle_tx.clone());
+            let token = self.job_tokens.get(&grant.job).copied();
+            let Some(token) = token else { continue };
+            let Some(token_state) = self.token_states.get(&token).cloned() else { continue };
+            let permit = OutboundPermit::new(grant.job, self.lifecycle_tx.clone(), token_state);
             if let Some(waiter) = self.waiters.remove(&grant.job) {
                 let _ = waiter.send(AcquireResult::Granted(permit));
             }
@@ -1710,6 +1775,41 @@ mod tests {
         in_flight.complete(OutboundCompletion::Success);
         tokio::time::advance(Duration::from_secs(61)).await;
         let permit = tokio::time::timeout(Duration::from_secs(1), pending).await.unwrap().unwrap();
+        permit.complete(OutboundCompletion::Success);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn pre_cancelled_latest_wins_replacement_keeps_predecessor() {
+        let queue = OutboundQueue::new_spawn(settings_with(
+            vec![window(1, Duration::from_secs(60))],
+            Vec::new(),
+        ))
+        .unwrap();
+        let handle = queue.handle();
+
+        // Keep the first request in flight and the predecessor pending
+        // behind the exhausted window.
+        let first =
+            handle.acquire_latest_wins(metadata(OutboundPriority::NORMAL), 7).await.unwrap();
+        let predecessor = handle.acquire_latest_wins(metadata(OutboundPriority::NORMAL), 7);
+        tokio::pin!(predecessor);
+        tokio::task::yield_now().await;
+        assert!(futures::poll!(predecessor.as_mut()).is_pending());
+
+        // Put the replacement into the ingress, then cancel it before the
+        // actor accepts it. The predecessor must not be superseded.
+        {
+            let mut replacement =
+                Box::pin(handle.acquire_latest_wins(metadata(OutboundPriority::NORMAL), 7));
+            assert!(futures::poll!(replacement.as_mut()).is_pending());
+        }
+        tokio::task::yield_now().await;
+        assert_eq!(handle.snapshot().await.unwrap().pending, 1);
+
+        first.complete(OutboundCompletion::Success);
+        tokio::time::advance(Duration::from_secs(61)).await;
+        let permit =
+            tokio::time::timeout(Duration::from_secs(1), predecessor).await.unwrap().unwrap();
         permit.complete(OutboundCompletion::Success);
     }
 

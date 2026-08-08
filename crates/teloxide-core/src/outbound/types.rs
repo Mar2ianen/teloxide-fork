@@ -318,7 +318,16 @@ pub enum OutboundCompletion {
     },
     Failed,
     /// The granted permit was dropped without an explicit completion.
+    ///
+    /// The request may already have started, so the rate budget is not
+    /// refunded. The ordering lane is still released.
     CancelledAfterGrant,
+    /// No outbound request was started after this permit was granted.
+    ///
+    /// This is an explicit opt-in completion for local no-op paths; unlike
+    /// [`Self::CancelledAfterGrant`], the scheduler may refund its accounting
+    /// weight.
+    NoRequest,
 }
 
 /// Fairness configuration for priority aging.

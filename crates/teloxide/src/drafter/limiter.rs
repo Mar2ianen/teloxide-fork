@@ -10,8 +10,10 @@ use std::{
 use teloxide_core::types::ChatId;
 use tokio::time::Instant;
 
-/// A key used by the shared limiter. The same limiter instance should be
-/// passed to every drafter belonging to one bot token.
+/// Stable chat identity used by a shared limiter and outbound queue.
+///
+/// Create one queue-backed limiter adapter per Drafter and share the
+/// underlying outbound queue across drafters that use the same bot token.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct DrafterRateLimitKey {
     pub chat_id: ChatId,
@@ -148,6 +150,24 @@ pub trait DrafterRateLimiter: Send + Sync + 'static {
     fn penalize(&self, scope: DrafterRateLimitScope, retry_after: Duration);
 
     fn completion_handles_retry_after(&self) -> bool {
+        false
+    }
+
+    /// Transfers a granted operation permit to a per-request scheduler when
+    /// the backend can account each underlying Bot API request separately.
+    /// Legacy limiters keep ownership of the permit in the Drafter worker.
+    fn request_context(
+        &self,
+        permit: DrafterPermit,
+        _key: DrafterRateLimitKey,
+        _priority: DrafterPriority,
+    ) -> Result<super::DrafterRequestContext, DrafterPermit> {
+        Err(permit)
+    }
+
+    /// Whether the limiter supports per-request scheduling, including
+    /// separate permits for backend cleanup requests.
+    fn uses_request_scheduler(&self) -> bool {
         false
     }
 }

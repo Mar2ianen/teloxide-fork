@@ -1165,6 +1165,48 @@ impl SchedulerState {
         }
     }
 
+    /// Re-arms only the owner of a reservation affected by a refund. The
+    /// reservation and its parked FIFO remain intact, so newer consumers
+    /// cannot overtake a heavy owner merely because one debit disappeared.
+    fn rearm_reservation_owner(&mut self, window: &WindowRef, now: Instant) {
+        let Some(owner) = self.reservations.get(window).and_then(|reservation| reservation.owner)
+        else {
+            return;
+        };
+        match owner {
+            CandidateRef::Job(job_id) => {
+                let rearm = self.jobs.get_mut(&job_id).is_some_and(|job| {
+                    if job.in_blocked_heap {
+                        job.in_blocked_heap = false;
+                        true
+                    } else {
+                        false
+                    }
+                });
+                if rearm {
+                    self.stale_blocked += 1;
+                    self.push_job_candidate(job_id, now);
+                }
+            }
+            CandidateRef::Lane(lane) => {
+                let rearm = self.lanes.get_mut(&lane).is_some_and(|lane_state| {
+                    if lane_state.in_blocked_heap {
+                        lane_state.in_blocked_heap = false;
+                        lane_state.blocked_generation =
+                            lane_state.blocked_generation.wrapping_add(1);
+                        true
+                    } else {
+                        false
+                    }
+                });
+                if rearm {
+                    self.stale_blocked += 1;
+                    self.push_lane_head_candidate(lane, now);
+                }
+            }
+        }
+    }
+
     /// Rebuilds the blocked heap when stale entries dominate, so that a
     /// hot latest-wins slot cannot grow the heap without bound while a
     /// long penalty or window keeps the slot blocked.
@@ -1208,6 +1250,12 @@ impl SchedulerState {
                     if job.not_before.is_some() {
                         continue; // re-delayed somehow; the heap will wake it
                     }
+                    if !job.in_blocked_heap {
+                        // A refund may have re-armed this owner while its old
+                        // deadline was still in the heap.
+                        self.stale_blocked = self.stale_blocked.saturating_sub(1);
+                        continue;
+                    }
                     self.jobs.get_mut(&job_id).expect("job exists").in_blocked_heap = false;
                     self.push_job_candidate(job_id, now);
                 }
@@ -1220,6 +1268,12 @@ impl SchedulerState {
                         // A stale node (replaced by a fresh wake node): it
                         // was accounted when it was superseded and must
                         // never touch the lane's current blocked state.
+                        self.stale_blocked = self.stale_blocked.saturating_sub(1);
+                        continue;
+                    }
+                    if !lane_state.in_blocked_heap {
+                        // A refund re-armed the current lane head while this
+                        // old deadline was still waiting in the heap.
                         self.stale_blocked = self.stale_blocked.saturating_sub(1);
                         continue;
                     }
@@ -1614,7 +1668,9 @@ impl SchedulerState {
 
     fn admission(&mut self, candidate: &Candidate, now: Instant) -> Admission {
         let weight = candidate.weight.get();
-        if self.reservation_active(WindowRef::Global, now) {
+        if self.reservation_active(WindowRef::Global, now)
+            && !self.reservation_owner_is(candidate, &WindowRef::Global)
+        {
             return Admission::Reserved;
         }
         let mut until = now;
@@ -1628,7 +1684,10 @@ impl SchedulerState {
             reserve = Some(WindowRef::Global);
         }
         if let OutboundScope::Chat(chat) = &candidate.scope {
-            if self.reservation_active(WindowRef::Chat(chat.clone()), now) {
+            let chat_window = WindowRef::Chat(chat.clone());
+            if self.reservation_active(chat_window.clone(), now)
+                && !self.reservation_owner_is(candidate, &chat_window)
+            {
                 return Admission::Reserved;
             }
             if self.penalty_active(PenaltyKey::Chat(chat.clone()), now) {
@@ -1654,6 +1713,13 @@ impl SchedulerState {
 
     fn penalty_active(&self, key: PenaltyKey, now: Instant) -> bool {
         self.penalties.get(&key).is_some_and(|&until| now < until)
+    }
+
+    fn reservation_owner_is(&self, candidate: &Candidate, window: &WindowRef) -> bool {
+        let reference = self.reference_of(candidate);
+        self.reservations
+            .get(window)
+            .is_some_and(|reservation| reservation.owner == Some(reference))
     }
 
     fn grant(&mut self, candidate: Candidate, now: Instant) {
@@ -1712,21 +1778,28 @@ impl SchedulerState {
             }
         }
         if refund {
-            let mut refunded = self.global_windows.refund(now, job, in_flight.weight);
+            let mut refunded_windows = Vec::new();
+            if self.global_windows.refund(now, job, in_flight.weight) {
+                refunded_windows.push(WindowRef::Global);
+            }
             if let OutboundScope::Chat(chat) = &in_flight.scope {
                 let remove_chat_window =
                     self.chat_window_sets.get_mut(chat).is_some_and(|windows| {
-                        refunded |= windows.refund(now, job, in_flight.weight);
+                        let refunded = windows.refund(now, job, in_flight.weight);
+                        if refunded {
+                            refunded_windows.push(WindowRef::Chat(chat.clone()));
+                        }
                         windows.is_idle(now)
                     });
                 if remove_chat_window {
                     self.chat_window_sets.remove(chat);
                 }
             }
-            if refunded {
-                // Any blocked/parked deadlines derived from this debit are
-                // stale now that the exact grant accounting was removed.
-                self.rearm_blocked_and_parked(now);
+            for window in refunded_windows {
+                // A refund invalidates only the deadline derived from this
+                // window. Keep its reservation and parked FIFO intact, and
+                // wake its owner ahead of newer consumers.
+                self.rearm_reservation_owner(&window, now);
             }
         }
         if let OutboundCompletion::RetryAfter { scope, duration } = completion {
@@ -2019,9 +2092,10 @@ fn blocked_node_alive(
     lanes: &HashMap<OutboundLaneKey, LaneState>,
 ) -> bool {
     match node.reference {
-        CandidateRef::Job(job_id) => jobs.contains_key(&job_id),
+        CandidateRef::Job(job_id) => jobs.get(&job_id).is_some_and(|job| job.in_blocked_heap),
         CandidateRef::Lane(lane) => lanes.get(&lane).is_some_and(|state| {
-            state.blocked_generation == node.generation
+            state.in_blocked_heap
+                && state.blocked_generation == node.generation
                 && state.pending.iter().any(|&(_, id)| jobs.contains_key(&id))
         }),
     }
@@ -2567,6 +2641,50 @@ mod tests {
         s.complete(a, OutboundCompletion::NoRequest, t0, t0);
 
         assert_eq!(jobs(&s.grant_ready(t0)), vec![b]);
+    }
+
+    #[test]
+    fn no_request_refund_preserves_weighted_reservation_owner() {
+        let mut s = scheduler(
+            OutboundLimits {
+                global: vec![WindowLimit::new(2, Duration::from_secs(60))],
+                chat: vec![],
+            },
+            aging(),
+        );
+        let t0 = base();
+        let a = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![a]);
+
+        let heavy = s
+            .enqueue(
+                OutboundMeta {
+                    weight: NonZeroU32::new(2).unwrap(),
+                    ..global(OutboundPriority::NORMAL)
+                },
+                OutboundEnqueueMode::Fifo,
+                usize::MAX,
+                None,
+                t0,
+            )
+            .unwrap()
+            .job;
+        assert!(s.grant_ready(t0).is_empty());
+
+        let light = fifo(&mut s, global(OutboundPriority::HIGHEST), t0);
+        assert!(s.grant_ready(t0).is_empty());
+        assert_eq!(
+            s.reservations.get(&WindowRef::Global).and_then(|r| r.owner),
+            Some(CandidateRef::Job(heavy))
+        );
+
+        s.complete(a, OutboundCompletion::NoRequest, t0, t0);
+
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![heavy]);
+        assert!(
+            !s.in_flight.contains_key(&light),
+            "parked newer traffic must not overtake the refunded reservation owner"
+        );
     }
 
     #[test]

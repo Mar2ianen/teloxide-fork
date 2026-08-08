@@ -83,6 +83,20 @@ pub trait DrafterBackend: Send + 'static {
 
     fn abort(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
+    /// Runs best-effort cleanup after a segment or final delivery has already
+    /// succeeded. Scheduler-aware backends must keep this cleanup separate
+    /// from [`Self::commit_segment`] and [`Self::finish`], so cleanup admission
+    /// cannot change the primary delivery result.
+    fn cleanup_after_delivery(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
+    }
+
+    /// Whether successful delivery currently has an external cleanup request
+    /// to run through [`Self::cleanup_after_delivery`].
+    fn cleanup_after_delivery_possible(&self) -> bool {
+        false
+    }
+
     /// Classifies the first real request made by an operation. Scheduler-aware
     /// custom backends must override this when their first request differs from
     /// the default state-based Telegram backend classification.

@@ -79,8 +79,14 @@ impl std::error::Error for DrafterAcquireError {}
 pub enum DrafterPermitCompletion {
     Success,
     Failed,
-    RetryAfter { scope: DrafterRateLimitScope, duration: Duration },
+    RetryAfter {
+        scope: DrafterRateLimitScope,
+        duration: Duration,
+    },
+    /// The request may already have started, so its rate budget is retained.
     CancelledAfterGrant,
+    /// No request was started after the permit was granted.
+    NoRequest,
 }
 
 pub(crate) trait DrafterPermitLease: Send {

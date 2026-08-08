@@ -620,7 +620,9 @@ fn poll_grant(
 /// Dropping the permit without an explicit completion reports
 /// [`OutboundCompletion::CancelledAfterGrant`] to the scheduler (best
 /// effort): the rate budget is not refunded, but the ordering lane (if any)
-/// is released.
+/// is released. Callers that prove no request started may report
+/// [`OutboundCompletion::NoRequest`] explicitly to refund the accounting
+/// weight.
 /// The permit owns a lifecycle sender (not the full handle): minting it
 /// never keeps the bounded enqueue ingress alive, so the actor can exit
 /// when every external handle is dropped even while permits are in flight.
@@ -644,7 +646,8 @@ impl OutboundPermit {
     ///
     /// A `RetryAfter` completion penalizes the reported scope for the
     /// reported duration (a chat-scoped request may report a global flood
-    /// penalty). The rate budget consumed by the grant is never refunded.
+    /// penalty). The rate budget consumed by the grant is refunded only for
+    /// an explicit `NoRequest` completion.
     pub fn complete(self, outcome: OutboundCompletion) {
         self.complete_observed_at(outcome, tokio::time::Instant::now());
     }

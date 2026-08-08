@@ -1,3 +1,5 @@
+use super::limiter::DrafterAcquireError;
+
 use std::{fmt, time::Duration};
 
 /// A monotonically increasing source revision.
@@ -105,9 +107,11 @@ pub struct DrafterErrorDisposition {
 
 /// Error returned by `flush` when the worker cannot deliver the target.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum DraftFlushError {
     WorkerStopped,
     PreviewDisabled,
+    RateLimiter(DrafterAcquireError),
 }
 
 impl fmt::Display for DraftFlushError {
@@ -115,6 +119,7 @@ impl fmt::Display for DraftFlushError {
         match self {
             Self::WorkerStopped => f.write_str("drafter worker stopped"),
             Self::PreviewDisabled => f.write_str("preview delivery is disabled"),
+            Self::RateLimiter(error) => write!(f, "drafter rate limiter failed: {error}"),
         }
     }
 }
@@ -123,8 +128,10 @@ impl std::error::Error for DraftFlushError {}
 
 /// Error returned by `commit_segment`.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum DraftCommitError<E> {
     WorkerStoppedBeforeCommand,
+    RateLimiter(DrafterAcquireError),
     WorkerStoppedAfterCommand { delivery: DeliveryCertainty },
     RequestTimeout { delivery: DeliveryCertainty },
     DeadlineExceeded { delivery: DeliveryCertainty },
@@ -137,6 +144,7 @@ impl<E: fmt::Display> fmt::Display for DraftCommitError<E> {
             Self::WorkerStoppedBeforeCommand => {
                 f.write_str("drafter worker stopped before segment commit command")
             }
+            Self::RateLimiter(error) => write!(f, "segment commit rate limiter failed: {error}"),
             Self::WorkerStoppedAfterCommand { delivery } => {
                 write!(f, "drafter worker stopped after segment commit command ({delivery:?})")
             }
@@ -157,8 +165,10 @@ impl<E: std::error::Error + 'static> std::error::Error for DraftCommitError<E> {
 
 /// Error returned by `finish`.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum DraftFinishError<E> {
     WorkerStoppedBeforeCommand,
+    RateLimiter(DrafterAcquireError),
     WorkerStoppedAfterCommand { delivery: DeliveryCertainty },
     RequestTimeout { delivery: DeliveryCertainty },
     DeadlineExceeded { delivery: DeliveryCertainty },
@@ -171,6 +181,7 @@ impl<E: fmt::Display> fmt::Display for DraftFinishError<E> {
             Self::WorkerStoppedBeforeCommand => {
                 f.write_str("drafter worker stopped before final command")
             }
+            Self::RateLimiter(error) => write!(f, "final delivery rate limiter failed: {error}"),
             Self::WorkerStoppedAfterCommand { delivery } => {
                 write!(f, "drafter worker stopped after final command ({delivery:?})")
             }

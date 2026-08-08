@@ -7,7 +7,8 @@ use std::{
 use teloxide_core::types::{ChatId, MessageId};
 
 use super::{
-    DrafterErrorDisposition, DrafterOperation, DrafterRateLimitKey, DrafterRequestContext,
+    DrafterErrorDisposition, DrafterOperation, DrafterRateLimitKey, DrafterRequestClass,
+    DrafterRequestContext,
 };
 
 /// Successful acknowledgement of a preview request.
@@ -81,6 +82,43 @@ pub trait DrafterBackend: Send + 'static {
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send;
 
     fn abort(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    /// Classifies the first real request made by an operation. Scheduler-aware
+    /// custom backends must override this when their first request differs from
+    /// the default state-based Telegram backend classification.
+    fn first_request_class(&self, operation: DrafterOperation) -> DrafterRequestClass {
+        if matches!(operation, DrafterOperation::Cleanup) {
+            DrafterRequestClass::Mutation
+        } else if matches!(operation, DrafterOperation::SegmentCommit | DrafterOperation::Final)
+            && self.capabilities().mode == DrafterMode::StatusEditThenSendFinal
+        {
+            DrafterRequestClass::Send
+        } else if self.preview_message_id().is_some() {
+            DrafterRequestClass::Mutation
+        } else {
+            DrafterRequestClass::Send
+        }
+    }
+
+    /// Whether this backend error means that one admitted request exceeded its
+    /// per-request timeout. The worker uses this to preserve its existing
+    /// timeout result shape for scheduler-aware backends.
+    fn is_request_timeout(&self, _error: &Self::Error) -> bool {
+        false
+    }
+
+    /// Whether this backend can identify a preview update that performs no
+    /// external request before admission. This is an optimization for
+    /// scheduler-aware backends; the default keeps the existing behavior.
+    fn may_skip_preview(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this particular preview is a local no-op. Called only
+    /// when [`Self::may_skip_preview`] returns `true`.
+    fn preview_is_noop(&self, _preview: &Self::Preview) -> bool {
+        false
+    }
 
     /// Whether this backend consumes a request context and schedules every
     /// underlying Bot API request separately.

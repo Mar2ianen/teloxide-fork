@@ -233,6 +233,7 @@ impl OutboundQueueHandle {
     /// `pub(crate)` for now: only the `ThrottleCompat` layer needs the
     /// admission point; make it public (and re-export the phase types)
     /// when a second caller appears.
+    #[cfg(any(feature = "throttle", test))]
     pub(crate) fn enqueue(&self, metadata: OutboundMetadata) -> OutboundEnqueue {
         self.enqueue_inner(metadata, None, OutboundEnqueueMode::Fifo)
     }
@@ -280,8 +281,8 @@ impl OutboundQueueHandle {
         // match it to the job whichever side arrives first.
         let token = self.next_token();
         let command = OutboundCommand::Enqueue { metadata, lane, mode, token, response, granted };
-        match self.enqueue.try_send(command) {
-            Ok(()) => {}
+        let sent = match self.enqueue.try_send(command) {
+            Ok(()) => true,
             Err(mpsc::error::TrySendError::Full(command)) => {
                 // The ingress is at capacity: fail fast, the actor never
                 // saw the command. The response receiver is alive and
@@ -289,17 +290,20 @@ impl OutboundQueueHandle {
                 if let OutboundCommand::Enqueue { response, .. } = command {
                     let _ = response.send(Err(OutboundQueueError::QueueFull));
                 }
+                false
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
                 // The actor is gone; the acquire resolves with `Closed`
                 // through the dropped response receiver.
+                false
             }
-        }
+        };
         OutboundEnqueue {
             handle: self.clone(),
             token,
             granted: Some(granted_rx),
             state: EnqueueState::Enqueuing(response_rx),
+            sent,
         }
     }
 
@@ -412,6 +416,9 @@ pub(crate) struct OutboundEnqueue {
     token: u64,
     granted: Option<oneshot::Receiver<AcquireResult>>,
     state: EnqueueState,
+    /// Whether the enqueue command reached the bounded actor ingress.
+    /// Rejected commands must not emit a later cancellation tombstone.
+    sent: bool,
 }
 
 impl Future for OutboundEnqueue {
@@ -459,7 +466,7 @@ impl Drop for OutboundEnqueue {
         // (`canceled_tokens`). A resolved future (`Done`) must not cancel
         // anything — its token was handed to the `OutboundGrant` or the
         // job never existed.
-        if matches!(self.state, EnqueueState::Enqueuing(_)) {
+        if self.sent && matches!(self.state, EnqueueState::Enqueuing(_)) {
             self.handle.cancel(self.token);
         }
     }
@@ -790,6 +797,11 @@ impl OutboundActor {
             }
             OutboundCommand::Complete { job_id, outcome, observed_at, ack } => {
                 self.scheduler.complete(job_id, outcome, self.now(), self.to_std(observed_at));
+                // Keep the token mapping through grant delivery so a
+                // buffered grant dropped before polling can still send its
+                // cancellation without creating a permanent tombstone.
+                // Completion is the terminal point for the token lifecycle.
+                self.forget_job(job_id);
                 if let Some(ack) = ack {
                     let _ = ack.send(());
                 }
@@ -827,6 +839,9 @@ impl OutboundActor {
     /// reaches the caller or completes the job itself.
     fn deliver_grants(&mut self, grants: Vec<Grant>) {
         for grant in grants {
+            // Keep the token mapping until completion: a buffered grant may
+            // be dropped before polling and then emit a late cancellation.
+            // Completion is the terminal point for the token lifecycle.
             let permit = OutboundPermit::new(grant.job, self.lifecycle_tx.clone());
             if let Some(waiter) = self.waiters.remove(&grant.job) {
                 let _ = waiter.send(AcquireResult::Granted(permit));

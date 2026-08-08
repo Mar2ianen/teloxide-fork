@@ -6,7 +6,9 @@ use std::{
 
 use teloxide_core::types::{ChatId, MessageId};
 
-use super::{DrafterErrorDisposition, DrafterOperation, DrafterRateLimitKey};
+use super::{
+    DrafterErrorDisposition, DrafterOperation, DrafterRateLimitKey, DrafterRequestContext,
+};
 
 /// Successful acknowledgement of a preview request.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -79,6 +81,32 @@ pub trait DrafterBackend: Send + 'static {
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send;
 
     fn abort(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    /// Whether this backend consumes a request context and schedules every
+    /// underlying Bot API request separately.
+    ///
+    /// The default is `false`: custom backends retain the legacy
+    /// operation-level permit contract until they opt into per-request
+    /// accounting explicitly. A backend that opts in and can issue a real
+    /// request from [`Self::abort`] must also return `true` from
+    /// [`Self::abort_request_possible`] while that request is possible.
+    fn supports_request_scheduler(&self) -> bool {
+        false
+    }
+
+    /// Installs the context for the next backend operation. Standard Telegram
+    /// backends consume it at the operation boundary and schedule every typed
+    /// request. Custom backends must override this together with
+    /// [`Self::supports_request_scheduler`] to use per-request accounting.
+    fn set_request_context(&mut self, _context: Option<DrafterRequestContext>) {}
+
+    /// Whether `abort` can issue a real cleanup request for the current
+    /// backend state. A scheduler-enabled custom backend must override this
+    /// whenever `abort` can issue a request; the conservative default avoids
+    /// granting a phantom permit for a no-op cleanup.
+    fn abort_request_possible(&self) -> bool {
+        false
+    }
 
     fn classify_error(
         &self,

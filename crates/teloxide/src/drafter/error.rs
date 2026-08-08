@@ -205,6 +205,7 @@ impl<E: std::error::Error + 'static> std::error::Error for DraftFinishError<E> {
 pub enum DraftAbortError<E> {
     WorkerStopped,
     RequestTimeout,
+    RateLimiter(DrafterAcquireError),
     Backend(E),
 }
 
@@ -213,6 +214,7 @@ impl<E: fmt::Display> fmt::Display for DraftAbortError<E> {
         match self {
             Self::WorkerStopped => f.write_str("drafter worker stopped"),
             Self::RequestTimeout => f.write_str("abort cleanup request timed out"),
+            Self::RateLimiter(error) => write!(f, "abort cleanup rate limiter failed: {error}"),
             Self::Backend(error) => write!(f, "abort cleanup failed: {error}"),
         }
     }

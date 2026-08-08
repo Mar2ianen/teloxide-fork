@@ -48,7 +48,7 @@ pub use observer::{
     DrafterEvent, DrafterEventKind, DrafterMetricsCollector, DrafterMetricsSnapshot,
     DrafterObserver, NoopDrafterObserver,
 };
-pub use outbound::DrafterOutboundLimiter;
+pub use outbound::{DrafterOutboundLimiter, DrafterRequestContext, DrafterRequestError};
 pub use source::{
     AccumulatorSource, DraftAccumulator, PreviewSnapshot, PreviewSource, ReplacePreview,
 };

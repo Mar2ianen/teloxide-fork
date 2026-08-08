@@ -1,6 +1,8 @@
 use std::{
     collections::HashMap,
+    fmt,
     future::Future,
+    pin::Pin,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -37,16 +39,94 @@ pub enum DrafterPriority {
     Final,
 }
 
-/// A successful reservation from a [`DrafterRateLimiter`].
-#[derive(Debug)]
+/// Broad outbound method class selected from the backend's current state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DrafterRequestClass {
+    Send,
+    Mutation,
+}
+
+/// Failure to acquire a shared Drafter scheduling slot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum DrafterAcquireError {
+    Closed,
+    QueueFull,
+    Superseded,
+    InvalidConfiguration,
+}
+
+impl fmt::Display for DrafterAcquireError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Closed => f.write_str("drafter rate limiter is closed"),
+            Self::QueueFull => f.write_str("drafter rate limiter queue is full"),
+            Self::Superseded => f.write_str("drafter rate-limit request was superseded"),
+            Self::InvalidConfiguration => {
+                f.write_str("drafter rate limiter configuration is invalid")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DrafterAcquireError {}
+
+/// The result reported by the operation guarded by a DrafterPermit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum DrafterPermitCompletion {
+    Success,
+    Failed,
+    RetryAfter { scope: DrafterRateLimitScope, duration: Duration },
+    CancelledAfterGrant,
+}
+
+pub(crate) trait DrafterPermitLease: Send {
+    fn complete(
+        self: Box<Self>,
+        completion: DrafterPermitCompletion,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>>;
+}
+
+struct NoopPermitLease;
+
+impl DrafterPermitLease for NoopPermitLease {
+    fn complete(
+        self: Box<Self>,
+        _completion: DrafterPermitCompletion,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+        Box::pin(async {})
+    }
+}
+
+/// A successful reservation from a DrafterRateLimiter.
+///
+/// The permit owns the scheduler reservation until the guarded backend
+/// operation reports an outcome. Dropping it without completion delegates to
+/// the underlying limiter cancellation behavior.
 pub struct DrafterPermit {
-    _private: (),
+    lease: Option<Box<dyn DrafterPermitLease>>,
+}
+
+impl fmt::Debug for DrafterPermit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DrafterPermit").field("active", &self.lease.is_some()).finish()
+    }
 }
 
 impl DrafterPermit {
-    /// Creates a permit for a limiter implementation.
-    pub const fn new() -> Self {
-        Self { _private: () }
+    pub fn new() -> Self {
+        Self { lease: Some(Box::new(NoopPermitLease)) }
+    }
+
+    pub(crate) fn from_lease(lease: impl DrafterPermitLease + 'static) -> Self {
+        Self { lease: Some(Box::new(lease)) }
+    }
+
+    pub async fn complete(mut self, completion: DrafterPermitCompletion) {
+        if let Some(lease) = self.lease.take() {
+            lease.complete(completion).await;
+        }
     }
 }
 
@@ -62,9 +142,14 @@ pub trait DrafterRateLimiter: Send + Sync + 'static {
         &self,
         key: DrafterRateLimitKey,
         priority: DrafterPriority,
-    ) -> impl Future<Output = DrafterPermit> + Send;
+        request_class: DrafterRequestClass,
+    ) -> impl Future<Output = Result<DrafterPermit, DrafterAcquireError>> + Send;
 
     fn penalize(&self, scope: DrafterRateLimitScope, retry_after: Duration);
+
+    fn completion_handles_retry_after(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Default)]
@@ -147,7 +232,12 @@ impl Default for InProcessRateLimiter {
 }
 
 impl DrafterRateLimiter for InProcessRateLimiter {
-    async fn acquire(&self, key: DrafterRateLimitKey, priority: DrafterPriority) -> DrafterPermit {
+    async fn acquire(
+        &self,
+        key: DrafterRateLimitKey,
+        priority: DrafterPriority,
+        _request_class: DrafterRequestClass,
+    ) -> Result<DrafterPermit, DrafterAcquireError> {
         let (id, mut waiter) = {
             let mut state = self.state.lock().expect("drafter limiter mutex poisoned");
             state.record_operation(Instant::now());
@@ -171,7 +261,7 @@ impl DrafterRateLimiter for InProcessRateLimiter {
                 let mut state = self.state.lock().expect("drafter limiter mutex poisoned");
                 let Some(current) = state.waiters.iter().find(|waiter| waiter.id == id).copied()
                 else {
-                    return DrafterPermit::new();
+                    return Ok(DrafterPermit::new());
                 };
                 let own_deadline = state.availability_deadline(current.key, now);
                 let has_priority_waiter = state.waiters.iter().any(|other| {
@@ -204,7 +294,7 @@ impl DrafterRateLimiter for InProcessRateLimiter {
                 AcquireWait::YieldToPriority => {
                     tokio::task::yield_now().await;
                 }
-                AcquireWait::Acquired => return DrafterPermit::new(),
+                AcquireWait::Acquired => return Ok(DrafterPermit::new()),
             }
         }
     }
@@ -260,19 +350,23 @@ mod tests {
     async fn final_waiter_precedes_refresh_waiter() {
         let limiter = InProcessRateLimiter::new(Duration::from_secs(1), Duration::from_secs(1));
         let key = DrafterRateLimitKey { chat_id: ChatId(1) };
-        let _ = limiter.acquire(key, DrafterPriority::ChangedPreview).await;
+        let _ =
+            limiter.acquire(key, DrafterPriority::ChangedPreview, DrafterRequestClass::Send).await;
 
         let refresh = {
             let limiter = limiter.clone();
             tokio::spawn(async move {
-                limiter.acquire(key, DrafterPriority::RefreshPreview).await;
+                let _ = limiter
+                    .acquire(key, DrafterPriority::RefreshPreview, DrafterRequestClass::Send)
+                    .await;
             })
         };
         tokio::task::yield_now().await;
         let final_delivery = {
             let limiter = limiter.clone();
             tokio::spawn(async move {
-                limiter.acquire(key, DrafterPriority::Final).await;
+                let _ =
+                    limiter.acquire(key, DrafterPriority::Final, DrafterRequestClass::Send).await;
             })
         };
         tokio::task::yield_now().await;
@@ -296,11 +390,15 @@ mod tests {
         let other = DrafterRateLimitKey { chat_id: ChatId(2) };
         limiter.penalize(DrafterRateLimitScope::Chat(penalized.chat_id), Duration::from_secs(5));
 
-        let _ = limiter.acquire(other, DrafterPriority::ChangedPreview).await;
+        let _ = limiter
+            .acquire(other, DrafterPriority::ChangedPreview, DrafterRequestClass::Send)
+            .await;
         let waiter = {
             let limiter = limiter.clone();
             tokio::spawn(async move {
-                limiter.acquire(penalized, DrafterPriority::ChangedPreview).await;
+                let _ = limiter
+                    .acquire(penalized, DrafterPriority::ChangedPreview, DrafterRequestClass::Send)
+                    .await;
             })
         };
         tokio::task::yield_now().await;
@@ -320,7 +418,9 @@ mod tests {
         let final_waiter = {
             let limiter = limiter.clone();
             tokio::spawn(async move {
-                limiter.acquire(chat_a, DrafterPriority::Final).await;
+                let _ = limiter
+                    .acquire(chat_a, DrafterPriority::Final, DrafterRequestClass::Send)
+                    .await;
             })
         };
         tokio::task::yield_now().await;
@@ -328,7 +428,9 @@ mod tests {
         let other_chat = {
             let limiter = limiter.clone();
             tokio::spawn(async move {
-                limiter.acquire(chat_b, DrafterPriority::ChangedPreview).await;
+                let _ = limiter
+                    .acquire(chat_b, DrafterPriority::ChangedPreview, DrafterRequestClass::Send)
+                    .await;
             })
         };
         tokio::task::yield_now().await;
@@ -356,7 +458,9 @@ mod tests {
         let low_waiter = {
             let limiter = limiter.clone();
             tokio::spawn(async move {
-                limiter.acquire(low_key, DrafterPriority::ChangedPreview).await;
+                let _ = limiter
+                    .acquire(low_key, DrafterPriority::ChangedPreview, DrafterRequestClass::Send)
+                    .await;
             })
         };
         tokio::task::yield_now().await;
@@ -387,7 +491,9 @@ mod tests {
         limiter.penalize(DrafterRateLimitScope::Chat(active), Duration::from_secs(60));
         for index in 0..600 {
             let key = DrafterRateLimitKey { chat_id: ChatId(index) };
-            limiter.acquire(key, DrafterPriority::ChangedPreview).await;
+            let _ = limiter
+                .acquire(key, DrafterPriority::ChangedPreview, DrafterRequestClass::Send)
+                .await;
             limiter.penalize(DrafterRateLimitScope::Chat(key.chat_id), Duration::from_secs(1));
         }
         {
@@ -398,10 +504,11 @@ mod tests {
 
         tokio::time::advance(Duration::from_secs(2)).await;
         for index in 600..1_024 {
-            limiter
+            let _ = limiter
                 .acquire(
                     DrafterRateLimitKey { chat_id: ChatId(index) },
                     DrafterPriority::ChangedPreview,
+                    DrafterRequestClass::Send,
                 )
                 .await;
         }

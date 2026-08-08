@@ -1,4 +1,4 @@
-# Outbound scheduler — design note (Commits 1–5)
+# Outbound scheduler — design note (Commits 1–6)
 
 Deterministic outbound scheduling model in `crates/teloxide-core/src/outbound/`.
 
@@ -29,6 +29,12 @@ Deterministic outbound scheduling model in `crates/teloxide-core/src/outbound/`.
   `WindowChatKind`). The legacy `Throttle` worker is kept for the
   head-to-head comparison (see "Throttle compatibility layer (Commit 5)"
   below).
+- **Commit 6**: the `Drafter` migration. The Drafter actor remains the
+  lifecycle/coalescing state machine, while every real Telegram request
+  (send, edit, native draft and delete) receives its own queue permit.
+  Confirmed primary delivery is separated from best-effort success cleanup,
+  so cleanup admission cannot turn a successful final into an operation
+  deadline error.
 
 ## Scope
 
@@ -155,8 +161,11 @@ for the next parked candidate.
 
 ## Windows
 
-Budget is debited at grant time (not at enqueue) and never refunded, even on
-`Failed` or `CancelledAfterGrant`. Cancelling a waiting job consumes nothing.
+Budget is debited at grant time (not at enqueue) and is not refunded for
+`Failed` or `CancelledAfterGrant`, because those outcomes may follow a started
+request. A caller that proves no request started may report `NoRequest`; that
+explicit local no-op completion refunds the exact grant accounting. Cancelling
+a waiting job consumes nothing.
 
 ## Cancellation and permit lifecycle
 
@@ -609,12 +618,11 @@ Reproduced legacy semantics:
   BEFORE the direct request runs, so a slow or hanging direct send
   cannot hold the parked waiters. The cancellation identity is a CLIENT
   TOKEN minted before the enqueue is sent: dropping the enqueue/grant
-  future sends `Cancel { token }`, and the actor applies it whether the
-  enqueue was already processed (the token is mapped to the job) or
-  still in flight (the cancel is remembered and applied on acceptance)
-  — a future dropped between the actor's acceptance reply and the
-  caller's observation of it can never leave a ghost job pending in the
-  scheduler.
+  future atomically marks the shared token state cancelled. The actor checks
+  that state before mutating the scheduler, and accepted jobs keep a direct
+  token-to-job mapping until their terminal outcome — a future dropped
+  between the actor's acceptance reply and the caller's observation can
+  never leave a ghost job pending in the scheduler.
   The completion is NON-BLOCKING (`OutboundPermit::complete`, not the
   adaptor's per-request `complete_and_await` barrier): the legacy
   request loop returns its result right after the inner request
@@ -722,6 +730,38 @@ the direct-send fallback), a granted request completing without an
 additional actor poll (the completion is fire-and-forget), the `Debug`
 contract, a cancelled `set_limits` future not staling `limits()`, and
 `limits()` panicking when the actor is dead.
+
+## Drafter migration (Commit 6)
+
+The `Drafter` worker is deliberately retained as the owner of lifecycle
+state, source revisions, coalescing, flush waiters and segment transitions.
+The shared queue replaces only admission, rate windows and ordering.
+
+Scheduler-aware Telegram backends pass the first granted permit to the first
+real typed request and acquire a separate permit for every subsequent request,
+including edits, native drafts and preview deletion. A backend that has
+confirmed final/segment delivery must expose optional cleanup through
+`DrafterBackend::cleanup_after_delivery`; the worker gives that cleanup its own
+best-effort admission/request deadline and never changes the already confirmed
+primary result because cleanup was delayed or rejected. Cleanup failures remain
+visible through the existing observer and `take_cleanup_failure` path.
+
+`DrafterRequestContext::cancel_unused` reports `NoRequest`, which refunds the
+exact queue accounting only when no Bot API request started. Dropped permits
+retain the conservative `CancelledAfterGrant` behavior because cancellation
+may happen after a request began.
+
+Commit 6 also adds the following public Drafter surface: the
+`cleanup_after_delivery`/`cleanup_after_delivery_possible` backend hooks and
+`DrafterPermitCompletion::NoRequest`. `DrafterRequestError` is now a public
+enum with `Inner`, `Acquire` and `Timeout` variants instead of the previous
+request-error alias; `DraftAbortError` has an explicit `RateLimiter` variant.
+The `DrafterRateLimiter::request_context` and
+`DrafterRateLimiter::uses_request_scheduler` capability hooks are defaulted,
+so legacy implementations remain source-compatible. Existing custom backends
+remain legacy operation-level schedulers by default; scheduler-aware custom
+backends must keep success cleanup outside `finish`/`commit_segment` and opt
+into the new hook when they issue cleanup requests.
 
 ## Out of scope (later commits)
 

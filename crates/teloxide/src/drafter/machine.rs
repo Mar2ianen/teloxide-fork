@@ -20,10 +20,11 @@ use tracing::Instrument;
 use super::{
     observer::next_instance_id, AccumulatorSource, CleanupFailure, DeliveryCertainty,
     DraftAbortError, DraftCommitError, DraftConfig, DraftFinishError, DraftFlushError,
-    DraftPushError, DraftRevision, DraftStartError, DrafterBackend, DrafterCapabilities,
-    DrafterErrorClass, DrafterErrorDisposition, DrafterEvent, DrafterEventKind, DrafterObserver,
-    DrafterOperation, DrafterPermit, DrafterPriority, DrafterRateLimiter, PreviewAck,
-    PreviewSource, ReplacePreview,
+    DraftPushError, DraftRevision, DraftStartError, DrafterAcquireError, DrafterBackend,
+    DrafterCapabilities, DrafterErrorClass, DrafterErrorDisposition, DrafterEvent,
+    DrafterEventKind, DrafterObserver, DrafterOperation, DrafterPermit, DrafterPermitCompletion,
+    DrafterPriority, DrafterRateLimiter, DrafterRequestClass, PreviewAck, PreviewSource,
+    ReplacePreview,
 };
 
 /// A cloneable synchronous producer handle.
@@ -86,6 +87,7 @@ enum PreviewRunResult<B: DrafterBackend> {
 
 enum TerminalWait {
     Permit(DrafterPermit),
+    AcquireError(DrafterAcquireError),
     Deadline,
     Cancelled,
 }
@@ -105,6 +107,7 @@ enum TerminalFailure {
 enum TerminalOutcome<T, E> {
     Success(T),
     Backend(E),
+    RateLimiter(DrafterAcquireError),
     Synthetic(TerminalFailure),
 }
 
@@ -115,6 +118,7 @@ fn terminal_delivery_certainty<T, E>(
     match outcome {
         TerminalOutcome::Success(_) => None,
         TerminalOutcome::Backend(_) => disposition.map(|value| value.delivery),
+        TerminalOutcome::RateLimiter(_) => Some(DeliveryCertainty::NotAttempted),
         TerminalOutcome::Synthetic(TerminalFailure::RequestTimeout) => {
             Some(DeliveryCertainty::Unknown)
         }
@@ -122,10 +126,27 @@ fn terminal_delivery_certainty<T, E>(
     }
 }
 
+async fn complete_permit<L>(limiter: &L, permit: DrafterPermit, completion: DrafterPermitCompletion)
+where
+    L: DrafterRateLimiter,
+{
+    let retry_after = match completion {
+        DrafterPermitCompletion::RetryAfter { scope, duration } => Some((scope, duration)),
+        _ => None,
+    };
+    permit.complete(completion).await;
+    if let Some((scope, duration)) = retry_after {
+        if !limiter.completion_handles_retry_after() {
+            limiter.penalize(scope, duration);
+        }
+    }
+}
+
 async fn wait_for_terminal_permit<L, R>(
     limiter: &L,
     key: super::DrafterRateLimitKey,
     priority: DrafterPriority,
+    request_class: DrafterRequestClass,
     reply: &mut oneshot::Sender<R>,
     deadline: Instant,
     retry_not_before: Option<Instant>,
@@ -146,7 +167,10 @@ where
         biased;
         _ = reply.closed() => TerminalWait::Cancelled,
         _ = tokio::time::sleep_until(deadline) => TerminalWait::Deadline,
-        permit = limiter.acquire(key, priority) => TerminalWait::Permit(permit),
+        permit = limiter.acquire(key, priority, request_class) => match permit {
+            Ok(permit) => TerminalWait::Permit(permit),
+            Err(error) => TerminalWait::AcquireError(error),
+        },
     }
 }
 
@@ -413,8 +437,20 @@ where
             return PreviewRunResult::Idle;
         };
         let key = backend.rate_limit_key();
-        let _permit: DrafterPermit = tokio::select! {
-            permit = self.limiter.acquire(key, priority) => permit,
+        let request_class = if backend.preview_message_id().is_some() {
+            DrafterRequestClass::Mutation
+        } else {
+            DrafterRequestClass::Send
+        };
+        let permit: DrafterPermit = tokio::select! {
+            permit = self.limiter.acquire(key, priority, request_class) => match permit {
+                Ok(permit) => permit,
+                Err(error) => {
+                    self.retry_not_before = Some(Instant::now() + self.retry_delay);
+                    self.fail_flushes(error);
+                    return PreviewRunResult::Continue;
+                }
+            },
             command = self.command_rx.recv() => {
                 return PreviewRunResult::Command(command);
             }
@@ -445,6 +481,7 @@ where
 
         match result {
             Ok(Ok(PreviewAck)) => {
+                complete_permit(&self.limiter, permit, DrafterPermitCompletion::Success).await;
                 let skipped_from = DraftRevision(self.last_delivered.get().saturating_add(1));
                 let skipped_to = DraftRevision(snapshot.revision.get().saturating_sub(1));
                 self.last_delivered = self.last_delivered.max(snapshot.revision);
@@ -478,6 +515,13 @@ where
                     .as_ref()
                     .expect("backend exists after preview")
                     .classify_error(operation, &error);
+                let completion = match disposition.class {
+                    DrafterErrorClass::RetryAfter { delay, scope } => {
+                        DrafterPermitCompletion::RetryAfter { scope, duration: delay }
+                    }
+                    _ => DrafterPermitCompletion::Failed,
+                };
+                complete_permit(&self.limiter, permit, completion).await;
                 self.record(
                     DrafterEventKind::PreviewError,
                     Some(snapshot.revision),
@@ -486,6 +530,7 @@ where
                 self.handle_preview_error(disposition.class, operation);
             }
             Err(_) => {
+                complete_permit(&self.limiter, permit, DrafterPermitCompletion::Failed).await;
                 let retry_safe = !matches!(
                     self.capabilities.mode,
                     super::DrafterMode::EditInPlace | super::DrafterMode::StatusEditThenSendFinal
@@ -504,9 +549,8 @@ where
     fn handle_preview_error(&mut self, class: DrafterErrorClass, operation: DrafterOperation) {
         self.consecutive_preview_failures = self.consecutive_preview_failures.saturating_add(1);
         match class {
-            DrafterErrorClass::RetryAfter { delay, scope } => {
+            DrafterErrorClass::RetryAfter { delay, scope: _scope } => {
                 self.record(DrafterEventKind::RetryAfter, None, Some(operation));
-                self.limiter.penalize(scope, delay);
                 self.retry_not_before = Some(Instant::now() + delay);
             }
             DrafterErrorClass::Transient { retry_safe: true }
@@ -528,6 +572,12 @@ where
                 self.next_watchdog = None;
                 self.complete_flushes();
             }
+        }
+    }
+
+    fn fail_flushes(&mut self, error: DrafterAcquireError) {
+        for waiter in self.flush_waiters.drain(..) {
+            let _ = waiter.reply.send(Err(DraftFlushError::RateLimiter(error)));
         }
     }
 
@@ -603,18 +653,37 @@ where
                 let operation_deadline = Instant::now() + self.config.terminal_timeout;
                 let mut retry_not_before = None;
                 let mut retry_count = 0;
+                let request_class = if matches!(
+                    self.capabilities.mode,
+                    super::DrafterMode::StatusEditThenSendFinal
+                ) {
+                    DrafterRequestClass::Send
+                } else if self
+                    .backend
+                    .as_ref()
+                    .and_then(DrafterBackend::preview_message_id)
+                    .is_some()
+                {
+                    DrafterRequestClass::Mutation
+                } else {
+                    DrafterRequestClass::Send
+                };
                 let result = loop {
-                    match wait_for_terminal_permit(
+                    let permit = match wait_for_terminal_permit(
                         &self.limiter,
                         key,
                         DrafterPriority::SegmentCommit,
+                        request_class,
                         &mut reply,
                         operation_deadline,
                         retry_not_before,
                     )
                     .await
                     {
-                        TerminalWait::Permit(_permit) => {}
+                        TerminalWait::Permit(permit) => permit,
+                        TerminalWait::AcquireError(error) => {
+                            break TerminalOutcome::RateLimiter(error);
+                        }
                         TerminalWait::Deadline => {
                             self.record(
                                 DrafterEventKind::OperationDeadlineExceeded,
@@ -633,7 +702,7 @@ where
                             );
                             return false;
                         }
-                    }
+                    };
 
                     let attempt = {
                         let backend = self.backend.as_mut().expect("backend exists for commit");
@@ -647,7 +716,13 @@ where
                     };
                     match attempt {
                         TerminalCall::Completed(Ok(output)) => {
-                            break TerminalOutcome::Success(output)
+                            complete_permit(
+                                &self.limiter,
+                                permit,
+                                DrafterPermitCompletion::Success,
+                            )
+                            .await;
+                            break TerminalOutcome::Success(output);
                         }
                         TerminalCall::Completed(Err(error)) => {
                             let disposition = self
@@ -655,8 +730,15 @@ where
                                 .as_ref()
                                 .expect("backend exists after commit")
                                 .classify_error(DrafterOperation::SegmentCommit, &error);
+                            let completion = match disposition.class {
+                                DrafterErrorClass::RetryAfter { delay, scope } => {
+                                    DrafterPermitCompletion::RetryAfter { scope, duration: delay }
+                                }
+                                _ => DrafterPermitCompletion::Failed,
+                            };
+                            complete_permit(&self.limiter, permit, completion).await;
                             failure_disposition = Some(disposition);
-                            if let DrafterErrorClass::RetryAfter { delay, scope } =
+                            if let DrafterErrorClass::RetryAfter { delay, scope: _scope } =
                                 disposition.class
                             {
                                 self.record(
@@ -664,7 +746,6 @@ where
                                     None,
                                     Some(DrafterOperation::SegmentCommit),
                                 );
-                                self.limiter.penalize(scope, delay);
                                 if retry_count >= self.config.terminal_retry_budget {
                                     self.record(
                                         DrafterEventKind::RetryExhausted,
@@ -682,6 +763,8 @@ where
                             break TerminalOutcome::Backend(error);
                         }
                         TerminalCall::RequestTimeout => {
+                            complete_permit(&self.limiter, permit, DrafterPermitCompletion::Failed)
+                                .await;
                             let disposition = DrafterErrorDisposition {
                                 class: DrafterErrorClass::Ambiguous,
                                 delivery: DeliveryCertainty::Unknown,
@@ -695,6 +778,8 @@ where
                             break TerminalOutcome::Synthetic(TerminalFailure::RequestTimeout);
                         }
                         TerminalCall::Deadline => {
+                            complete_permit(&self.limiter, permit, DrafterPermitCompletion::Failed)
+                                .await;
                             failure_disposition = Some(DrafterErrorDisposition {
                                 class: DrafterErrorClass::Ambiguous,
                                 delivery: DeliveryCertainty::Unknown,
@@ -779,6 +864,16 @@ where
                         let _ = reply.send(Ok(output));
                         true
                     }
+                    TerminalOutcome::RateLimiter(error) => {
+                        self.record(
+                            DrafterEventKind::SegmentCommitError,
+                            None,
+                            Some(DrafterOperation::SegmentCommit),
+                        );
+                        self.source.close();
+                        let _ = reply.send(Err(DraftCommitError::RateLimiter(error)));
+                        false
+                    }
                     TerminalOutcome::Backend(error) => {
                         self.record(
                             DrafterEventKind::SegmentCommitError,
@@ -836,18 +931,37 @@ where
                 let operation_deadline = Instant::now() + self.config.terminal_timeout;
                 let mut retry_not_before = None;
                 let mut retry_count = 0;
+                let request_class = if matches!(
+                    self.capabilities.mode,
+                    super::DrafterMode::StatusEditThenSendFinal
+                ) {
+                    DrafterRequestClass::Send
+                } else if self
+                    .backend
+                    .as_ref()
+                    .and_then(DrafterBackend::preview_message_id)
+                    .is_some()
+                {
+                    DrafterRequestClass::Mutation
+                } else {
+                    DrafterRequestClass::Send
+                };
                 let result = loop {
-                    match wait_for_terminal_permit(
+                    let permit = match wait_for_terminal_permit(
                         &self.limiter,
                         key,
                         DrafterPriority::Final,
+                        request_class,
                         &mut reply,
                         operation_deadline,
                         retry_not_before,
                     )
                     .await
                     {
-                        TerminalWait::Permit(_permit) => {}
+                        TerminalWait::Permit(permit) => permit,
+                        TerminalWait::AcquireError(error) => {
+                            break TerminalOutcome::RateLimiter(error);
+                        }
                         TerminalWait::Deadline => {
                             self.record(
                                 DrafterEventKind::OperationDeadlineExceeded,
@@ -866,7 +980,7 @@ where
                             );
                             return false;
                         }
-                    }
+                    };
 
                     let attempt = {
                         let backend = self.backend.as_mut().expect("backend exists for finish");
@@ -880,7 +994,13 @@ where
                     };
                     match attempt {
                         TerminalCall::Completed(Ok(output)) => {
-                            break TerminalOutcome::Success(output)
+                            complete_permit(
+                                &self.limiter,
+                                permit,
+                                DrafterPermitCompletion::Success,
+                            )
+                            .await;
+                            break TerminalOutcome::Success(output);
                         }
                         TerminalCall::Completed(Err(error)) => {
                             let disposition = self
@@ -888,8 +1008,15 @@ where
                                 .as_ref()
                                 .expect("backend exists after finish")
                                 .classify_error(DrafterOperation::Final, &error);
+                            let completion = match disposition.class {
+                                DrafterErrorClass::RetryAfter { delay, scope } => {
+                                    DrafterPermitCompletion::RetryAfter { scope, duration: delay }
+                                }
+                                _ => DrafterPermitCompletion::Failed,
+                            };
+                            complete_permit(&self.limiter, permit, completion).await;
                             failure_disposition = Some(disposition);
-                            if let DrafterErrorClass::RetryAfter { delay, scope } =
+                            if let DrafterErrorClass::RetryAfter { delay, scope: _scope } =
                                 disposition.class
                             {
                                 self.record(
@@ -897,7 +1024,6 @@ where
                                     None,
                                     Some(DrafterOperation::Final),
                                 );
-                                self.limiter.penalize(scope, delay);
                                 if retry_count >= self.config.terminal_retry_budget {
                                     self.record(
                                         DrafterEventKind::RetryExhausted,
@@ -913,6 +1039,8 @@ where
                             break TerminalOutcome::Backend(error);
                         }
                         TerminalCall::RequestTimeout => {
+                            complete_permit(&self.limiter, permit, DrafterPermitCompletion::Failed)
+                                .await;
                             failure_disposition = Some(DrafterErrorDisposition {
                                 class: DrafterErrorClass::Ambiguous,
                                 delivery: DeliveryCertainty::Unknown,
@@ -925,6 +1053,8 @@ where
                             break TerminalOutcome::Synthetic(TerminalFailure::RequestTimeout);
                         }
                         TerminalCall::Deadline => {
+                            complete_permit(&self.limiter, permit, DrafterPermitCompletion::Failed)
+                                .await;
                             failure_disposition = Some(DrafterErrorDisposition {
                                 class: DrafterErrorClass::Ambiguous,
                                 delivery: DeliveryCertainty::Unknown,
@@ -1005,6 +1135,9 @@ where
                 self.backend.take();
                 let result = match result {
                     TerminalOutcome::Success(output) => Ok(output),
+                    TerminalOutcome::RateLimiter(error) => {
+                        Err(DraftFinishError::RateLimiter(error))
+                    }
                     TerminalOutcome::Backend(source) => {
                         let disposition =
                             failure_disposition.expect("backend final errors have a disposition");
@@ -1410,8 +1543,9 @@ mod tests {
             &self,
             _key: DrafterRateLimitKey,
             _priority: DrafterPriority,
-        ) -> DrafterPermit {
-            DrafterPermit::new()
+            _request_class: DrafterRequestClass,
+        ) -> Result<DrafterPermit, DrafterAcquireError> {
+            Ok(DrafterPermit::new())
         }
 
         fn penalize(&self, _scope: DrafterRateLimitScope, _retry_after: Duration) {}
@@ -1427,8 +1561,9 @@ mod tests {
             &self,
             _key: DrafterRateLimitKey,
             _priority: DrafterPriority,
-        ) -> DrafterPermit {
-            DrafterPermit::new()
+            _request_class: DrafterRequestClass,
+        ) -> Result<DrafterPermit, DrafterAcquireError> {
+            Ok(DrafterPermit::new())
         }
 
         fn penalize(&self, scope: DrafterRateLimitScope, retry_after: Duration) {
@@ -1805,13 +1940,14 @@ mod tests {
             &self,
             _key: DrafterRateLimitKey,
             priority: DrafterPriority,
-        ) -> DrafterPermit {
+            _request_class: DrafterRequestClass,
+        ) -> Result<DrafterPermit, DrafterAcquireError> {
             if matches!(priority, DrafterPriority::RefreshPreview | DrafterPriority::ChangedPreview)
             {
                 self.preview_started.notify_one();
                 std::future::pending::<()>().await;
             }
-            DrafterPermit::new()
+            Ok(DrafterPermit::new())
         }
 
         fn penalize(&self, _scope: DrafterRateLimitScope, _retry_after: Duration) {}
@@ -1828,13 +1964,14 @@ mod tests {
             &self,
             _key: DrafterRateLimitKey,
             priority: DrafterPriority,
-        ) -> DrafterPermit {
+            _request_class: DrafterRequestClass,
+        ) -> Result<DrafterPermit, DrafterAcquireError> {
             if matches!(priority, DrafterPriority::RefreshPreview | DrafterPriority::ChangedPreview)
             {
                 self.permit_started.notify_one();
                 self.release_permit.notified().await;
             }
-            DrafterPermit::new()
+            Ok(DrafterPermit::new())
         }
 
         fn penalize(&self, _scope: DrafterRateLimitScope, _retry_after: Duration) {}

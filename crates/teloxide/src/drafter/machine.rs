@@ -1586,12 +1586,12 @@ where
 
     async fn run_success_cleanup(&mut self, key: DrafterRateLimitKey) {
         let request_scheduling = request_scheduler_enabled(&self.limiter, self.backend.as_ref());
-        let cleanup_request_class = self.cleanup_request_class();
         let cleanup_possible =
             self.backend.as_mut().is_some_and(DrafterBackend::prepare_cleanup_after_delivery);
         if !cleanup_possible {
             return;
         }
+        let cleanup_request_class = self.cleanup_request_class();
 
         let cleanup_deadline = Instant::now() + self.config.request_timeout;
         if request_scheduling {

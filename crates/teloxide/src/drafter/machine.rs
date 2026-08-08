@@ -1003,7 +1003,7 @@ where
                                 &self.limiter,
                                 key,
                                 DrafterPriority::ChangedPreview,
-                                DrafterRequestClass::Mutation,
+                                self.cleanup_request_class(),
                                 self.config.request_timeout,
                             ),
                         )
@@ -1362,7 +1362,7 @@ where
                                 &self.limiter,
                                 key,
                                 DrafterPriority::ChangedPreview,
-                                DrafterRequestClass::Mutation,
+                                self.cleanup_request_class(),
                                 self.config.request_timeout,
                             ),
                         )
@@ -1493,7 +1493,7 @@ where
                             &self.limiter,
                             key,
                             DrafterPriority::ChangedPreview,
-                            DrafterRequestClass::Mutation,
+                            self.cleanup_request_class(),
                             self.config.request_timeout,
                         ),
                     )
@@ -1577,10 +1577,18 @@ where
         }
     }
 
+    fn cleanup_request_class(&self) -> DrafterRequestClass {
+        self.backend
+            .as_ref()
+            .expect("backend exists while acquiring cleanup")
+            .first_request_class(DrafterOperation::Cleanup)
+    }
+
     async fn run_success_cleanup(&mut self, key: DrafterRateLimitKey) {
         let request_scheduling = request_scheduler_enabled(&self.limiter, self.backend.as_ref());
+        let cleanup_request_class = self.cleanup_request_class();
         let cleanup_possible =
-            self.backend.as_ref().is_some_and(DrafterBackend::cleanup_after_delivery_possible);
+            self.backend.as_mut().is_some_and(DrafterBackend::prepare_cleanup_after_delivery);
         if !cleanup_possible {
             return;
         }
@@ -1593,7 +1601,7 @@ where
                     &self.limiter,
                     key,
                     DrafterPriority::ChangedPreview,
-                    DrafterRequestClass::Mutation,
+                    cleanup_request_class,
                     self.config.request_timeout,
                 ),
             )

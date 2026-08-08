@@ -1,13 +1,12 @@
 //! Outbound-queue backed Drafter rate limiting.
 
-use std::{future::Future, num::NonZeroU32, pin::Pin, time::Duration};
+use std::{error::Error, fmt, future::Future, num::NonZeroU32, pin::Pin, time::Duration};
 
 use teloxide_core::{
     errors::RequestError,
     outbound::{
         class, OutboundAcquireError, OutboundClass, OutboundCompletion, OutboundLane,
-        OutboundMetadata, OutboundPermit, OutboundPriority, OutboundQueue, OutboundRequestError,
-        OutboundScope,
+        OutboundMetadata, OutboundPermit, OutboundPriority, OutboundQueue, OutboundScope,
     },
 };
 
@@ -72,7 +71,35 @@ impl DrafterOutboundLimiter {
 
 /// Error returned by a standard Telegram backend when either Telegram or the
 /// per-request outbound scheduler rejects a typed request.
-pub type DrafterRequestError = OutboundRequestError<RequestError>;
+#[derive(Clone, Debug)]
+pub enum DrafterRequestError {
+    /// The Telegram request failed after its permit was granted.
+    Inner(RequestError),
+    /// The request could not be admitted and was never executed.
+    Acquire(OutboundAcquireError),
+    /// An admitted Telegram request exceeded the configured request timeout.
+    Timeout,
+}
+
+impl fmt::Display for DrafterRequestError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Inner(error) => write!(f, "the scheduled request failed: {error}"),
+            Self::Acquire(error) => write!(f, "the outbound queue rejected the request: {error}"),
+            Self::Timeout => f.write_str("the scheduled request timed out"),
+        }
+    }
+}
+
+impl Error for DrafterRequestError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Inner(error) => Some(error),
+            Self::Acquire(error) => Some(error),
+            Self::Timeout => None,
+        }
+    }
+}
 
 /// Per-operation context that transfers the already granted first permit to
 /// the first real Bot API request and acquires additional permits for every
@@ -82,6 +109,7 @@ pub struct DrafterRequestContext {
     initial_permit: Option<DrafterPermit>,
     key: DrafterRateLimitKey,
     priority: DrafterPriority,
+    request_timeout: Option<Duration>,
 }
 
 impl DrafterRequestContext {
@@ -91,7 +119,23 @@ impl DrafterRequestContext {
         key: DrafterRateLimitKey,
         priority: DrafterPriority,
     ) -> Self {
-        Self { limiter, initial_permit: Some(initial_permit), key, priority }
+        Self { limiter, initial_permit: Some(initial_permit), key, priority, request_timeout: None }
+    }
+
+    /// Configures the timeout applied only after a request receives a permit.
+    #[must_use]
+    pub fn with_request_timeout(mut self, timeout: Duration) -> Self {
+        self.request_timeout = Some(timeout);
+        self
+    }
+
+    /// Cancels a transferred permit when the backend operation is known not to
+    /// issue any request. This is the explicit completion path for local
+    /// no-op operations; dropping the context remains only a fallback.
+    pub async fn cancel_unused(mut self) {
+        if let Some(permit) = self.initial_permit.take() {
+            permit.complete(DrafterPermitCompletion::CancelledAfterGrant).await;
+        }
     }
 
     /// Executes exactly one typed request under one completion-aware permit.
@@ -112,9 +156,19 @@ impl DrafterRequestContext {
                 .limiter
                 .acquire_outbound(self.key, self.priority, request_class)
                 .await
-                .map_err(OutboundRequestError::Acquire)?,
+                .map_err(DrafterRequestError::Acquire)?,
         };
-        let result = request().await;
+        let result = if let Some(timeout) = self.request_timeout {
+            match tokio::time::timeout(timeout, request()).await {
+                Ok(result) => result,
+                Err(_) => {
+                    permit.complete(DrafterPermitCompletion::Failed).await;
+                    return Err(DrafterRequestError::Timeout);
+                }
+            }
+        } else {
+            request().await
+        };
         let completion = match &result {
             Ok(_) => DrafterPermitCompletion::Success,
             Err(RequestError::RetryAfter(seconds)) => DrafterPermitCompletion::RetryAfter {
@@ -124,7 +178,7 @@ impl DrafterRequestContext {
             Err(_) => DrafterPermitCompletion::Failed,
         };
         permit.complete(completion).await;
-        result.map_err(OutboundRequestError::Inner)
+        result.map_err(DrafterRequestError::Inner)
     }
 }
 
@@ -220,7 +274,13 @@ fn map_acquire_error(error: OutboundAcquireError) -> DrafterAcquireError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
+    use std::{
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        },
+        time::Duration,
+    };
 
     use teloxide_core::{
         outbound::{AgingPolicy, OutboundLimits, OutboundSettings, WindowLimit},
@@ -300,6 +360,55 @@ mod tests {
 
         tokio::time::advance(Duration::from_secs(60)).await;
         next.await.unwrap().complete(DrafterPermitCompletion::Success).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn request_admission_is_not_counted_against_request_timeout() {
+        let queue = OutboundQueue::new_spawn(OutboundSettings {
+            limits: OutboundLimits {
+                global: vec![WindowLimit::new(1, Duration::from_secs(60))],
+                chat: Vec::new(),
+            },
+            queue_capacity: 16,
+            aging: AgingPolicy { quantum: Duration::from_secs(1), max_boost: u8::MAX },
+        })
+        .unwrap();
+        let limiter = DrafterOutboundLimiter::new(queue);
+        let initial = limiter
+            .acquire(
+                DrafterRateLimitKey { chat_id: ChatId(1) },
+                DrafterPriority::Final,
+                DrafterRequestClass::Send,
+            )
+            .await
+            .unwrap();
+        let mut context = limiter
+            .request_context(
+                initial,
+                DrafterRateLimitKey { chat_id: ChatId(1) },
+                DrafterPriority::Final,
+            )
+            .unwrap()
+            .with_request_timeout(Duration::from_secs(5));
+
+        context.execute(DrafterRequestClass::Send, || async { Ok(()) }).await.unwrap();
+        let request_started = Arc::new(AtomicBool::new(false));
+        let request_started_ref = Arc::clone(&request_started);
+        let second = context.execute(DrafterRequestClass::Mutation, move || async move {
+            request_started_ref.store(true, Ordering::Relaxed);
+            Ok(())
+        });
+        tokio::pin!(second);
+
+        assert!(futures::poll!(second.as_mut()).is_pending());
+        tokio::time::advance(Duration::from_secs(5)).await;
+        tokio::task::yield_now().await;
+        assert!(futures::poll!(second.as_mut()).is_pending());
+        assert!(!request_started.load(Ordering::Relaxed));
+
+        tokio::time::advance(Duration::from_secs(55)).await;
+        second.await.unwrap();
+        assert!(request_started.load(Ordering::Relaxed));
     }
 
     #[tokio::test(start_paused = true)]

@@ -36,6 +36,12 @@ fn classify_request_error(
                 delivery: DeliveryCertainty::NotAttempted,
             };
         }
+        DrafterRequestError::Timeout => {
+            return DrafterErrorDisposition {
+                class: DrafterErrorClass::Ambiguous,
+                delivery: DeliveryCertainty::Unknown,
+            };
+        }
     };
     let (class, delivery) = match error {
         RequestError::RetryAfter(seconds) => (
@@ -391,6 +397,12 @@ where
     request
 }
 
+async fn cancel_unused_context(context: Option<DrafterRequestContext>) {
+    if let Some(context) = context {
+        context.cancel_unused().await;
+    }
+}
+
 async fn execute_request<T, F, Fut>(
     context: &mut Option<DrafterRequestContext>,
     request_class: super::DrafterRequestClass,
@@ -660,8 +672,12 @@ where
     }
 
     async fn abort(&mut self) -> Result<(), DrafterRequestError> {
-        let _context = self.request_context.take();
+        cancel_unused_context(self.request_context.take()).await;
         Ok(())
+    }
+
+    fn is_request_timeout(&self, error: &Self::Error) -> bool {
+        matches!(error, DrafterRequestError::Timeout)
     }
 
     fn supports_request_scheduler(&self) -> bool {
@@ -817,8 +833,12 @@ where
     }
 
     async fn abort(&mut self) -> Result<(), DrafterRequestError> {
-        let _context = self.request_context.take();
+        cancel_unused_context(self.request_context.take()).await;
         Ok(())
+    }
+
+    fn is_request_timeout(&self, error: &Self::Error) -> bool {
+        matches!(error, DrafterRequestError::Timeout)
     }
 
     fn supports_request_scheduler(&self) -> bool {
@@ -1035,16 +1055,23 @@ where
     async fn abort(&mut self) -> Result<(), DrafterRequestError> {
         let mut context = self.request_context.take();
         if self.cleanup != StatusCleanup::DeleteAfterFinalSuccess {
+            cancel_unused_context(context).await;
             return Ok(());
         }
-        if let Some(message_id) = self.preview_message_id {
-            delete_message(&self.bot, self.chat_id, message_id, &mut context).await?;
-        }
+        let Some(message_id) = self.preview_message_id else {
+            cancel_unused_context(context).await;
+            return Ok(());
+        };
+        delete_message(&self.bot, self.chat_id, message_id, &mut context).await?;
         Ok(())
     }
 
     fn abort_request_possible(&self) -> bool {
         self.cleanup == StatusCleanup::DeleteAfterFinalSuccess && self.preview_message_id.is_some()
+    }
+
+    fn is_request_timeout(&self, error: &Self::Error) -> bool {
+        matches!(error, DrafterRequestError::Timeout)
     }
 
     fn supports_request_scheduler(&self) -> bool {
@@ -1285,16 +1312,24 @@ where
 
     async fn abort(&mut self) -> Result<(), DrafterRequestError> {
         let mut context = self.request_context.take();
-        if self.cleanup == StatusCleanup::DeleteAfterFinalSuccess {
-            if let Some(message_id) = self.preview_message_id {
-                delete_message(&self.bot, self.chat_id, message_id, &mut context).await?;
-            }
+        if self.cleanup != StatusCleanup::DeleteAfterFinalSuccess {
+            cancel_unused_context(context).await;
+            return Ok(());
         }
+        let Some(message_id) = self.preview_message_id else {
+            cancel_unused_context(context).await;
+            return Ok(());
+        };
+        delete_message(&self.bot, self.chat_id, message_id, &mut context).await?;
         Ok(())
     }
 
     fn abort_request_possible(&self) -> bool {
         self.cleanup == StatusCleanup::DeleteAfterFinalSuccess && self.preview_message_id.is_some()
+    }
+
+    fn is_request_timeout(&self, error: &Self::Error) -> bool {
+        matches!(error, DrafterRequestError::Timeout)
     }
 
     fn supports_request_scheduler(&self) -> bool {
@@ -1453,6 +1488,7 @@ where
         let mut context = self.request_context.take();
         let current_fingerprint = fingerprint(&preview);
         if self.last_fingerprint == Some(current_fingerprint) {
+            cancel_unused_context(context).await;
             return Ok(PreviewAck);
         }
         let result = if let Some(message_id) = self.message_id {
@@ -1564,16 +1600,32 @@ where
 
     async fn abort(&mut self) -> Result<(), DrafterRequestError> {
         let mut context = self.request_context.take();
-        if self.abort_policy == EditAbortPolicy::DeletePreviewBestEffort {
-            if let Some(message_id) = self.message_id {
-                let _ = delete_message(&self.bot, self.chat_id, message_id, &mut context).await;
-            }
+        if self.abort_policy != EditAbortPolicy::DeletePreviewBestEffort {
+            cancel_unused_context(context).await;
+            return Ok(());
         }
+        let Some(message_id) = self.message_id else {
+            cancel_unused_context(context).await;
+            return Ok(());
+        };
+        let _ = delete_message(&self.bot, self.chat_id, message_id, &mut context).await;
         Ok(())
     }
 
     fn abort_request_possible(&self) -> bool {
         self.abort_policy == EditAbortPolicy::DeletePreviewBestEffort && self.message_id.is_some()
+    }
+
+    fn is_request_timeout(&self, error: &Self::Error) -> bool {
+        matches!(error, DrafterRequestError::Timeout)
+    }
+
+    fn may_skip_preview(&self) -> bool {
+        true
+    }
+
+    fn preview_is_noop(&self, preview: &Self::Preview) -> bool {
+        self.last_fingerprint == Some(fingerprint(preview))
     }
 
     fn supports_request_scheduler(&self) -> bool {
@@ -1691,6 +1743,7 @@ impl DrafterBackend for RichEditInPlaceBackend {
     ) -> Result<PreviewAck, DrafterRequestError> {
         let mut context = self.request_context.take();
         if self.last_preview.as_ref() == Some(&preview) {
+            cancel_unused_context(context).await;
             return Ok(PreviewAck);
         }
         let result = if let Some(message_id) = self.message_id {
@@ -1805,16 +1858,32 @@ impl DrafterBackend for RichEditInPlaceBackend {
 
     async fn abort(&mut self) -> Result<(), DrafterRequestError> {
         let mut context = self.request_context.take();
-        if self.abort_policy == EditAbortPolicy::DeletePreviewBestEffort {
-            if let Some(message_id) = self.message_id {
-                let _ = delete_message(&self.bot, self.chat_id, message_id, &mut context).await;
-            }
+        if self.abort_policy != EditAbortPolicy::DeletePreviewBestEffort {
+            cancel_unused_context(context).await;
+            return Ok(());
         }
+        let Some(message_id) = self.message_id else {
+            cancel_unused_context(context).await;
+            return Ok(());
+        };
+        let _ = delete_message(&self.bot, self.chat_id, message_id, &mut context).await;
         Ok(())
     }
 
     fn abort_request_possible(&self) -> bool {
         self.abort_policy == EditAbortPolicy::DeletePreviewBestEffort && self.message_id.is_some()
+    }
+
+    fn is_request_timeout(&self, error: &Self::Error) -> bool {
+        matches!(error, DrafterRequestError::Timeout)
+    }
+
+    fn may_skip_preview(&self) -> bool {
+        true
+    }
+
+    fn preview_is_noop(&self, preview: &Self::Preview) -> bool {
+        self.last_preview.as_ref() == Some(preview)
     }
 
     fn supports_request_scheduler(&self) -> bool {

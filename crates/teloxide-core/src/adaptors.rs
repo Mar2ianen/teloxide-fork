@@ -33,9 +33,8 @@ pub mod erased;
 #[cfg(feature = "throttle")]
 pub mod throttle;
 
-/// Outbound-scheduler based compatibility implementation of [`Throttle`],
-/// kept alongside the legacy worker for head-to-head parity testing (the
-/// migration of Commit 5 of the outbound scheduler).
+/// Outbound-scheduler implementation behind the public [`Throttle`] alias.
+/// The module remains public for the migration surface and parity tests.
 ///
 /// [`Throttle`]: crate::adaptors::Throttle
 #[cfg(feature = "throttle")]

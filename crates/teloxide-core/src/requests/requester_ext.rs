@@ -54,7 +54,6 @@ pub trait RequesterExt: Requester {
     where
         Self: Sized + Clone + Send + Sync + 'static,
         Self::Err: crate::errors::AsResponseParameters,
-        Self::GetChat: Send,
     {
         Throttle::new_spawn(self, limits)
     }

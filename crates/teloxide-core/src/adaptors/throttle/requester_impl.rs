@@ -3,7 +3,7 @@ use std::sync::Arc;
 use url::Url;
 
 use crate::{
-    adaptors::{throttle::ThrottlingRequest, Throttle},
+    adaptors::throttle::{LegacyThrottle, ThrottlingRequest},
     errors::AsResponseParameters,
     requests::{HasPayload, Requester},
     types::*,
@@ -37,7 +37,7 @@ macro_rules! ftyid {
     };
 }
 
-impl<B: Requester> Requester for Throttle<B>
+impl<B: Requester> Requester for LegacyThrottle<B>
 where
     B::Err: AsResponseParameters,
 
@@ -275,6 +275,6 @@ where
 
 download_forward! {
     B
-    Throttle<B>
+    LegacyThrottle<B>
     { this => this.inner() }
 }

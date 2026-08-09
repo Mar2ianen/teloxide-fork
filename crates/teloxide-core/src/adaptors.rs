@@ -29,9 +29,17 @@ pub mod erased;
 /// [`Throttle`] bot adaptor which allows automatically throttle when hitting
 /// API limits.
 ///
-/// [`Throttle`]: throttle::Throttle
+/// [`Throttle`]: crate::adaptors::Throttle
 #[cfg(feature = "throttle")]
 pub mod throttle;
+
+/// Outbound-scheduler based compatibility implementation of [`Throttle`],
+/// kept alongside the legacy worker for head-to-head parity testing (the
+/// migration of Commit 5 of the outbound scheduler).
+///
+/// [`Throttle`]: crate::adaptors::Throttle
+#[cfg(feature = "throttle")]
+pub mod throttle_compat;
 
 mod parse_mode;
 

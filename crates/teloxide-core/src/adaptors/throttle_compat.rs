@@ -1,20 +1,20 @@
 //! Compatibility `Throttle` built on top of the outbound scheduler.
 //!
-//! Commit 8 of the outbound scheduler migration: the public
-//! [`Throttle`](crate::adaptors::Throttle) now uses this implementation over
-//! the [`OutboundQueue`](crate::outbound::OutboundQueue) instead, so the two
-//! engines can be compared head-to-head on paused time (see `tests`).
+//! Commit 9 of the outbound scheduler migration: the public
+//! [`Throttle`](crate::adaptors::Throttle) uses this implementation over the
+//! [`OutboundQueue`](crate::outbound::OutboundQueue). The old worker has been
+//! removed; `tests` pin the scheduler-backed compatibility contract directly.
 //!
-//! Reproduced legacy semantics:
+//! Retained compatibility contract:
 //!
-//! - the throttled method allowlist matches the legacy `requester_impl` exactly
-//!   (25 message-send methods; everything else passes through untouched) — it
-//!   is a compatibility predicate, NOT derived from the `class` taxonomy
-//!   (`copy_message(s)`/`forward_message(s)` are `OTHER`);
-//! - every throttled request is accounted with weight 1: the legacy worker
-//!   counts API calls, not messages, so a media group of ten items costs one
-//!   unit (the scheduler's generated batch weights would make it inadmissible
-//!   against `messages_per_sec_chat = 1`);
+//! - the throttled method allowlist matches the historical throttled-method set
+//!   exactly (25 message-send methods; everything else passes through
+//!   untouched) — it is a compatibility predicate, NOT derived from the `class`
+//!   taxonomy (`copy_message(s)`/`forward_message(s)` are `OTHER`);
+//! - every throttled request is accounted with weight 1: the previous worker
+//!   contract counts API calls, not messages, so a media group of ten items
+//!   costs one unit (the scheduler's generated batch weights would make it
+//!   inadmissible against `messages_per_sec_chat = 1`);
 //! - per-chat FIFO: all throttled requests share one priority, so the
 //!   scheduler's (priority, sequence) arbitration plus the shared per-chat
 //!   windows reproduce the legacy "request order in chats is not changed";
@@ -27,19 +27,21 @@
 //!   execution runs the inner request through `IntoFuture::into_future`
 //!   (`owned.take().unwrap().await`), NOT through `Request::send` — in the
 //!   regular `retry = false` path and in the direct-send fallback alike,
-//!   because the legacy worker only ever calls `.await` on the taken request;
-//! - a `RetryAfter` outcome registers a GLOBAL penalty: the legacy worker
-//!   freezes everything until the backoff expires, so the compatibility layer
-//!   completes the permit with [`crate::outbound::OutboundScope::Global`]; the
-//!   request then sleeps until the penalty expires and only THEN re-queues —
-//!   like the legacy worker, which sleeps outside its queue, so requests that
-//!   arrive during the freeze keep their place ahead of the retry. The penalty
-//!   deadline is anchored at the moment the error was OBSERVED — ONE shared
-//!   timestamp drives the scheduler penalty, the local retry sleep and the
-//!   compat-side freeze deadline (`OutboundPermit::complete_observed_at`), so a
-//!   completion processed late by the actor cannot extend a freeze whose
-//!   deadline already passed — exactly like the legacy worker receiving an
-//!   expired absolute `until`. The outcome is classified exactly once
+//!   because the previous worker contract only ever calls `.await` on the taken
+//!   request;
+//! - a `RetryAfter` outcome registers a GLOBAL penalty: the previous worker
+//!   contract freezes everything until the backoff expires, so the
+//!   compatibility layer completes the permit with
+//!   [`crate::outbound::OutboundScope::Global`]; the request then sleeps until
+//!   the penalty expires and only THEN re-queues — like the previous worker
+//!   contract, which sleeps outside its queue, so requests that arrive during
+//!   the freeze keep their place ahead of the retry. The penalty deadline is
+//!   anchored at the moment the error was OBSERVED — ONE shared timestamp
+//!   drives the scheduler penalty, the local retry sleep and the compat-side
+//!   freeze deadline (`OutboundPermit::complete_observed_at`), so a completion
+//!   processed late by the actor cannot extend a freeze whose deadline already
+//!   passed — exactly like the previous worker contract receiving an expired
+//!   absolute `until`. The outcome is classified exactly once
 //!   (`AsResponseParameters::retry_after` is not required to be pure);
 //! - the backlog is bounded by `max(messages_per_sec_overall, 1)` (the legacy
 //!   channel capacity for positive limits): a capacity semaphore parks requests
@@ -56,46 +58,47 @@
 //!   at t=0 reports the backlog of t=0. A request going straight into a direct
 //!   send because the actor died before the acceptance never reports a full
 //!   backlog, and the callback is silent while a global freeze is active —
-//!   exactly like the legacy worker, which does not run its queue checks while
-//!   frozen; a full-backlog event deferred during the freeze is emitted EXACTLY
-//!   ONCE at the thaw boundary (the legacy worker still reads the messages out
-//!   of its bounded channel after the thaw, even if every pending request was
-//!   cancelled before it) and cleared when the actor dies (a dead worker never
-//!   runs the callback again). A saturation monitor re-fires the callback while
-//!   the backlog stays full (the legacy worker re-checks on every iteration),
-//!   sleeps past the freeze deadline before re-checking, and exits when a slot
-//!   frees up, resetting its flag BEFORE releasing the observed permit so a
-//!   fresh saturation wave spawns a new monitor. The slot is held while the job
-//!   is pending and released on grant; a `QueueFull` rejection (only possible
-//!   behind an unprocessed cancel) keeps the slot and retries, preserving the
-//!   FIFO order, and the direct-send fallback on the actor's death releases the
-//!   slot BEFORE the direct request runs. The cancellation identity is a CLIENT
-//!   TOKEN minted before the enqueue is sent: dropping the enqueue/grant future
-//!   sends `Cancel { token }`, and the actor applies it whether the enqueue was
+//!   exactly like the previous worker contract, which does not run its queue
+//!   checks while frozen; a full-backlog event deferred during the freeze is
+//!   emitted EXACTLY ONCE at the thaw boundary (the previous worker contract
+//!   still reads the messages out of its bounded channel after the thaw, even
+//!   if every pending request was cancelled before it) and cleared when the
+//!   actor dies (a dead worker never runs the callback again). A saturation
+//!   monitor re-fires the callback while the backlog stays full (the previous
+//!   worker contract re-checks on every iteration), sleeps past the freeze
+//!   deadline before re-checking, and exits when a slot frees up, resetting its
+//!   flag BEFORE releasing the observed permit so a fresh saturation wave
+//!   spawns a new monitor. The slot is held while the job is pending and
+//!   released on grant; a `QueueFull` rejection (only possible behind an
+//!   unprocessed cancel) keeps the slot and retries, preserving the FIFO order,
+//!   and the direct-send fallback on the actor's death releases the slot BEFORE
+//!   the direct request runs. The cancellation identity is a CLIENT TOKEN
+//!   minted before the enqueue is sent: dropping the enqueue/grant future sends
+//!   `Cancel { token }`, and the actor applies it whether the enqueue was
 //!   already processed (token mapped to the job) or still in flight (the cancel
 //!   is remembered and applied on acceptance) — a dropped future can never
 //!   leave a ghost job pending. The completion is NON-BLOCKING
 //!   ([`crate::outbound::OutboundPermit::complete`], not the adaptor's
-//!   per-request barrier): the legacy request loop returns its result right
-//!   after the inner request finished, and the ordering is preserved because
-//!   the completion lands synchronously in the actor's lifecycle channel, which
-//!   is drained before any later enqueue;
+//!   per-request barrier): the compatibility request loop returns its result
+//!   right after the inner request finished, and the ordering is preserved
+//!   because the completion lands synchronously in the actor's lifecycle
+//!   channel, which is drained before any later enqueue;
 //! - `limits()`/`set_limits()` keep the legacy async API; the queue actor is
 //!   the single source of truth (there is no client-side mirror to diverge,
 //!   even if a `set_limits` future is cancelled mid-flight), the scheduler's
 //!   `set_limits` carries the rate history over, and `limits()` panics if the
-//!   actor is gone — exactly like the legacy worker dying.
+//!   actor is gone — exactly like the previous worker contract dying.
 //!
 //! Documented temporary incompatibilities:
 //!
-//! - `Settings::check_slow_mode` is ignored (the legacy worker asks `get_chat`
-//!   to skip a freeze caused by slow mode);
+//! - `Settings::check_slow_mode` is ignored (the previous worker contract asks
+//!   `get_chat` to skip a freeze caused by slow mode);
 //! - channel usernames are canonicalized (the legacy hashed the raw spelling,
 //!   so `@Foo` and `foo` were different identities);
 //! - zero-capacity limits: a zero chat/global rate window pauses matching
 //!   requests until a later `set_limits` update raises it again. This matches
-//!   the legacy worker's behavior; the queue actor keeps such jobs pending
-//!   without scheduling a timer wake-up.
+//!   the previous worker contract's behavior; the queue actor keeps such jobs
+//!   pending without scheduling a timer wake-up.
 mod request;
 mod requester_impl;
 
@@ -129,7 +132,7 @@ type BoxedFnMut<I, O> = Box<dyn FnMut(I) -> O + Send>;
 type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 /// Minimum delay between two `on_queue_full` invocations, mirroring the
-/// legacy worker's `QUEUE_FULL_DELAY`.
+/// previous worker contract's `QUEUE_FULL_DELAY`.
 const QUEUE_FULL_DELAY: Duration = Duration::from_secs(4);
 
 /// The saturation monitor's re-check period: one rate-limit window plus a
@@ -198,9 +201,9 @@ struct CompatState {
     /// [`ensure_saturation_monitor`]).
     monitor_active: AtomicBool,
     /// The latest known GLOBAL freeze deadline (from `RetryAfter`
-    /// outcomes). While a freeze is active the legacy worker does not run
-    /// its queue checks, so `on_queue_full` must stay silent and the
-    /// saturation monitor must sleep until the freeze ends.
+    /// outcomes). While a freeze is active the previous worker contract does
+    /// not run its queue checks, so `on_queue_full` must stay silent and
+    /// the saturation monitor must sleep until the freeze ends.
     freeze_until: Mutex<Option<tokio::time::Instant>>,
     /// A full-backlog event that happened while a global freeze was
     /// active (the last slot was accepted during the freeze). The legacy
@@ -209,8 +212,8 @@ struct CompatState {
     /// reads them, sees `queue.len() == capacity()` and fires the
     /// callback — even if every pending request was cancelled before the
     /// thaw. The deferred event is emitted exactly once at the thaw
-    /// boundary, and cleared when the actor dies (a dead legacy worker
-    /// would never run the callback again).
+    /// boundary, and cleared when the actor dies (a dead previous worker
+    /// contract would never run the callback again).
     deferred_full: AtomicBool,
     /// The outbound queue, kept for the saturation monitor's actor
     /// liveness probe (a dead actor must clear the deferred event).
@@ -316,7 +319,7 @@ impl<B> ThrottleCompat<B> {
             queue_capacity,
             // The default aging policy preserves the FIFO order of equal
             // priorities (aging is monotonic in waiting time), which is
-            // what the legacy worker guarantees.
+            // what the previous worker contract guarantees.
             ..<_>::default()
         };
         let (queue, actor) = OutboundQueue::new(queue_settings)
@@ -327,7 +330,7 @@ impl<B> ThrottleCompat<B> {
             queue_capacity,
             on_queue_full: Mutex::new(on_queue_full),
             // Initialized just PAST the rate-limit window so the FIRST
-            // overflow fires immediately: the legacy worker initializes to
+            // overflow fires immediately: the previous worker contract initializes to
             // `now - QUEUE_FULL_DELAY` and fires when `elapsed() > DELAY`,
             // which under real clocks is always true; under a paused test
             // clock the elapsed time would be exactly the delay, so a
@@ -398,11 +401,11 @@ impl<B> ThrottleCompat<B> {
     ///
     /// The scheduler's `set_limits` carries the already debited history
     /// over, so changing limits does not reset the rate budget (same
-    /// semantics as the legacy worker, which keeps its history). If the
-    /// queue rejects malformed limits (for example a zero-duration window),
-    /// the previous limits stay in effect and the error is logged. A
-    /// zero-capacity rate window is valid and pauses matching requests until
-    /// a later update enables it again.
+    /// semantics as the previous worker contract, which keeps its history). If
+    /// the queue rejects malformed limits (for example a zero-duration
+    /// window), the previous limits stay in effect and the error is logged.
+    /// A zero-capacity rate window is valid and pauses matching requests
+    /// until a later update enables it again.
     ///
     /// There is deliberately no client-side mirror: [`ThrottleCompat::limits`]
     /// always reads the actor, so cancelling this future after the actor
@@ -416,11 +419,11 @@ impl<B> ThrottleCompat<B> {
 }
 
 /// Fires `on_queue_full` at most once per [`QUEUE_FULL_DELAY`], passing
-/// the backlog bound as the pending count (the legacy worker fires when
-/// `queue.len() == capacity` and passes the length).
+/// the backlog bound as the pending count (the previous worker contract fires
+/// when `queue.len() == capacity` and passes the length).
 fn notify_queue_full(state: &Arc<CompatState>) {
     let mut last = state.last_queue_full.lock().unwrap();
-    // The legacy worker fires when `elapsed() > QUEUE_FULL_DELAY`; the
+    // The previous worker contract fires when `elapsed() > QUEUE_FULL_DELAY`; the
     // boundary is kept identical.
     if last.elapsed() <= QUEUE_FULL_DELAY {
         return;
@@ -431,7 +434,7 @@ fn notify_queue_full(state: &Arc<CompatState>) {
     tokio::spawn(future);
 }
 
-/// Whether a GLOBAL freeze is active right now (the legacy worker
+/// Whether a GLOBAL freeze is active right now (the previous worker contract
 /// freezes everything and does not run its queue checks while frozen).
 fn freeze_active(state: &CompatState) -> bool {
     state.freeze_until.lock().unwrap().is_some_and(|until| tokio::time::Instant::now() < until)
@@ -440,7 +443,7 @@ fn freeze_active(state: &CompatState) -> bool {
 /// Records a GLOBAL freeze deadline, extending an existing one only when
 /// the new deadline is later (max semantics, like the scheduler's
 /// penalties). Called on every `RetryAfter` outcome — even when the
-/// request will not be retried, because the legacy worker freezes
+/// request will not be retried, because the previous worker contract freezes
 /// regardless of the retry flag. The deadline is anchored at the
 /// `observed_at` moment passed in by the caller: the scheduler penalty,
 /// the local retry sleep and this compat-side freeze must all share ONE
@@ -457,7 +460,7 @@ fn record_freeze_at(state: &CompatState, observed_at: tokio::time::Instant, dura
 
 /// Starts the saturation monitor if one is not already running.
 ///
-/// The legacy worker re-checks `queue.len() == capacity()` on EVERY
+/// The previous worker contract re-checks `queue.len() == capacity()` on EVERY
 /// iteration and re-fires the callback once the 4-second rate limit has
 /// expired, so a backlog that stays full for a long time produces several
 /// notifications even without new requests. The monitor reproduces that:
@@ -473,8 +476,8 @@ fn ensure_saturation_monitor(state: &Arc<CompatState>) {
 /// The saturation monitor task: see [`ensure_saturation_monitor`].
 ///
 /// While a global freeze is active the monitor sleeps until the freeze
-/// ends (the legacy worker does not run its checks while frozen) and only
-/// then re-checks the saturation.
+/// ends (the previous worker contract does not run its checks while frozen) and
+/// only then re-checks the saturation.
 async fn saturation_monitor(state: Arc<CompatState>) {
     loop {
         let now = tokio::time::Instant::now();
@@ -491,7 +494,7 @@ async fn saturation_monitor(state: Arc<CompatState>) {
         }
         // The thaw boundary: a full-backlog event deferred during the
         // freeze is emitted exactly once, even if every pending request
-        // was cancelled before the thaw (the legacy worker still reads
+        // was cancelled before the thaw (the previous worker contract still reads
         // the messages out of its bounded channel). A dead actor clears
         // it: the legacy callback would never run again.
         if state.deferred_full.swap(false, Ordering::SeqCst) {

@@ -1066,6 +1066,31 @@ fn limits_map_to_outbound_windows() {
 // ---------- compat functional tests ----------
 
 #[tokio::test(start_paused = true)]
+async fn compat_zero_global_rate_limit_pauses_until_reconfigured() {
+    let mut limits = default_limits();
+    limits.messages_per_sec_chat = 30;
+    limits.messages_per_sec_overall = 0;
+    let (compat, actor) = ThrottleCompat::with_settings(
+        FakeBot::ok(),
+        Settings { limits, retry: true, check_slow_mode: false, ..Settings::default() },
+    );
+    let actor_task = tokio::spawn(actor);
+
+    let request = compat.send_message(ChatId(1), "paused").send();
+    tokio::pin!(request);
+    tokio::task::yield_now().await;
+    assert!(futures::poll!(request.as_mut()).is_pending());
+
+    let mut enabled = limits;
+    enabled.messages_per_sec_overall = 1;
+    compat.set_limits(enabled).await;
+
+    let result = tokio::time::timeout(Duration::from_secs(1), request).await.unwrap();
+    assert!(result.is_ok(), "request remained paused after global limit reconfiguration");
+    actor_task.abort();
+}
+
+#[tokio::test(start_paused = true)]
 async fn compat_enforces_the_per_chat_second_limit_in_fifo_order() {
     let (compat, actor) = ThrottleCompat::new(FakeBot::ok(), default_limits());
     let actor_task = tokio::spawn(actor);
@@ -1274,12 +1299,12 @@ async fn compat_set_limits_changes_the_windows() {
     compat.set_limits(new).await;
     assert_eq!(compat.limits().await, new, "limits() следует за scheduler-ом");
 
-    // Zero-capacity limits are rejected by the scheduler; the effective
-    // limits stay unchanged (documented incompatibility).
+    // A zero chat-minute limit pauses matching requests until a later
+    // settings update raises it again.
     let mut zero = default_limits();
     zero.messages_per_min_chat = 0;
     compat.set_limits(zero).await;
-    assert_eq!(compat.limits().await, new, "нулевые лимиты отвергнуты, старые остаются");
+    assert_eq!(compat.limits().await, zero, "нулевой лимит должен примениться");
 
     let mut futs: Vec<Pin<Box<dyn Future<Output = ()>>>> = Vec::new();
     let order = Arc::new(Mutex::new(Vec::new()));
@@ -1296,6 +1321,16 @@ async fn compat_set_limits_changes_the_windows() {
     }
     let mut resolved = [false; 2];
     drain_rounds(&mut futs, &mut resolved, false).await;
+    for _ in 0..5 {
+        tokio::time::advance(TICK).await;
+        drain_rounds(&mut futs, &mut resolved, false).await;
+    }
+    assert!(
+        resolved.iter().all(|resolved| !resolved),
+        "нулевой лимит должен поставить запросы на паузу"
+    );
+
+    compat.set_limits(new).await;
     let mut ticks = 0;
     while resolved.iter().any(|r| !r) && ticks < 20 {
         tokio::time::advance(TICK).await;

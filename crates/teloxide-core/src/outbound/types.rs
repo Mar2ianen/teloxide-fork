@@ -176,9 +176,11 @@ pub struct OutboundMetadata {
     pub class: OutboundClass,
     pub priority: OutboundPriority,
     /// Accounting weight: the number of window capacity units the request
-    /// consumes when granted. Must fit every window that applies to the
-    /// scope, otherwise the acquire fails with
-    /// [`OutboundQueueError::WeightExceedsWindow`].
+    /// consumes when granted. It must fit every positive-capacity window that
+    /// applies to the scope, otherwise the acquire fails with
+    /// [`OutboundQueueError::WeightExceedsWindow`]. A zero-capacity window is
+    /// an explicit pause: matching acquires remain pending until `set_limits`
+    /// reconfigures it.
     pub weight: NonZeroU32,
 }
 
@@ -258,10 +260,10 @@ pub(crate) enum EnqueueError {
     /// classification error, so it is rejected instead of being silently
     /// turned into a second pending job.
     IncompatibleCoalesceMetadata,
-    /// The request weight never fits at least one window that applies to
-    /// its scope (the weight exceeds the window capacity). Such a job
-    /// could never be granted, so it is rejected at enqueue time instead
-    /// of waiting forever.
+    /// The request weight exceeds a positive-capacity window that applies
+    /// to its scope. Such a job could never be granted, so it is rejected at
+    /// enqueue time instead of waiting forever. A zero-capacity window is an
+    /// explicit pause and does not produce this error.
     WeightExceedsWindow { scope: OutboundScope, weight: NonZeroU32, capacity: u32 },
 }
 
@@ -270,7 +272,8 @@ pub(crate) enum EnqueueError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SchedulerConfigError {
-    /// A window with zero capacity can never admit any request.
+    /// Reserved for strict validation callers; the scheduler itself treats
+    /// zero capacity as a valid pause until the next settings update.
     ZeroWindowCapacity,
     /// A window with zero duration never expires its history.
     ZeroWindowDuration,
@@ -431,7 +434,7 @@ pub enum OutboundQueueError {
     /// The backlog is at capacity; the acquire was rejected without
     /// growing the queue.
     QueueFull,
-    /// The acquire weight never fits an applicable window.
+    /// The acquire weight exceeds a positive-capacity applicable window.
     WeightExceedsWindow { scope: OutboundScope, weight: NonZeroU32, capacity: u32 },
     /// A latest-wins acquire changed the accounting weight of an existing
     /// slot; the slot was left untouched.
@@ -446,7 +449,7 @@ pub enum OutboundAcquireError {
     Closed,
     /// The backlog was at capacity when the acquire was enqueued.
     QueueFull,
-    /// The acquire weight never fits an applicable window.
+    /// The acquire weight exceeds a positive-capacity applicable window.
     WeightExceedsWindow { scope: OutboundScope, weight: NonZeroU32, capacity: u32 },
     /// A latest-wins acquire changed the accounting weight of an existing
     /// slot; the slot was left untouched.

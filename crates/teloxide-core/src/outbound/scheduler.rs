@@ -368,7 +368,7 @@ impl PartialOrd for CandidateKey {
 /// A candidate that failed admission: it sleeps until `until` and is then
 /// re-inserted into the candidate heap. The reference is re-validated on
 /// promotion, so a lane entry whose head changed wakes the current head.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct BlockedJob {
     until: Instant,
     /// A permanent block is lifted only by a settings update. Its deadline is
@@ -380,6 +380,25 @@ struct BlockedJob {
     /// touches the lane when it surfaces.
     generation: u64,
     reference: CandidateRef,
+}
+
+impl Ord for BlockedJob {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // `blocked` is a min-heap through `Reverse`: finite deadlines must
+        // always precede permanent nodes, regardless of the sentinel
+        // deadline used by a permanent node.
+        self.permanent
+            .cmp(&other.permanent)
+            .then_with(|| self.until.cmp(&other.until))
+            .then_with(|| self.generation.cmp(&other.generation))
+            .then_with(|| self.reference.cmp(&other.reference))
+    }
+}
+
+impl PartialOrd for BlockedJob {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 /// The moment a candidate's effective priority rises by one level, so that
@@ -554,8 +573,9 @@ impl SchedulerState {
         not_before: Option<Instant>,
         now: Instant,
     ) -> Result<EnqueueOutcome, EnqueueError> {
-        // A job that never fits an applicable window could never be
-        // granted; reject it at enqueue time instead of parking it forever.
+        // A job that exceeds a positive-capacity applicable window could
+        // never be granted; reject it at enqueue time instead of parking it
+        // forever. A zero-capacity window is an explicit pause.
         let weight = meta.weight.get();
         if let Some(window) =
             self.global_limits.iter().find(|w| w.capacity != 0 && weight > w.capacity)
@@ -3374,6 +3394,44 @@ mod tests {
         ));
         // a spanning policy is accepted
         let _ = SchedulerState::new(limits(100), aging()).unwrap();
+    }
+
+    #[test]
+    fn permanent_block_does_not_hide_later_finite_deadline() {
+        let mut s = SchedulerState::new(
+            OutboundLimits {
+                global: Vec::new(),
+                chat: vec![WindowLimit::new(0, Duration::from_secs(1))],
+            },
+            aging(),
+        )
+        .unwrap();
+        let t0 = base();
+        let permanent = fifo(
+            &mut s,
+            meta(OutboundScope::Chat(OutboundChatKey::id(1)), None, OutboundPriority::NORMAL),
+            t0,
+        );
+        assert!(s.grant_ready(t0).is_empty());
+
+        let seed = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![seed]);
+        let finite_deadline = t0 + Duration::from_secs(400 * 24 * 60 * 60);
+        s.complete(
+            seed,
+            OutboundCompletion::RetryAfter {
+                scope: OutboundScope::Global,
+                duration: finite_deadline - t0,
+            },
+            t0,
+            t0,
+        );
+
+        let finite = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
+        assert!(s.grant_ready(t0).is_empty());
+        assert_eq!(s.next_deadline(t0), SchedulerWakeup::At(finite_deadline));
+        assert_eq!(jobs(&s.grant_ready(finite_deadline)), vec![finite]);
+        assert!(s.jobs.contains_key(&permanent));
     }
 
     #[test]

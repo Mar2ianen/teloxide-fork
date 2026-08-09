@@ -1,4 +1,4 @@
-# Outbound scheduler — design note (Commits 1–6)
+# Outbound scheduler — design note (Commits 1–7)
 
 Deterministic outbound scheduling model in `crates/teloxide-core/src/outbound/`.
 
@@ -35,6 +35,11 @@ Deterministic outbound scheduling model in `crates/teloxide-core/src/outbound/`.
   Confirmed primary delivery is separated from best-effort success cleanup,
   so cleanup admission cannot turn a successful final into an operation
   deadline error.
+- **Commit 7**: zero-capacity rate windows. A zero global or chat window is a
+  valid pause until `set_limits` reconfigures it; affected jobs remain pending
+  without a timer wake-up. The compat layer keeps one ingress slot when the
+  legacy global rate is zero, because the rate pause must still be able to
+  receive a job and later release it after reconfiguration.
 
 ## Scope
 
@@ -53,7 +58,8 @@ candidates: BinaryHeap<CandidateKey>     persistent candidate heap
       CandidateKey { effective, sequence, Job(JobId) | Lane(OutboundLaneKey) }
       (effective desc, sequence asc; entries validated lazily on pop)
 blocked: BinaryHeap<Reverse<BlockedJob>> failed candidates, by earliest
-      eligibility; BlockedJob { until, reference }
+      eligibility; BlockedJob { until, permanent, reference }. Finite nodes are
+      ordered before permanent pause nodes regardless of their sentinel `until`.
 aging_events: BinaryHeap<Reverse<AgingEvent>>
       the moment a candidate's effective priority rises one level; the
       candidate heap is re-keyed by event, never by a per-tick full scan
@@ -82,11 +88,13 @@ per-window release moments).
 
 ## Configuration validation
 
-`SchedulerState::new` returns `Result` and rejects: zero window capacity,
-zero window duration, zero aging quantum, and an aging policy whose
+`SchedulerState::new` returns `Result` and rejects: zero window duration,
+zero aging quantum, and an aging policy whose
 `max_boost` cannot lift `LOWEST` to `HIGHEST` (the anti-starvation
 guarantee). `enqueue` rejects a weight that never fits an applicable window
 (`EnqueueError::WeightExceedsWindow`) — such a job could never be granted.
+A zero-capacity window is different: it pauses matching jobs until a later
+`set_limits` update and does not create a timer wake-up.
 
 ## Selection algorithm (event-driven)
 
@@ -560,7 +568,8 @@ Reproduced legacy semantics:
   passed — the legacy worker receives the absolute `until` computed at
   the error site. Without retries the error is returned.
 - **`on_queue_full` + FIFO admission**: the backlog is bounded by
-  `messages_per_sec_overall` (the legacy channel capacity) through a
+  `max(messages_per_sec_overall, 1)` (the legacy channel capacity for
+  positive limits) through a
   capacity semaphore (`tokio::sync::Semaphore`, one permit per slot). A
   request acquires its slot through a SINGLE `acquire_owned()` future —
   registering in the semaphore's FIFO waitlist is atomic, so a permit
@@ -659,8 +668,8 @@ Reproduced legacy semantics:
   concurrent or cancelled updates cannot desync the two views. Like the
   legacy worker, `limits()` PANICS when the actor is gone (a silent
   default could hand the caller a completely wrong state). Invalid new
-  limits (zero capacity) are rejected and logged; the previous limits
-  stay in effect.
+  limits with zero-duration windows are rejected and logged; a
+  zero-capacity window is accepted as a pause until a later settings update.
 
 - **`Debug`**: `ThrottleCompat<B>` keeps the legacy `Debug` contract
   (the legacy type derives it); the callback closure is not printable
@@ -672,13 +681,10 @@ Documented temporary incompatibilities:
   asks `get_chat` whether slow mode explains a freeze);
 - channel usernames are canonicalized (the legacy hashed the raw
   spelling, so `@Foo` and `foo` were different identities);
-- zero-capacity limits: the legacy worker accepts `messages_per_min_chat
-  = 0` (requests to such chats wait forever) and `set_limits` with
-  zeroes pauses the traffic; the scheduler rejects zero-capacity windows
-  at construction and in `set_limits`, so the compatibility layer
-  rejects and logs such updates while the previous limits stay in
-  effect. This must be resolved before the public `Throttle` switches to
-  this layer.
+- zero-capacity limits: a zero global or chat window is accepted and
+  pauses matching requests until a later `set_limits` update raises it.
+  The blocked jobs use an external-event wakeup rather than a timer, so
+  zero-capacity configuration cannot create a busy loop.
 
 The legacy worker was switched from `std::time::Instant` to
 `tokio::time::Instant` (production-identical: tokio's Instant is the
@@ -698,7 +704,7 @@ being SILENT during a freeze on both engines (0 callbacks before the
 thaw, >= 1 after it) and REPEATING at >= 4s intervals while the backlog
 stays full on both engines. The compat-only tests additionally pin
 exact timings, the weight-1 batch accounting, the passthrough bypass,
-`set_limits` (actor round-trip, zero-capacity rejection), the per-kind
+`set_limits` (actor round-trip, zero-capacity pause and re-arm), the per-kind
 minute windows and the capacity-semaphore lifecycle regressions: FIFO
 among released waiters, a cancelled waiter not blocking the queue, a
 cancelled pending request waking a parked waiter, a slot freed before

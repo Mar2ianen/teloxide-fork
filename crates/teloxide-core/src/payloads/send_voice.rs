@@ -67,3 +67,14 @@ impl_payload! {
         }
     }
 }
+
+impl crate::outbound::OutboundPayload for SendVoice {
+    fn outbound_hint(&self) -> crate::outbound::OutboundHint {
+        crate::outbound::OutboundHint {
+            scope: crate::outbound::classify::scope_of_recipient(&self.chat_id),
+            class: crate::outbound::OutboundClass::new(crate::outbound::class::MESSAGE_SEND),
+            priority: crate::outbound::OutboundPriority::NORMAL,
+            weight: std::num::NonZeroU32::new(1).unwrap(),
+        }
+    }
+}

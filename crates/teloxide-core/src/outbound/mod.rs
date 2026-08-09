@@ -1,8 +1,7 @@
 //! Deterministic outbound scheduling model.
 //!
-//! Commit 1 delivered the pure state machine ([`scheduler`]); Commit 2 adds
-//! the actor, the handle and the completion-aware permit ([`actor`]) on top
-//! of it.
+//! Commit 1 delivered the pure deterministic state machine; Commit 2 adds
+//! the public actor, handle and completion-aware permit on top of it.
 //!
 //! The scheduler owns only the shared admission/rate/order layer:
 //! priorities with aging, per-chat ordering lanes, rolling windows,

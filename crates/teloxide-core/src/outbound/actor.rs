@@ -555,8 +555,8 @@ impl Drop for OutboundGrant {
 }
 
 /// A future that resolves with a permit once the scheduler grants the job:
-/// the combined single-future form of [`OutboundEnqueue`] +
-/// [`OutboundGrant`].
+/// the combined single-future form of the internal enqueue and grant
+/// phases.
 ///
 /// The grant receiver is owned by the future from the moment of creation,
 /// not nested inside the enqueue reply: dropping the future in ANY state

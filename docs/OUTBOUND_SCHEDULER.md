@@ -58,7 +58,8 @@ candidates: BinaryHeap<CandidateKey>     persistent candidate heap
       CandidateKey { effective, sequence, Job(JobId) | Lane(OutboundLaneKey) }
       (effective desc, sequence asc; entries validated lazily on pop)
 blocked: BinaryHeap<Reverse<BlockedJob>> failed candidates, by earliest
-      eligibility; BlockedJob { until, permanent, reference }
+      eligibility; BlockedJob { until, permanent, reference }. Finite nodes are
+      ordered before permanent pause nodes regardless of their sentinel `until`.
 aging_events: BinaryHeap<Reverse<AgingEvent>>
       the moment a candidate's effective priority rises one level; the
       candidate heap is re-keyed by event, never by a per-tick full scan

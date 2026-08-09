@@ -22,9 +22,8 @@ use url::Url;
 
 use crate::{
     adaptors::{
-        throttle::{Limits, Settings},
+        throttle::{LegacyThrottle, Limits, Settings},
         throttle_compat::ThrottleCompat,
-        Throttle,
     },
     errors::{AsResponseParameters, RequestError},
     outbound::WindowChatKind,
@@ -961,6 +960,20 @@ async fn drain_rounds(
     }
 }
 
+#[tokio::test(start_paused = true)]
+async fn public_throttle_alias_uses_outbound_scheduler() {
+    let (throttle, actor) = crate::adaptors::Throttle::new(FakeBot::ok(), default_limits());
+    let actor_task = tokio::spawn(actor);
+    let result = tokio::time::timeout(
+        Duration::from_secs(1),
+        throttle.send_message(ChatId(1), "public alias"),
+    )
+    .await
+    .unwrap();
+    assert!(result.is_ok());
+    actor_task.abort();
+}
+
 /// Drives one engine: submits `sends` (chat, text) at t=0, ticks the
 /// paused clock, and records the completion order with timestamps
 /// (relative to the virtual t=0).
@@ -1022,7 +1035,7 @@ fn default_limits() -> Limits {
 /// and returns both completion orders.
 async fn run_both(limits: Limits, sends: &[(i64, &str)]) -> (Vec<usize>, Vec<usize>) {
     let legacy_bot = FakeBot::ok();
-    let (legacy, worker) = Throttle::new(legacy_bot, limits);
+    let (legacy, worker) = LegacyThrottle::new(legacy_bot, limits);
     let worker_task = tokio::spawn(worker);
 
     let compat_bot = FakeBot::ok();
@@ -1398,7 +1411,7 @@ async fn inner_execution_path_matches_the_legacy_table() {
     // Default settings (`retry = true`): the inner `send_ref()` is used
     // even for an owned request. The fake bot returns message_id 2 from
     // `send_ref()` and 1 from `send()`.
-    let (legacy, worker) = Throttle::new(FakeBot::ok(), default_limits());
+    let (legacy, worker) = LegacyThrottle::new(FakeBot::ok(), default_limits());
     let worker_task = tokio::spawn(worker);
     let output = tokio::time::timeout(Duration::from_secs(1), legacy.send_message(ChatId(1), "x"))
         .await
@@ -1421,7 +1434,7 @@ async fn inner_execution_path_matches_the_legacy_table() {
     // worker), NOT through `Request::send` — the fake distinguishes the
     // two (id 3 = into_future, id 1 = send).
     let settings = Settings { limits: default_limits(), ..<_>::default() }.no_retry();
-    let (legacy, worker) = Throttle::with_settings(FakeBot::ok(), settings);
+    let (legacy, worker) = LegacyThrottle::with_settings(FakeBot::ok(), settings);
     let worker_task = tokio::spawn(worker);
     let output = tokio::time::timeout(Duration::from_secs(1), legacy.send_message(ChatId(1), "x"))
         .await
@@ -1442,7 +1455,7 @@ async fn inner_execution_path_matches_the_legacy_table() {
 
     // `retry = false` + outer `send_ref()`: the inner `send_ref()` is used.
     let settings = Settings { limits: default_limits(), ..<_>::default() }.no_retry();
-    let (legacy, worker) = Throttle::with_settings(FakeBot::ok(), settings);
+    let (legacy, worker) = LegacyThrottle::with_settings(FakeBot::ok(), settings);
     let worker_task = tokio::spawn(worker);
     let output = tokio::time::timeout(
         Duration::from_secs(1),
@@ -1496,7 +1509,7 @@ async fn parity_interleaved_chats_reversed_poll_order() {
     let sends = [(1, "a"), (2, "b"), (1, "c"), (2, "d")];
 
     let legacy_bot = FakeBot::ok();
-    let (legacy, worker) = Throttle::new(legacy_bot, default_limits());
+    let (legacy, worker) = LegacyThrottle::new(legacy_bot, default_limits());
     let worker_task = tokio::spawn(worker);
     let legacy_order = drive_completions(legacy, &sends, true).await;
 
@@ -1529,7 +1542,7 @@ async fn parity_retry_after_freeze() {
     // reports a global penalty. Both must grant B1/A2 only after the
     // freeze, and the retried A1 last.
     let legacy_bot = FakeBot::ok().failing_first(1, Duration::from_secs(3));
-    let (legacy, worker) = Throttle::new(legacy_bot, default_limits());
+    let (legacy, worker) = LegacyThrottle::new(legacy_bot, default_limits());
     let worker_task = tokio::spawn(worker);
     let legacy_order = drive_completions(legacy, &[(1, "a1"), (2, "b1"), (1, "a2")], false).await;
 
@@ -1569,7 +1582,7 @@ async fn parity_saturated_backlog_reversed_poll_order() {
     let sends = [(1, "a"), (1, "b"), (1, "c"), (1, "d"), (1, "e")];
 
     let legacy_bot = FakeBot::ok();
-    let (legacy, worker) = Throttle::new(legacy_bot, limits);
+    let (legacy, worker) = LegacyThrottle::new(legacy_bot, limits);
     let worker_task = tokio::spawn(worker);
     let legacy_order = drive_completions(legacy, &sends, true).await;
 
@@ -1897,7 +1910,7 @@ async fn parity_request_during_freeze_precedes_the_retried_request() {
     // an immediate re-enqueue would put the retry ahead of the frozen
     // request and occupy a pending slot during the whole freeze.
     let legacy_bot = FakeBot::ok().failing_first(1, Duration::from_secs(10));
-    let (legacy, worker) = Throttle::new(legacy_bot, default_limits());
+    let (legacy, worker) = LegacyThrottle::new(legacy_bot, default_limits());
     let worker_task = tokio::spawn(worker);
     let legacy_order =
         drive_freeze_then_request(legacy, (1, "a"), (2, "b"), Duration::from_secs(10)).await;
@@ -2076,7 +2089,7 @@ async fn compat_on_queue_full_fires_when_the_backlog_reaches_capacity() {
 #[tokio::test]
 #[should_panic(expected = "worker died before last `Throttle` instance")]
 async fn limits_panics_when_the_actor_is_dead() {
-    // The legacy `Throttle::limits` panics when the worker died; the
+    // The legacy `LegacyThrottle::limits` panics when the worker died; the
     // compatibility layer must not silently hand out defaults.
     let (compat, actor) = ThrottleCompat::new(FakeBot::ok(), default_limits());
     let actor_task = tokio::spawn(actor);
@@ -2102,7 +2115,7 @@ async fn parity_late_processed_completion_does_not_extend_the_freeze() {
     // --- legacy ---
     let legacy_start = tokio::time::Instant::now();
     let legacy_bot = FakeBot::ok().failing_first(1, fail_after);
-    let (legacy, worker) = Throttle::new(legacy_bot, default_limits());
+    let (legacy, worker) = LegacyThrottle::new(legacy_bot, default_limits());
     let mut worker = Box::pin(worker);
     let legacy_done = Arc::new(Mutex::new(None));
     let legacy_req = legacy.send_message(ChatId(1), "a");
@@ -2239,8 +2252,10 @@ async fn parity_on_queue_full_is_silent_during_a_freeze() {
         retry: true,
         check_slow_mode: false,
     };
-    let (legacy, worker) =
-        Throttle::with_settings(FakeBot::ok().failing_first(1, Duration::from_secs(15)), settings);
+    let (legacy, worker) = LegacyThrottle::with_settings(
+        FakeBot::ok().failing_first(1, Duration::from_secs(15)),
+        settings,
+    );
     let worker_task = tokio::spawn(worker);
     let mut futs: Vec<Pin<Box<dyn Future<Output = ()>>>> = Vec::new();
     let freezer = legacy.send_message(ChatId(1), "freeze");
@@ -2354,7 +2369,7 @@ async fn parity_on_queue_full_repeats_while_the_backlog_stays_full() {
         retry: true,
         check_slow_mode: false,
     };
-    let (legacy, worker) = Throttle::with_settings(FakeBot::ok(), settings);
+    let (legacy, worker) = LegacyThrottle::with_settings(FakeBot::ok(), settings);
     let worker_task = tokio::spawn(worker);
     let mut futs: Vec<Pin<Box<dyn Future<Output = ()>>>> = Vec::new();
     for &(chat, text) in &sends {
@@ -2437,7 +2452,7 @@ async fn compat_implements_debug_like_the_legacy() {
     // The legacy `Throttle` derives `Debug`; the compatibility layer must
     // keep the same contract (downstream code with `Debug` bounds breaks
     // otherwise).
-    let (legacy, worker) = Throttle::new(FakeBot::ok(), default_limits());
+    let (legacy, worker) = LegacyThrottle::new(FakeBot::ok(), default_limits());
     let legacy_debug = format!("{legacy:?}");
     std::mem::drop(worker);
 
@@ -2458,7 +2473,7 @@ async fn cloned_no_retry_owned_send_uses_inner_send_ref() {
     // fake bot distinguishes the paths by the message id (2 vs 1).
     let settings = Settings { limits: default_limits(), ..<_>::default() }.no_retry();
 
-    let (legacy, worker) = Throttle::with_settings(FakeBot::ok(), settings);
+    let (legacy, worker) = LegacyThrottle::with_settings(FakeBot::ok(), settings);
     let worker_task = tokio::spawn(worker);
     let request = legacy.send_message(ChatId(1), "x");
     let clone = request.clone();
@@ -2490,7 +2505,7 @@ async fn outer_send_ref_does_not_clone_the_inner_request() {
 
     let legacy_bot = FakeBot::ok();
     let legacy_clones = legacy_bot.clones.clone();
-    let (legacy, worker) = Throttle::with_settings(legacy_bot, settings);
+    let (legacy, worker) = LegacyThrottle::with_settings(legacy_bot, settings);
     let worker_task = tokio::spawn(worker);
     let before = legacy_clones.load(Ordering::SeqCst);
     let request = legacy.send_message(ChatId(1), "x");
@@ -2732,7 +2747,7 @@ async fn owned_direct_fallback_uses_into_future_not_send() {
     // Legacy: the worker future is dropped, its channel closes, and the
     // request goes straight to the inner request.
     let settings = Settings { limits: default_limits(), ..<_>::default() }.no_retry();
-    let (legacy, worker) = Throttle::with_settings(FakeBot::ok(), settings);
+    let (legacy, worker) = LegacyThrottle::with_settings(FakeBot::ok(), settings);
     std::mem::drop(worker);
     let output = tokio::time::timeout(Duration::from_secs(1), legacy.send_message(ChatId(1), "x"))
         .await
@@ -2889,7 +2904,7 @@ async fn parity_full_backlog_cancelled_during_freeze_still_reports_after_thaw() 
         check_slow_mode: false,
     };
     let (legacy, worker) =
-        Throttle::with_settings(FakeBot::ok().failing_first(1, freeze), settings);
+        LegacyThrottle::with_settings(FakeBot::ok().failing_first(1, freeze), settings);
     let mut worker = Box::pin(worker);
     let send_a = legacy.send_message(ChatId(1), "a");
     let mut fut_a = Box::pin(async move {

@@ -1,9 +1,8 @@
 //! Compatibility `Throttle` built on top of the outbound scheduler.
 //!
-//! Commit 5 of the outbound scheduler migration: the legacy
-//! [`Throttle`](crate::adaptors::Throttle) worker is kept and this module
-//! implements the same public contract over the
-//! [`OutboundQueue`](crate::outbound::OutboundQueue) instead, so the two
+//! Commit 8 of the outbound scheduler migration: the public
+//! [`Throttle`](crate::adaptors::Throttle) now uses this implementation over
+//! the [`OutboundQueue`](crate::outbound::OutboundQueue) instead, so the two
 //! engines can be compared head-to-head on paused time (see `tests`).
 //!
 //! Reproduced legacy semantics:
@@ -140,7 +139,7 @@ const SATURATION_CHECK_PERIOD: Duration = Duration::from_millis(4001);
 
 /// A `Throttle`-compatible wrapper over the outbound scheduler.
 ///
-/// Same public contract as [`Throttle`](crate::adaptors::Throttle):
+/// Public implementation of [`Throttle`](crate::adaptors::Throttle):
 /// [`Limits`], [`Settings`], `limits()`/`set_limits()`, `inner()`,
 /// `into_inner()` and the throttled method allowlist. The worker future
 /// returned by `new`/`with_settings` is the outbound actor future.
@@ -151,7 +150,7 @@ pub struct ThrottleCompat<B> {
     state: Arc<CompatState>,
 }
 
-/// Same `Debug` contract as the legacy [`Throttle`](crate::adaptors::Throttle)
+/// `Debug` contract of the public [`Throttle`](crate::adaptors::Throttle)
 /// (`#[derive(Debug)]`): the callback is not printable and is skipped.
 impl<B: std::fmt::Debug> std::fmt::Debug for ThrottleCompat<B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

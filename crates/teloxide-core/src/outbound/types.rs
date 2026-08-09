@@ -456,7 +456,7 @@ pub enum OutboundAcquireError {
     Superseded,
 }
 
-/// Errors of [`OutboundQueueHandle::set_limits`].
+/// Errors of [`crate::outbound::OutboundQueueHandle::set_limits`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum OutboundSetLimitsError {

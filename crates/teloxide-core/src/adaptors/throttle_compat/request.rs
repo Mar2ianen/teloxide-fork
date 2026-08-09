@@ -18,7 +18,7 @@ use crate::{
 
 /// Request returned by [`ThrottleCompat`](super::ThrottleCompat) methods.
 ///
-/// Like the legacy `ThrottlingRequest`, the inner request is shared
+/// Like the previous throttle request wrapper, the inner request is shared
 /// through an `Arc`: an outer `send_ref()` (and a retried owned request)
 /// re-sends the same payload without consuming it and without cloning the
 /// inner request itself (an arbitrary `R::clone()` may carry side
@@ -129,7 +129,7 @@ impl<R: Request> Future for CompatSend<R> {
 
 /// The scheduler metadata of one throttled request: the payload's scope
 /// and class, the legacy-compatible NORMAL priority and weight 1 (the
-/// legacy worker counts API calls, not messages).
+/// previous worker contract counts API calls, not messages).
 fn compat_metadata<R>(request: &ShareableRequest<R>) -> OutboundMetadata
 where
     R: Request,
@@ -153,7 +153,8 @@ where
 /// dead waiters blocking the queue. The permit is held while the job is
 /// pending and released when the grant arrives, exactly like the legacy
 /// worker popping a request from its queue before sending it. The outcome
-/// is classified like the legacy worker's request loop (see [`finish`]).
+/// is classified like the previous worker contract's request loop (see
+/// [`finish`]).
 async fn compat_send<R>(
     mut request: ShareableRequest<R>,
     queue: OutboundQueue,
@@ -178,7 +179,7 @@ where
             .acquire_owned()
             .await
             .expect("the pending-slots semaphore is never closed");
-        // The legacy worker fires the callback when its queue REACHES the
+        // The previous worker contract fires the callback when its queue REACHES the
         // capacity (the N-th pending request), NOT when the N-th request
         // is granted: the check runs before the rate limits are applied.
         // The compatibility layer therefore fires it on the ENQUEUE
@@ -204,7 +205,7 @@ where
                 Err(_) => {
                     // The actor is shut down (or an impossible
                     // configuration slipped through): send directly, like
-                    // the legacy worker dying before draining its queue.
+                    // the previous worker contract dying before draining its queue.
                     // The slot is released BEFORE the direct send, so the
                     // other parked requests are woken immediately — a
                     // slow or hanging direct send must not hold them.
@@ -219,7 +220,7 @@ where
         };
         if was_last_slot {
             // The backlog is full NOW (before any grant): fire the
-            // callback at the legacy timing. The legacy worker does not
+            // callback at the legacy timing. The previous worker contract does not
             // run its checks while frozen, so the callback stays silent
             // during a freeze — but the messages are already in its
             // bounded channel, and it WILL report the full backlog after
@@ -236,14 +237,14 @@ where
         }
         // Phase 2: the grant. The slot is held while the job is pending
         // and handed to the next waiter on the grant, exactly like the
-        // legacy worker popping a request from its queue before sending
+        // previous worker contract popping a request from its queue before sending
         // it.
         let permit = match grant.await {
             Ok(permit) => permit,
             Err(_) => {
                 // The actor died between the acceptance and the
                 // grant: send directly (see above). A full-backlog event
-                // deferred during a freeze is cleared: the legacy worker
+                // deferred during a freeze is cleared: the previous worker contract
                 // is dead and would never run the callback again.
                 state.deferred_full.store(false, Ordering::SeqCst);
                 log::error!("ThrottleCompat: outbound queue unavailable, sending directly");
@@ -293,7 +294,7 @@ where
         let observed_at = tokio::time::Instant::now();
         if let Some(seconds) = retry_after {
             // The freeze deadline is recorded even when the request will
-            // not be retried (the legacy worker freezes regardless of the
+            // not be retried (the previous worker contract freezes regardless of the
             // retry flag).
             super::record_freeze_at(&state, observed_at, seconds.duration());
         }
@@ -304,7 +305,7 @@ where
             Ok(output) => return Ok(output),
             Err(error) => {
                 if retry && retry_after.is_some() {
-                    // The legacy worker sleeps until the freeze expires
+                    // The previous worker contract sleeps until the freeze expires
                     // OUTSIDE the queue and only then re-sends: a request
                     // that arrived during the freeze keeps its place
                     // ahead of the retry, and the retry occupies no
@@ -327,12 +328,12 @@ where
 /// Completes the permit according to the PRE-CLASSIFIED outcome and
 /// returns the outcome unchanged:
 ///
-/// - `retry_after` — registers the GLOBAL penalty (the legacy worker freezes
-///   everything);
+/// - `retry_after` — registers the GLOBAL penalty (the previous worker contract
+///   freezes everything);
 /// - otherwise `Ok` — success;
 /// - otherwise — failure.
 ///
-/// The completion is NON-BLOCKING: the legacy request loop returns its
+/// The completion is NON-BLOCKING: the compatibility request loop returns its
 /// result right after the inner request finished (the worker is only told
 /// about a `RetryAfter` freeze, and even that without waiting for the
 /// worker to apply it), so the compatibility layer must not stall a

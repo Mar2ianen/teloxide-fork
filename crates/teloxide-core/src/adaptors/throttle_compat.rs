@@ -1,7 +1,7 @@
 //! Compatibility `Throttle` built on top of the outbound scheduler.
 //!
 //! Commit 5 of the outbound scheduler migration: the legacy
-//! [`Throttle`](super::throttle::Throttle) worker is kept and this module
+//! [`Throttle`](crate::adaptors::Throttle) worker is kept and this module
 //! implements the same public contract over the
 //! [`OutboundQueue`](crate::outbound::OutboundQueue) instead, so the two
 //! engines can be compared head-to-head on paused time (see `tests`).
@@ -144,7 +144,7 @@ const SATURATION_CHECK_PERIOD: Duration = Duration::from_millis(4001);
 
 /// A `Throttle`-compatible wrapper over the outbound scheduler.
 ///
-/// Same public contract as [`Throttle`](super::throttle::Throttle):
+/// Same public contract as [`Throttle`](crate::adaptors::Throttle):
 /// [`Limits`], [`Settings`], `limits()`/`set_limits()`, `inner()`,
 /// `into_inner()` and the throttled method allowlist. The worker future
 /// returned by `new`/`with_settings` is the outbound actor future.
@@ -155,7 +155,7 @@ pub struct ThrottleCompat<B> {
     state: Arc<CompatState>,
 }
 
-/// Same `Debug` contract as the legacy [`Throttle`](super::throttle::Throttle)
+/// Same `Debug` contract as the legacy [`Throttle`](crate::adaptors::Throttle)
 /// (`#[derive(Debug)]`): the callback is not printable and is skipped.
 impl<B: std::fmt::Debug> std::fmt::Debug for ThrottleCompat<B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -280,7 +280,8 @@ impl<B> ThrottleCompat<B> {
     /// Creates the wrapper alongside the outbound actor future.
     ///
     /// Note: requests will only be sent while the returned future is
-    /// polled/spawned/awaited (same contract as [`Throttle::new`]).
+    /// polled/spawned/awaited (same contract as
+    /// [`crate::adaptors::Throttle::new`]).
     pub fn new(bot: B, limits: Limits) -> (Self, impl Future<Output = ()>)
     where
         B: Requester + Clone,
@@ -377,7 +378,7 @@ impl<B> ThrottleCompat<B> {
     /// [`Throttle::limits`], this panics if the worker is gone (a silent
     /// default could hand the caller a completely wrong state).
     ///
-    /// [`Throttle::limits`]: super::throttle::Throttle::limits
+    /// [`Throttle::limits`]: crate::adaptors::Throttle::limits
     pub async fn limits(&self) -> Limits {
         const WORKER_DIED: &str = "worker died before last `Throttle` instance";
         let outbound = self.queue.handle().limits().await.expect(WORKER_DIED);

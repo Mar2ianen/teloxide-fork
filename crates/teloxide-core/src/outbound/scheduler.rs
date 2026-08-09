@@ -21,7 +21,8 @@
 //!   inherits the queue position and the scheduling age of the superseded job),
 //!   and incompatible metadata is rejected instead of silently creating a
 //!   second pending job;
-//! - a job whose weight fits no applicable window is rejected at enqueue;
+//! - a job whose weight fits no positive applicable window is rejected at
+//!   enqueue; a zero-capacity window instead blocks it until `set_limits`;
 //! - a top-aged candidate blocked by window capacity reserves the window: later
 //!   jobs consuming the same window are held back until the blocked candidate
 //!   can be granted, so a heavy job cannot starve behind a stream of lighter
@@ -36,6 +37,8 @@ use std::{
     num::NonZeroU32,
     time::{Duration, Instant},
 };
+
+const BLOCKED_FOREVER_DELAY: Duration = Duration::from_secs(365 * 24 * 3600);
 
 use super::types::{
     AgingPolicy, EnqueueError, EnqueueOutcome, Grant, JobId, OutboundChatKey, OutboundClass,
@@ -368,6 +371,9 @@ impl PartialOrd for CandidateKey {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct BlockedJob {
     until: Instant,
+    /// A permanent block is lifted only by a settings update. Its deadline is
+    /// intentionally not exposed as a timer wake-up.
+    permanent: bool,
     /// Ownership token of the node. Lane nodes carry the lane's blocked
     /// generation: a node whose generation does not match the lane's
     /// current one is stale (replaced by a fresh wake node) and never
@@ -422,6 +428,9 @@ enum Admission {
     /// window (if any) that must be held back until `until` so that the
     /// candidate is not starved by lighter traffic.
     Blocked { until: Instant, reserve: Option<WindowRef> },
+    /// The candidate is blocked by a zero-capacity window. It is re-armed
+    /// only by a settings update; no timer deadline can make it grantable.
+    BlockedForever,
     /// The candidate consumes a window that is already reserved for an
     /// older blocked candidate; it is parked without further processing.
     Reserved,
@@ -481,9 +490,6 @@ impl SchedulerState {
         aging: AgingPolicy,
     ) -> Result<Self, SchedulerConfigError> {
         for window in limits.global.iter().chain(limits.chat.iter()) {
-            if window.capacity == 0 {
-                return Err(SchedulerConfigError::ZeroWindowCapacity);
-            }
             if window.window.is_zero() {
                 return Err(SchedulerConfigError::ZeroWindowDuration);
             }
@@ -551,7 +557,9 @@ impl SchedulerState {
         // A job that never fits an applicable window could never be
         // granted; reject it at enqueue time instead of parking it forever.
         let weight = meta.weight.get();
-        if let Some(window) = self.global_limits.iter().find(|w| weight > w.capacity) {
+        if let Some(window) =
+            self.global_limits.iter().find(|w| w.capacity != 0 && weight > w.capacity)
+        {
             return Err(EnqueueError::WeightExceedsWindow {
                 scope: meta.scope,
                 weight: meta.weight,
@@ -564,7 +572,7 @@ impl SchedulerState {
                 .chat_limits
                 .iter()
                 .filter(|w| w.kind == WindowChatKind::Any || w.kind == kind)
-                .find(|w| weight > w.capacity)
+                .find(|w| w.capacity != 0 && weight > w.capacity)
             {
                 return Err(EnqueueError::WeightExceedsWindow {
                     scope: meta.scope,
@@ -905,6 +913,7 @@ impl SchedulerState {
                             self.stale_blocked += 1;
                             self.blocked.push(Reverse(BlockedJob {
                                 until: now,
+                                permanent: false,
                                 generation: lane_state.blocked_generation,
                                 reference: CandidateRef::Lane(lane),
                             }));
@@ -1252,7 +1261,7 @@ impl SchedulerState {
     /// head, a dead job is skipped).
     fn promote_blocked(&mut self, now: Instant) {
         while let Some(top) = self.blocked.peek() {
-            if top.0.until > now {
+            if top.0.permanent || top.0.until > now {
                 break;
             }
             let BlockedJob { reference, generation, .. } = self.blocked.pop().unwrap().0;
@@ -1442,6 +1451,55 @@ impl SchedulerState {
         }
     }
 
+    /// Drops an owner reservation when the candidate is blocked by a
+    /// different window (or forever). A job owns at most one reservation, so
+    /// the old parked FIFO must be released before a new owner is assigned.
+    fn release_previous_reservation_if_changed(
+        &mut self,
+        candidate: &Candidate,
+        next_window: Option<&WindowRef>,
+        now: Instant,
+    ) {
+        let reference = self.reference_of(candidate);
+        let previous_window =
+            self.jobs.get(&candidate.job).and_then(|job| job.reservation_owner.clone());
+        if previous_window.as_ref() == next_window {
+            return;
+        }
+        let Some(previous_window) = previous_window else { return };
+        self.release_reservation(&previous_window, reference, now);
+        if let Some(job) = self.jobs.get_mut(&candidate.job) {
+            if job.reservation_owner.as_ref() == Some(&previous_window) {
+                job.reservation_owner = None;
+            }
+        }
+    }
+
+    /// Adds the candidate to the blocked heap and marks its current job or
+    /// lane node as live. `BLOCKED_FOREVER_DELAY` is used for zero-capacity
+    /// windows and is ignored by `next_deadline`.
+    fn block_candidate(&mut self, candidate: &Candidate, until: Instant, permanent: bool) {
+        let generation = if let Some(job) = self.jobs.get(&candidate.job) {
+            if let Some(lane) = job.meta.lane {
+                let lane_state = self.lanes.get_mut(&lane).expect("lane exists");
+                lane_state.in_blocked_heap = true;
+                lane_state.blocked_generation = lane_state.blocked_generation.wrapping_add(1);
+                lane_state.blocked_generation
+            } else {
+                self.jobs.get_mut(&candidate.job).expect("job exists").in_blocked_heap = true;
+                0
+            }
+        } else {
+            0
+        };
+        self.blocked.push(Reverse(BlockedJob {
+            until,
+            permanent,
+            generation,
+            reference: self.reference_of(candidate),
+        }));
+    }
+
     /// Grants every job that can be admitted at `now`.
     ///
     /// Arbitration is event-driven: candidates are popped from the
@@ -1473,19 +1531,8 @@ impl SchedulerState {
                     grants.push(Grant { job });
                 }
                 Admission::Blocked { until, reserve } => {
+                    self.release_previous_reservation_if_changed(&candidate, reserve.as_ref(), now);
                     let reference = self.reference_of(&candidate);
-                    let previous_window =
-                        self.jobs.get(&candidate.job).and_then(|job| job.reservation_owner.clone());
-                    if previous_window.as_ref() != reserve.as_ref() {
-                        if let Some(previous_window) = previous_window {
-                            self.release_reservation(&previous_window, reference, now);
-                            if let Some(job) = self.jobs.get_mut(&candidate.job) {
-                                if job.reservation_owner.as_ref() == Some(&previous_window) {
-                                    job.reservation_owner = None;
-                                }
-                            }
-                        }
-                    }
                     if let Some(window) = reserve {
                         let reservation =
                             self.reservations.entry(window.clone()).or_insert_with(|| {
@@ -1499,33 +1546,11 @@ impl SchedulerState {
                             }
                         }
                     }
-                    let generation = if let Some(job) = self.jobs.get(&candidate.job) {
-                        if let Some(lane) = job.meta.lane {
-                            // The blocked node references the lane and is
-                            // owned by the lane state: exactly one CURRENT
-                            // node per blocked lane (older nodes carry a
-                            // stale generation), so the stale accounting
-                            // never double-counts a cancelled lane head.
-                            let lane_state = self.lanes.get_mut(&lane).expect("lane exists");
-                            lane_state.in_blocked_heap = true;
-                            lane_state.blocked_generation =
-                                lane_state.blocked_generation.wrapping_add(1);
-                            lane_state.blocked_generation
-                        } else {
-                            self.jobs
-                                .get_mut(&candidate.job)
-                                .expect("job exists")
-                                .in_blocked_heap = true;
-                            0
-                        }
-                    } else {
-                        0
-                    };
-                    self.blocked.push(Reverse(BlockedJob {
-                        until,
-                        generation,
-                        reference: self.reference_of(&candidate),
-                    }));
+                    self.block_candidate(&candidate, until, false);
+                }
+                Admission::BlockedForever => {
+                    self.release_previous_reservation_if_changed(&candidate, None, now);
+                    self.block_candidate(&candidate, now + BLOCKED_FOREVER_DELAY, true);
                 }
                 Admission::Reserved => {
                     let window = self.reservation_window(&candidate, now);
@@ -1710,7 +1735,10 @@ impl SchedulerState {
             until = until.max(self.penalties[&PenaltyKey::Global]);
         }
         if !self.global_windows.can_consume(now, weight) {
-            until = until.max(self.global_windows.earliest_for(now, weight).unwrap_or(now));
+            let Some(window_until) = self.global_windows.earliest_for(now, weight) else {
+                return Admission::BlockedForever;
+            };
+            until = until.max(window_until);
             reserve = Some(WindowRef::Global);
         }
         if let OutboundScope::Chat(chat) = &candidate.scope {
@@ -1728,7 +1756,10 @@ impl SchedulerState {
                 .entry(chat.clone())
                 .or_insert_with(|| WindowSet::new(&self.chat_limits, chat.window_chat_kind()));
             if !windows.can_consume(now, weight) {
-                until = until.max(windows.earliest_for(now, weight).unwrap_or(now));
+                let Some(window_until) = windows.earliest_for(now, weight) else {
+                    return Admission::BlockedForever;
+                };
+                until = until.max(window_until);
                 if reserve.is_none() {
                     reserve = Some(WindowRef::Chat(chat.clone()));
                 }
@@ -1874,9 +1905,6 @@ impl SchedulerState {
         now: Instant,
     ) -> Result<(), SchedulerConfigError> {
         for window in limits.global.iter().chain(limits.chat.iter()) {
-            if window.capacity == 0 {
-                return Err(SchedulerConfigError::ZeroWindowCapacity);
-            }
             if window.window.is_zero() {
                 return Err(SchedulerConfigError::ZeroWindowDuration);
             }
@@ -1893,7 +1921,9 @@ impl SchedulerState {
         // as a whole.
         for job in self.jobs.values() {
             let weight = job.meta.weight.get();
-            if let Some(window) = limits.global.iter().find(|w| weight > w.capacity) {
+            if let Some(window) =
+                limits.global.iter().find(|w| w.capacity != 0 && weight > w.capacity)
+            {
                 return Err(SchedulerConfigError::PendingWeightExceedsWindow {
                     scope: job.meta.scope.clone(),
                     weight,
@@ -1906,7 +1936,7 @@ impl SchedulerState {
                     .chat
                     .iter()
                     .filter(|w| w.kind == WindowChatKind::Any || w.kind == kind)
-                    .find(|w| weight > w.capacity)
+                    .find(|w| w.capacity != 0 && weight > w.capacity)
                 {
                     return Err(SchedulerConfigError::PendingWeightExceedsWindow {
                         scope: job.meta.scope.clone(),
@@ -2095,7 +2125,7 @@ impl SchedulerState {
         if let Some(top) = self.delayed.peek() {
             consider(top.0.not_before);
         }
-        if let Some(top) = self.blocked.peek() {
+        if let Some(top) = self.blocked.peek().filter(|top| !top.0.permanent) {
             consider(top.0.until);
         }
         if let Some(top) = self.aging_events.peek() {
@@ -3347,17 +3377,33 @@ mod tests {
     }
 
     #[test]
+    fn zero_capacity_windows_are_valid_but_block_until_reconfigured() {
+        let mut s = SchedulerState::new(
+            OutboundLimits {
+                global: vec![WindowLimit::new(0, Duration::from_secs(1))],
+                chat: vec![],
+            },
+            aging(),
+        )
+        .unwrap();
+        let t0 = base();
+        let job = fifo(&mut s, global(OutboundPriority::NORMAL), t0);
+        assert!(s.grant_ready(t0).is_empty());
+        assert_eq!(s.next_deadline(t0), SchedulerWakeup::ExternalEvent);
+
+        s.set_limits(
+            OutboundLimits {
+                global: vec![WindowLimit::new(1, Duration::from_secs(1))],
+                chat: vec![],
+            },
+            t0,
+        )
+        .unwrap();
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![job]);
+    }
+
+    #[test]
     fn invalid_window_configs_are_rejected() {
-        assert!(matches!(
-            SchedulerState::new(
-                OutboundLimits {
-                    global: vec![WindowLimit::new(0, Duration::from_secs(1))],
-                    chat: vec![],
-                },
-                aging(),
-            ),
-            Err(SchedulerConfigError::ZeroWindowCapacity)
-        ));
         assert!(matches!(
             SchedulerState::new(
                 OutboundLimits { global: vec![WindowLimit::new(1, Duration::ZERO)], chat: vec![] },

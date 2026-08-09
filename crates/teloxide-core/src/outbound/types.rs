@@ -270,7 +270,8 @@ pub(crate) enum EnqueueError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SchedulerConfigError {
-    /// A window with zero capacity can never admit any request.
+    /// Reserved for strict validation callers; the scheduler itself treats
+    /// zero capacity as a valid pause until the next settings update.
     ZeroWindowCapacity,
     /// A window with zero duration never expires its history.
     ZeroWindowDuration,

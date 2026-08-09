@@ -42,40 +42,40 @@
 //!   deadline already passed — exactly like the legacy worker receiving an
 //!   expired absolute `until`. The outcome is classified exactly once
 //!   (`AsResponseParameters::retry_after` is not required to be pure);
-//! - the backlog is bounded by `messages_per_sec_overall` (the legacy channel
-//!   capacity): a capacity semaphore parks requests in FIFO order when the
-//!   backlog is full, `on_queue_full` fires at most once per 4 seconds (both
-//!   when the last slot is taken and when a request has to wait), and a slot
-//!   freed by a grant, a cancellation or the actor's death automatically wakes
-//!   the next waiter — no lost wakeups, no dead waiters. The notification is
-//!   anchored at the ENQUEUE ACCEPTANCE of the last slot — the moment the actor
-//!   put the job into the backlog, BEFORE the rate-limit wait and the grant
-//!   (the two-phase `OutboundQueueHandle::enqueue`/`OutboundGrant` acquire
-//!   exposes the admission point): a last pending request cancelled before its
-//!   grant cannot erase the full-backlog event that already happened, and a
-//!   request granted at t=0 reports the backlog of t=0. A request going
-//!   straight into a direct send because the actor died before the acceptance
-//!   never reports a full backlog, and the callback is silent while a global
-//!   freeze is active — exactly like the legacy worker, which does not run its
-//!   queue checks while frozen; a full-backlog event deferred during the freeze
-//!   is emitted EXACTLY ONCE at the thaw boundary (the legacy worker still
-//!   reads the messages out of its bounded channel after the thaw, even if
-//!   every pending request was cancelled before it) and cleared when the actor
-//!   dies (a dead worker never runs the callback again). A saturation monitor
-//!   re-fires the callback while the backlog stays full (the legacy worker
-//!   re-checks on every iteration), sleeps past the freeze deadline before
-//!   re-checking, and exits when a slot frees up, resetting its flag BEFORE
-//!   releasing the observed permit so a fresh saturation wave spawns a new
-//!   monitor. The slot is held while the job is pending and released on grant;
-//!   a `QueueFull` rejection (only possible behind an unprocessed cancel) keeps
-//!   the slot and retries, preserving the FIFO order, and the direct-send
-//!   fallback on the actor's death releases the slot BEFORE the direct request
-//!   runs. The cancellation identity is a CLIENT TOKEN minted before the
-//!   enqueue is sent: dropping the enqueue/grant future sends `Cancel { token
-//!   }`, and the actor applies it whether the enqueue was already processed
-//!   (token mapped to the job) or still in flight (the cancel is remembered and
-//!   applied on acceptance) — a dropped future can never leave a ghost job
-//!   pending. The completion is NON-BLOCKING
+//! - the backlog is bounded by `max(messages_per_sec_overall, 1)` (the legacy
+//!   channel capacity for positive limits): a capacity semaphore parks requests
+//!   in FIFO order when the backlog is full, `on_queue_full` fires at most once
+//!   per 4 seconds (both when the last slot is taken and when a request has to
+//!   wait), and a slot freed by a grant, a cancellation or the actor's death
+//!   automatically wakes the next waiter — no lost wakeups, no dead waiters.
+//!   The notification is anchored at the ENQUEUE ACCEPTANCE of the last slot —
+//!   the moment the actor put the job into the backlog, BEFORE the rate-limit
+//!   wait and the grant (the two-phase
+//!   `OutboundQueueHandle::enqueue`/`OutboundGrant` acquire exposes the
+//!   admission point): a last pending request cancelled before its grant cannot
+//!   erase the full-backlog event that already happened, and a request granted
+//!   at t=0 reports the backlog of t=0. A request going straight into a direct
+//!   send because the actor died before the acceptance never reports a full
+//!   backlog, and the callback is silent while a global freeze is active —
+//!   exactly like the legacy worker, which does not run its queue checks while
+//!   frozen; a full-backlog event deferred during the freeze is emitted EXACTLY
+//!   ONCE at the thaw boundary (the legacy worker still reads the messages out
+//!   of its bounded channel after the thaw, even if every pending request was
+//!   cancelled before it) and cleared when the actor dies (a dead worker never
+//!   runs the callback again). A saturation monitor re-fires the callback while
+//!   the backlog stays full (the legacy worker re-checks on every iteration),
+//!   sleeps past the freeze deadline before re-checking, and exits when a slot
+//!   frees up, resetting its flag BEFORE releasing the observed permit so a
+//!   fresh saturation wave spawns a new monitor. The slot is held while the job
+//!   is pending and released on grant; a `QueueFull` rejection (only possible
+//!   behind an unprocessed cancel) keeps the slot and retries, preserving the
+//!   FIFO order, and the direct-send fallback on the actor's death releases the
+//!   slot BEFORE the direct request runs. The cancellation identity is a CLIENT
+//!   TOKEN minted before the enqueue is sent: dropping the enqueue/grant future
+//!   sends `Cancel { token }`, and the actor applies it whether the enqueue was
+//!   already processed (token mapped to the job) or still in flight (the cancel
+//!   is remembered and applied on acceptance) — a dropped future can never
+//!   leave a ghost job pending. The completion is NON-BLOCKING
 //!   ([`crate::outbound::OutboundPermit::complete`], not the adaptor's
 //!   per-request barrier): the legacy request loop returns its result right
 //!   after the inner request finished, and the ordering is preserved because
@@ -93,14 +93,10 @@
 //!   to skip a freeze caused by slow mode);
 //! - channel usernames are canonicalized (the legacy hashed the raw spelling,
 //!   so `@Foo` and `foo` were different identities);
-//! - zero-capacity limits: the legacy worker accepts `messages_per_min_chat =
-//!   0` (requests to such chats wait forever) and `set_limits` with zeroes
-//!   simply pauses the traffic. The scheduler rejects zero-capacity windows at
-//!   construction and in `set_limits`, so `ThrottleCompat::set_limits` with a
-//!   zero limit is rejected and logged while the previous limits stay in
-//!   effect. This MUST be resolved (either zero-capacity support in the
-//!   scheduler or a compat-side "blocked until next set_limits" gate) before
-//!   the public `Throttle` switches to this layer.
+//! - zero-capacity limits: a zero chat/global rate window pauses matching
+//!   requests until a later `set_limits` update raises it again. This matches
+//!   the legacy worker's behavior; the queue actor keeps such jobs pending
+//!   without scheduling a timer wake-up.
 mod request;
 mod requester_impl;
 
@@ -187,7 +183,9 @@ struct CompatState {
     /// Whether a `RetryAfter` outcome re-sends the request.
     retry: bool,
     /// Backlog bound in permits — the role of the legacy bounded channel
-    /// (capacity `messages_per_sec_overall`). A request holds one permit
+    /// (capacity `max(messages_per_sec_overall, 1)`). A zero overall rate
+    /// limit still gets one slot so a paused request can reach the scheduler
+    /// and later be released by `set_limits`. A request holds one permit
     /// while its job is pending and releases it on grant, cancellation or
     /// the actor's death, so the next waiter is woken automatically,
     /// cancellation-safe and in FIFO order.
@@ -225,6 +223,18 @@ struct CompatState {
 /// The per-chat minute limit is split by chat kind, reproducing the legacy
 /// `messages_per_min_chat` vs `messages_per_min_channel_or_supergroup`
 /// distinction; the per-second limits become 1-second windows.
+const MIN_QUEUE_CAPACITY: usize = 1;
+
+/// Keeps the compat ingress usable when the global rate window is paused.
+///
+/// `tokio::mpsc` and the legacy semaphore both require a positive capacity,
+/// while a zero `messages_per_sec_overall` is a valid rate-limit pause. One
+/// slot is enough to keep the request in the scheduler until `set_limits`
+/// re-enables the window; positive limits retain their legacy capacity.
+fn queue_capacity_for_limits(limits: Limits) -> usize {
+    (limits.messages_per_sec_overall as usize).max(MIN_QUEUE_CAPACITY)
+}
+
 fn to_outbound_limits(limits: Limits) -> OutboundLimits {
     OutboundLimits {
         global: vec![WindowLimit::new(limits.messages_per_sec_overall, Duration::from_secs(1))],
@@ -301,7 +311,7 @@ impl<B> ThrottleCompat<B> {
         if check_slow_mode {
             log::warn!("ThrottleCompat: `check_slow_mode` is not supported yet and is ignored");
         }
-        let queue_capacity = limits.messages_per_sec_overall as usize;
+        let queue_capacity = queue_capacity_for_limits(limits);
         let queue_settings = OutboundSettings {
             limits: to_outbound_limits(limits),
             queue_capacity,
@@ -390,8 +400,10 @@ impl<B> ThrottleCompat<B> {
     /// The scheduler's `set_limits` carries the already debited history
     /// over, so changing limits does not reset the rate budget (same
     /// semantics as the legacy worker, which keeps its history). If the
-    /// queue rejects the new limits (e.g. a zero capacity, see the module
-    /// docs), the previous limits stay in effect and the error is logged.
+    /// queue rejects malformed limits (for example a zero-duration window),
+    /// the previous limits stay in effect and the error is logged. A
+    /// zero-capacity rate window is valid and pauses matching requests until
+    /// a later update enables it again.
     ///
     /// There is deliberately no client-side mirror: [`ThrottleCompat::limits`]
     /// always reads the actor, so cancelling this future after the actor

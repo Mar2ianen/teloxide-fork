@@ -1,4 +1,4 @@
-# Outbound scheduler — design note (Commits 1–7)
+# Outbound scheduler — design note (Commits 1–8)
 
 Deterministic outbound scheduling model in `crates/teloxide-core/src/outbound/`.
 

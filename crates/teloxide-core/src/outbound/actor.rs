@@ -2056,25 +2056,25 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn set_limits_rejects_invalid_configuration() {
+    async fn set_limits_accepts_zero_capacity_and_rearms_after_pause() {
         let queue = OutboundQueue::new_spawn(settings()).unwrap();
         let handle = queue.handle();
 
-        let error = handle
+        handle
             .set_limits(OutboundLimits {
                 global: vec![window(0, Duration::from_secs(60))],
                 chat: Vec::new(),
             })
             .await
-            .unwrap_err();
-        assert_eq!(
-            error,
-            OutboundSetLimitsError::Invalid(SchedulerConfigError::ZeroWindowCapacity)
-        );
+            .unwrap();
 
-        // The previous limits stay in effect and the queue keeps working.
-        let permit = handle.acquire(metadata(OutboundPriority::NORMAL));
-        let permit = tokio::time::timeout(Duration::from_secs(1), permit).await.unwrap().unwrap();
+        let blocked = handle.acquire(metadata(OutboundPriority::NORMAL));
+        tokio::pin!(blocked);
+        tokio::task::yield_now().await;
+        assert!(futures::poll!(blocked.as_mut()).is_pending());
+
+        handle.set_limits(OutboundLimits { global: Vec::new(), chat: Vec::new() }).await.unwrap();
+        let permit = tokio::time::timeout(Duration::from_secs(1), blocked).await.unwrap().unwrap();
         permit.complete(OutboundCompletion::Success);
     }
 

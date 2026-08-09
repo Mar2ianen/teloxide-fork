@@ -1,31 +1,41 @@
 /// `ThrottlingRequest` and `ThrottlingSend` structures
+#[cfg(test)]
 mod request;
 /// Lock that allows requests to wait until they are allowed to be sent
+#[cfg(test)]
 mod request_lock;
-/// `impl Requester for Throttle<_>`
+/// Legacy implementation retained for parity tests; the public `Throttle`
+/// alias below uses the outbound scheduler.
+#[cfg(test)]
 mod requester_impl;
 /// `Settings` and `Limits` structures
 mod settings;
 /// "Worker" that checks the limits
+#[cfg(test)]
 mod worker;
 
+#[cfg(test)]
 use std::{
     future::Future,
     hash::{Hash, Hasher},
 };
 
+#[cfg(test)]
 use tokio::sync::{
     mpsc,
     oneshot::{self},
 };
 
+#[cfg(test)]
 use crate::{errors::AsResponseParameters, requests::Requester, types::*};
 
+#[cfg(test)]
 use self::{
     request_lock::{channel, RequestLock},
     worker::{worker, FreezeUntil, InfoMessage},
 };
 
+#[cfg(test)]
 pub use request::{ThrottlingRequest, ThrottlingSend};
 pub use settings::{Limits, Settings};
 
@@ -41,8 +51,8 @@ pub use settings::{Limits, Settings};
 /// changed).
 ///
 /// It's recommended to use this wrapper before other wrappers (i.e.:
-/// `SomeWrapper<Throttle<Bot>>` not `Throttle<SomeWrapper<Bot>>`) because if
-/// done otherwise inner wrappers may cause `Throttle` to miscalculate limits
+/// `SomeWrapper<Throttle<Bot>>` not `LegacyThrottle<SomeWrapper<Bot>>`) because
+/// if done otherwise inner wrappers may cause `Throttle` to miscalculate limits
 /// usage.
 ///
 /// [limits]: https://core.telegram.org/bots/faq#my-bot-is-hitting-limits-how-do-i-avoid-this
@@ -71,14 +81,20 @@ pub use settings::{Limits, Settings};
 /// As such, we encourage not to use `ChatId::ChannelUsername(u)` with this bot
 /// wrapper.
 #[derive(Clone, Debug)]
-pub struct Throttle<B> {
+// This wrapper exists only while the in-crate parity suite compares the
+// scheduler implementation with the removed-from-public-surface worker.
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) struct LegacyThrottle<B> {
     bot: B,
     // `RequestLock` allows to unlock requests (allowing them to be sent).
     queue: mpsc::Sender<(ChatIdHash, RequestLock)>,
     info_tx: mpsc::Sender<InfoMessage>,
 }
 
-impl<B> Throttle<B> {
+#[cfg(test)]
+#[allow(dead_code)]
+impl<B> LegacyThrottle<B> {
     /// Creates new [`Throttle`] alongside with worker future.
     ///
     /// Note: [`Throttle`] will only send requests if returned worker is
@@ -153,7 +169,7 @@ impl<B> Throttle<B> {
 
     /// Returns currently used [`Limits`].
     pub async fn limits(&self) -> Limits {
-        const WORKER_DIED: &str = "worker died before last `Throttle` instance";
+        const WORKER_DIED: &str = "worker died before last `LegacyThrottle` instance";
 
         let (tx, rx) = oneshot::channel();
 
@@ -178,13 +194,16 @@ impl<B> Throttle<B> {
 ///
 /// It is used instead of `ChatId` to make copying cheap even in case of
 /// usernames. (It is just a hashed username.)
+#[cfg(test)]
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 enum ChatIdHash {
     Id(ChatId),
     ChannelUsernameHash(u64),
 }
 
+#[cfg(test)]
 impl ChatIdHash {
+    #[allow(dead_code)]
     fn is_channel_or_supergroup(&self) -> bool {
         match self {
             &Self::Id(id) => id.is_channel_or_supergroup(),
@@ -193,12 +212,14 @@ impl ChatIdHash {
     }
 }
 
+#[cfg(test)]
 impl From<&ChatId> for ChatIdHash {
     fn from(value: &ChatId) -> Self {
         ChatIdHash::Id(*value)
     }
 }
 
+#[cfg(test)]
 impl From<&Recipient> for ChatIdHash {
     fn from(value: &Recipient) -> Self {
         match value {
@@ -214,3 +235,9 @@ impl From<&Recipient> for ChatIdHash {
         }
     }
 }
+
+/// Public throttling adaptor backed by the outbound scheduler.
+///
+/// The legacy worker remains available internally while the compatibility
+/// implementation completes its public migration and parity period.
+pub type Throttle<B> = crate::adaptors::throttle_compat::ThrottleCompat<B>;

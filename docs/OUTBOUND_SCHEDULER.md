@@ -1,4 +1,4 @@
-# Outbound scheduler — design note (Commits 1–7)
+# Outbound scheduler — design note (Commits 1–8)
 
 Deterministic outbound scheduling model in `crates/teloxide-core/src/outbound/`.
 
@@ -26,9 +26,7 @@ Deterministic outbound scheduling model in `crates/teloxide-core/src/outbound/`.
 - **Commit 5**: the `Throttle` compatibility layer (`ThrottleCompat`)
   over the scheduler with parity tests against the legacy worker, plus
   the chat-kind window limits extension (`WindowLimit::kind`,
-  `WindowChatKind`). The legacy `Throttle` worker is kept for the
-  head-to-head comparison (see "Throttle compatibility layer (Commit 5)"
-  below).
+  `WindowChatKind`).
 - **Commit 6**: the `Drafter` migration. The Drafter actor remains the
   lifecycle/coalescing state machine, while every real Telegram request
   (send, edit, native draft and delete) receives its own queue permit.
@@ -40,6 +38,9 @@ Deterministic outbound scheduling model in `crates/teloxide-core/src/outbound/`.
   without a timer wake-up. The compat layer keeps one ingress slot when the
   legacy global rate is zero, because the rate pause must still be able to
   receive a job and later release it after reconfiguration.
+- **Commit 8**: the public `Throttle` alias is switched to `ThrottleCompat`.
+  The legacy worker remains compiled only for in-crate parity tests; it is no
+  longer part of the production request path.
 
 ## Scope
 
@@ -516,10 +517,10 @@ pub trait OutboundPayload {
 ## Throttle compatibility layer (Commit 5)
 
 `ThrottleCompat<B>` (`crates/teloxide-core/src/adaptors/throttle_compat/`)
-reimplements the legacy `Throttle` contract on top of the outbound
-scheduler, keeping the legacy worker untouched for head-to-head parity
-testing. The public `Throttle` is NOT switched yet (that happens in a
-later commit, together with the legacy worker removal).
+implements the public `Throttle` contract on top of the outbound scheduler.
+The public `adaptors::Throttle` type is now an alias of `ThrottleCompat`; the
+legacy worker is compiled only for in-crate head-to-head parity tests and is
+not used by production request paths.
 
 Reproduced legacy semantics:
 
@@ -775,5 +776,5 @@ into the new hook when they issue cleanup requests.
 
 `OrderedStart` lanes (Commit 2 is serial-only), `Bot::outbound`-style
 extension sugar, class-aware window sets for the raw `Outbound` adaptor,
-the public `Throttle` switch-over and legacy worker removal, durable outbox,
+legacy worker removal, durable outbox,
 observability hooks.

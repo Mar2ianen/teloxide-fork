@@ -1,10 +1,4 @@
-//! Unit, functional and legacy-parity tests of the compatibility layer.
-//!
-//! Parity tests drive the SAME scenario through the legacy worker
-//! (`Throttle`) and the outbound-based engine (`ThrottleCompat`) on a
-//! paused clock and compare the order of grants. The legacy worker uses
-//! `tokio::time::Instant` (switched from `std::time::Instant` in Commit 5),
-//! so both engines observe the same virtual time.
+//! Unit and functional tests of the scheduler-backed compatibility layer.
 
 use std::{
     future::{Future, IntoFuture},
@@ -22,7 +16,7 @@ use url::Url;
 
 use crate::{
     adaptors::{
-        throttle::{LegacyThrottle, Limits, Settings},
+        throttle::{Limits, Settings},
         throttle_compat::ThrottleCompat,
     },
     errors::{AsResponseParameters, RequestError},
@@ -32,15 +26,14 @@ use crate::{
     types::*,
 };
 
-/// Virtual-time tick of the scenario drivers (matches the legacy worker's
-/// `DELAY`).
+/// Virtual-time tick used by the scenario drivers.
 const TICK: Duration = Duration::from_millis(250);
 
 /// A fake request with a programmed result: the first `fail_count`
 /// executions fail with `RetryAfter(fail_after)`, the rest succeed. The
 /// execution counter is shared through the clone, so a retried request
-/// (cloned by `CompatRequest` or shared via `Arc` by the legacy
-/// `ThrottlingRequest`) observes the same program.
+/// (cloned by `CompatRequest` or shared via `Arc` by the compatibility
+/// request wrapper) observes the same program.
 struct FakeRequest<P: Payload> {
     payload: P,
     /// Result of the inner `send()`.
@@ -48,10 +41,10 @@ struct FakeRequest<P: Payload> {
     /// Result of the inner `send_ref()`.
     send_ref_result: Result<P::Output, RequestError>,
     /// Result of the inner `IntoFuture::into_future()`. Distinct from
-    /// `send_result`: the legacy worker executes a truly owned request
-    /// through `owned.take().unwrap().await` (IntoFuture), so a custom
-    /// requester whose `into_future` differs from `send` must observe the
-    /// into_future result.
+    /// `send_result`: the previous worker contract executes a truly owned
+    /// request through `owned.take().unwrap().await` (IntoFuture), so a
+    /// custom requester whose `into_future` differs from `send` must
+    /// observe the into_future result.
     into_future_result: Result<P::Output, RequestError>,
     fail_count: usize,
     fail_after: Duration,
@@ -64,7 +57,7 @@ struct FakeRequest<P: Payload> {
     /// Shared clone counter: every `R::clone()` is observable, so the
     /// tests can assert that the compatibility layer never clones the
     /// inner request itself (it shares it through an `Arc`, like the
-    /// legacy `ThrottlingRequest`).
+    /// previous throttle request wrapper).
     clones: Arc<AtomicUsize>,
 }
 
@@ -1021,7 +1014,7 @@ where
     order
 }
 
-/// The legacy per-second limits used by most scenarios.
+/// Common per-second limits used by most scenarios.
 fn default_limits() -> Limits {
     Limits {
         messages_per_sec_chat: 1,
@@ -1029,28 +1022,6 @@ fn default_limits() -> Limits {
         messages_per_min_channel_or_supergroup: 10,
         messages_per_sec_overall: 30,
     }
-}
-
-/// Runs the same scenario through the legacy worker and the compat engine
-/// and returns both completion orders.
-async fn run_both(limits: Limits, sends: &[(i64, &str)]) -> (Vec<usize>, Vec<usize>) {
-    let legacy_bot = FakeBot::ok();
-    let (legacy, worker) = LegacyThrottle::new(legacy_bot, limits);
-    let worker_task = tokio::spawn(worker);
-
-    let compat_bot = FakeBot::ok();
-    let (compat, actor) = ThrottleCompat::new(compat_bot, limits);
-    let actor_task = tokio::spawn(actor);
-
-    let legacy_order = drive_completions(legacy, sends, false).await;
-    let compat_order = drive_completions(compat, sends, false).await;
-
-    worker_task.abort();
-    actor_task.abort();
-    (
-        legacy_order.into_iter().map(|(i, _)| i).collect(),
-        compat_order.into_iter().map(|(i, _)| i).collect(),
-    )
 }
 
 // ---------- unit: limits mapping ----------
@@ -1195,13 +1166,13 @@ async fn compat_retry_after_penalizes_globally_and_retries() {
     let actor_task = tokio::spawn(actor);
 
     // A1 fails with RetryAfter(3s); B1 (another chat) is queued behind it.
-    // The legacy worker freezes EVERYTHING until the penalty expires, so
+    // A global penalty freezes all matching requests until it expires, so
     // B1 must NOT be granted at t=1 (when A1's per-chat 1s window frees)
     // but only at t=3 together with the retried A1.
     let sends = [(1, "a1"), (2, "b1"), (1, "a2")];
     let order = drive_completions(compat, &sends, false).await;
 
-    // The legacy worker unlocks B1 at t=0 (it was queued before the
+    // B1 is queued before the penalty and its chat is free, so
     // freeze and its chat is free), the freeze then blocks A2 until t=3,
     // and the retried A1 re-queues behind A2 (chat 1/s window).
     assert_eq!(
@@ -1407,42 +1378,21 @@ async fn compat_distinguishes_channel_and_regular_minute_limits() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn inner_execution_path_matches_the_legacy_table() {
-    // Default settings (`retry = true`): the inner `send_ref()` is used
-    // even for an owned request. The fake bot returns message_id 2 from
+async fn compat_inner_execution_path_honors_settings() {
+    // Default settings (`retry = true`) execute the inner `send_ref()` even
+    // for an owned request. The fake bot returns message_id 2 from
     // `send_ref()` and 1 from `send()`.
-    let (legacy, worker) = LegacyThrottle::new(FakeBot::ok(), default_limits());
-    let worker_task = tokio::spawn(worker);
-    let output = tokio::time::timeout(Duration::from_secs(1), legacy.send_message(ChatId(1), "x"))
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(output.id.0, 2, "legacy: retry=true -> inner send_ref");
-    worker_task.abort();
-
     let (compat, actor) = ThrottleCompat::new(FakeBot::ok(), default_limits());
     let actor_task = tokio::spawn(actor);
     let output = tokio::time::timeout(Duration::from_secs(1), compat.send_message(ChatId(1), "x"))
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(output.id.0, 2, "compat: retry=true -> inner send_ref");
+    assert_eq!(output.id.0, 2, "retry=true -> inner send_ref");
     actor_task.abort();
 
-    // `retry = false` + owned `send()`: the inner request is executed
-    // through `IntoFuture` (`owned.take().unwrap().await` in the legacy
-    // worker), NOT through `Request::send` — the fake distinguishes the
-    // two (id 3 = into_future, id 1 = send).
-    let settings = Settings { limits: default_limits(), ..<_>::default() }.no_retry();
-    let (legacy, worker) = LegacyThrottle::with_settings(FakeBot::ok(), settings);
-    let worker_task = tokio::spawn(worker);
-    let output = tokio::time::timeout(Duration::from_secs(1), legacy.send_message(ChatId(1), "x"))
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(output.id.0, 3, "legacy: owned + retry=false -> IntoFuture");
-    worker_task.abort();
-
+    // `retry = false` + owned `send()` still uses the request's
+    // `IntoFuture` implementation, not `Request::send`.
     let settings = Settings { limits: default_limits(), ..<_>::default() }.no_retry();
     let (compat, actor) = ThrottleCompat::with_settings(FakeBot::ok(), settings);
     let actor_task = tokio::spawn(actor);
@@ -1450,23 +1400,10 @@ async fn inner_execution_path_matches_the_legacy_table() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(output.id.0, 3, "compat: owned + retry=false -> IntoFuture");
+    assert_eq!(output.id.0, 3, "owned + retry=false -> IntoFuture");
     actor_task.abort();
 
-    // `retry = false` + outer `send_ref()`: the inner `send_ref()` is used.
-    let settings = Settings { limits: default_limits(), ..<_>::default() }.no_retry();
-    let (legacy, worker) = LegacyThrottle::with_settings(FakeBot::ok(), settings);
-    let worker_task = tokio::spawn(worker);
-    let output = tokio::time::timeout(
-        Duration::from_secs(1),
-        legacy.send_message(ChatId(1), "x").send_ref(),
-    )
-    .await
-    .unwrap()
-    .unwrap();
-    assert_eq!(output.id.0, 2, "legacy: outer send_ref -> inner send_ref");
-    worker_task.abort();
-
+    // `retry = false` + outer `send_ref()` uses the inner `send_ref()`.
     let settings = Settings { limits: default_limits(), ..<_>::default() }.no_retry();
     let (compat, actor) = ThrottleCompat::with_settings(FakeBot::ok(), settings);
     let actor_task = tokio::spawn(actor);
@@ -1477,128 +1414,11 @@ async fn inner_execution_path_matches_the_legacy_table() {
     .await
     .unwrap()
     .unwrap();
-    assert_eq!(output.id.0, 2, "compat: outer send_ref -> inner send_ref");
+    assert_eq!(output.id.0, 2, "outer send_ref -> inner send_ref");
     actor_task.abort();
 }
 
-// ---------- parity: legacy worker vs compat engine ----------
-
-#[tokio::test(start_paused = true)]
-async fn parity_per_chat_second_limit() {
-    let sends = [(1, "a"), (1, "b"), (1, "c"), (2, "d")];
-    let (legacy, compat) = run_both(default_limits(), &sends).await;
-    assert_eq!(legacy, compat, "legacy: {legacy:?} compat: {compat:?}");
-    assert_eq!(legacy, vec![0, 3, 1, 2]);
-}
-
-#[tokio::test(start_paused = true)]
-async fn parity_interleaved_chats() {
-    let sends = [(1, "a"), (2, "b"), (1, "c"), (2, "d")];
-    let (legacy, compat) = run_both(default_limits(), &sends).await;
-    assert_eq!(legacy, compat);
-    assert_eq!(legacy, vec![0, 1, 2, 3]);
-}
-
-/// Same scenario as `parity_interleaved_chats`, but the driver polls the
-/// futures in REVERSE submission order. Both engines see the same poll
-/// order, so the comparison still holds — and if one engine granted in a
-/// different order than the other, the reversed tie-break would expose it
-/// instead of masking it.
-#[tokio::test(start_paused = true)]
-async fn parity_interleaved_chats_reversed_poll_order() {
-    let sends = [(1, "a"), (2, "b"), (1, "c"), (2, "d")];
-
-    let legacy_bot = FakeBot::ok();
-    let (legacy, worker) = LegacyThrottle::new(legacy_bot, default_limits());
-    let worker_task = tokio::spawn(worker);
-    let legacy_order = drive_completions(legacy, &sends, true).await;
-
-    let compat_bot = FakeBot::ok();
-    let (compat, actor) = ThrottleCompat::new(compat_bot, default_limits());
-    let actor_task = tokio::spawn(actor);
-    let compat_order = drive_completions(compat, &sends, true).await;
-
-    worker_task.abort();
-    actor_task.abort();
-    let legacy: Vec<usize> = legacy_order.into_iter().map(|(i, _)| i).collect();
-    let compat: Vec<usize> = compat_order.into_iter().map(|(i, _)| i).collect();
-    assert_eq!(legacy, compat, "legacy: {legacy:?} compat: {compat:?}");
-}
-
-#[tokio::test(start_paused = true)]
-async fn parity_global_second_limit() {
-    let mut limits = default_limits();
-    limits.messages_per_sec_chat = 30;
-    limits.messages_per_sec_overall = 2;
-    let sends = [(1, "a"), (2, "b"), (3, "c"), (4, "d")];
-    let (legacy, compat) = run_both(limits, &sends).await;
-    assert_eq!(legacy, compat);
-    assert_eq!(legacy, vec![0, 1, 2, 3]);
-}
-
-#[tokio::test(start_paused = true)]
-async fn parity_retry_after_freeze() {
-    // The legacy worker freezes the whole bot on RetryAfter; the compat
-    // reports a global penalty. Both must grant B1/A2 only after the
-    // freeze, and the retried A1 last.
-    let legacy_bot = FakeBot::ok().failing_first(1, Duration::from_secs(3));
-    let (legacy, worker) = LegacyThrottle::new(legacy_bot, default_limits());
-    let worker_task = tokio::spawn(worker);
-    let legacy_order = drive_completions(legacy, &[(1, "a1"), (2, "b1"), (1, "a2")], false).await;
-
-    let compat_bot = FakeBot::ok().failing_first(1, Duration::from_secs(3));
-    let (compat, actor) = ThrottleCompat::new(compat_bot, default_limits());
-    let actor_task = tokio::spawn(actor);
-    let compat_order = drive_completions(compat, &[(1, "a1"), (2, "b1"), (1, "a2")], false).await;
-
-    worker_task.abort();
-    actor_task.abort();
-    let legacy: Vec<usize> = legacy_order.into_iter().map(|(i, _)| i).collect();
-    let compat: Vec<usize> = compat_order.into_iter().map(|(i, _)| i).collect();
-    assert_eq!(legacy, compat, "legacy: {legacy:?} compat: {compat:?}");
-    assert_eq!(legacy, vec![1, 2, 0], "B1 раньше, затем A2, затем retry A1");
-}
-
-#[tokio::test(start_paused = true)]
-async fn parity_full_backlog_order() {
-    let mut limits = default_limits();
-    limits.messages_per_sec_chat = 30;
-    limits.messages_per_sec_overall = 2;
-    let sends = [(1, "a"), (2, "b"), (3, "c"), (4, "d"), (5, "e")];
-    let (legacy, compat) = run_both(limits, &sends).await;
-    assert_eq!(legacy, compat);
-    assert_eq!(legacy, vec![0, 1, 2, 3, 4]);
-}
-
-/// Five requests to ONE chat with a 1/s chat limit and a backlog bound of
-/// 2: requests 4 and 5 are rejected with `QueueFull` and must keep their
-/// FIFO position (the legacy parks them on its bounded channel). The
-/// driver polls in REVERSE submission order, so a polling-based
-/// re-admission that lost the FIFO order would be exposed.
-#[tokio::test(start_paused = true)]
-async fn parity_saturated_backlog_reversed_poll_order() {
-    let mut limits = default_limits();
-    limits.messages_per_sec_overall = 2; // backlog bound = 2
-    let sends = [(1, "a"), (1, "b"), (1, "c"), (1, "d"), (1, "e")];
-
-    let legacy_bot = FakeBot::ok();
-    let (legacy, worker) = LegacyThrottle::new(legacy_bot, limits);
-    let worker_task = tokio::spawn(worker);
-    let legacy_order = drive_completions(legacy, &sends, true).await;
-
-    let compat_bot = FakeBot::ok();
-    let (compat, actor) = ThrottleCompat::new(compat_bot, limits);
-    let actor_task = tokio::spawn(actor);
-    let compat_order = drive_completions(compat, &sends, true).await;
-
-    worker_task.abort();
-    actor_task.abort();
-    let legacy: Vec<usize> = legacy_order.into_iter().map(|(i, _)| i).collect();
-    let compat: Vec<usize> = compat_order.into_iter().map(|(i, _)| i).collect();
-    assert_eq!(legacy, compat, "legacy: {legacy:?} compat: {compat:?}");
-    // Both engines follow the reverse poll order: 4, 3, 2, 1, 0.
-    assert_eq!(legacy, vec![4, 3, 2, 1, 0]);
-}
+// ---------- scheduler ordering regressions ----------
 
 // ---------- capacity semaphore: lifecycle regressions ----------
 //
@@ -1675,7 +1495,7 @@ async fn cancelled_capacity_waiter_does_not_block_the_next() {
 #[tokio::test(start_paused = true)]
 async fn cancelling_a_pending_request_wakes_a_capacity_waiter() {
     // R0 primes a GLOBAL freeze (it fails with RetryAfter(10) and sleeps
-    // OUTSIDE the queue, like the legacy worker); R1/R2 submitted during
+    // OUTSIDE the queue, like the previous worker contract); R1/R2 submitted during
     // the freeze stay PENDING and fill the two backlog slots, so R3
     // parks on the semaphore. Cancelling R1 releases its slot AND
     // cancels its job, and the freed slot must reach R3 — the hand-rolled
@@ -1781,7 +1601,7 @@ async fn actor_death_wakes_all_capacity_waiters_and_direct_sends() {
     // R0/R1 hold the two backlog slots; R2/R3 park on the semaphore.
     // Killing the actor resolves the pending acquires with `Closed`, the
     // released slots cascade through the waiters, and every request
-    // degrades to a direct send (the legacy worker dropping its queue).
+    // degrades to a direct send after the actor drops its queue.
     let (compat, actor) = ThrottleCompat::new(FakeBot::ok(), default_limits());
     let actor_task = tokio::spawn(actor);
 
@@ -1808,8 +1628,8 @@ async fn actor_death_wakes_all_capacity_waiters_and_direct_sends() {
     let mut results = results.lock().unwrap().clone();
     results.sort();
     // The requests were never cloned, so the direct-send fallback uses
-    // the legacy table: Owned -> `IntoFuture` (id 3), not `Request::send`
-    // (id 1) — the legacy worker runs `owned.take().unwrap().await`.
+    // the owned execution contract: Owned -> `IntoFuture` (id 3), not
+    // `Request::send` (id 1).
     assert_eq!(
         results,
         vec![(0, 3), (1, 3), (2, 3), (3, 3)],
@@ -1851,10 +1671,9 @@ async fn cancelled_set_limits_cannot_stale_limits() {
 // ---------- retry timing, direct-send fallback and QueueFull FIFO ----------
 
 /// Two-phase scenario driver: `first` is submitted at t=0 and fails once
-/// with `RetryAfter(fail_after)` (freezing the engine), `second` is
-/// submitted at t=1 — DURING the freeze — and both must complete after
-/// the freeze, in the order the queue received them.
-async fn drive_freeze_then_request<R: Requester>(
+/// with `RetryAfter(fail_after)`, `second` is submitted at t=1 during the
+/// freeze, and both must complete in queue order after the freeze.
+async fn drive_compat_freeze_then_request<R: Requester>(
     bot: R,
     first: (i64, &str),
     second: (i64, &str),
@@ -1867,24 +1686,22 @@ where
     let mut futs: Vec<Pin<Box<dyn Future<Output = ()>>>> = Vec::new();
     {
         let order = Arc::clone(&order);
-        let a = bot.send_message(ChatId(first.0), first.1);
+        let request = bot.send_message(ChatId(first.0), first.1);
         futs.push(Box::pin(async move {
-            let _ = a.await;
+            let _ = request.await;
             order.lock().unwrap().push(0);
         }));
     }
     let mut resolved = vec![false; 1];
     let _ = poll_once(futs[0].as_mut());
-    // Drive until the freeze is registered (the first request is now
-    // sleeping outside the queue).
     drain_rounds(&mut futs, &mut resolved, false).await;
 
     tokio::time::advance(Duration::from_secs(1)).await;
-    let order_b = Arc::clone(&order);
-    let b = bot.send_message(ChatId(second.0), second.1);
+    let order_for_request = Arc::clone(&order);
+    let request = bot.send_message(ChatId(second.0), second.1);
     futs.push(Box::pin(async move {
-        let _ = b.await;
-        order_b.lock().unwrap().push(1);
+        let _ = request.await;
+        order_for_request.lock().unwrap().push(1);
     }));
     let mut resolved = vec![false; 2];
     for fut in futs.iter_mut() {
@@ -1892,39 +1709,26 @@ where
     }
     drain_rounds(&mut futs, &mut resolved, false).await;
 
-    // Past the freeze: both requests complete in queue order.
     tokio::time::advance(fail_after).await;
     drain_rounds(&mut futs, &mut resolved, false).await;
     tokio::time::advance(Duration::from_secs(2)).await;
     drain_rounds(&mut futs, &mut resolved, false).await;
-    assert!(resolved.iter().all(|r| *r), "оба запроса завершились после freeze-а");
+    assert!(resolved.iter().all(|resolved| *resolved), "оба запроса завершились после freeze-а");
     let order = order.lock().unwrap().clone();
     order
 }
 
 #[tokio::test(start_paused = true)]
-async fn parity_request_during_freeze_precedes_the_retried_request() {
-    // The legacy worker sleeps until the RetryAfter expires and only
-    // THEN re-queues the request, so a request that arrives during the
-    // freeze is queued ahead of the retry. The compat layer must match:
-    // an immediate re-enqueue would put the retry ahead of the frozen
-    // request and occupy a pending slot during the whole freeze.
-    let legacy_bot = FakeBot::ok().failing_first(1, Duration::from_secs(10));
-    let (legacy, worker) = LegacyThrottle::new(legacy_bot, default_limits());
-    let worker_task = tokio::spawn(worker);
-    let legacy_order =
-        drive_freeze_then_request(legacy, (1, "a"), (2, "b"), Duration::from_secs(10)).await;
-
-    let compat_bot = FakeBot::ok().failing_first(1, Duration::from_secs(10));
-    let (compat, actor) = ThrottleCompat::new(compat_bot, default_limits());
+async fn compat_request_during_freeze_precedes_the_retried_request() {
+    // A request arriving during a RetryAfter freeze is queued ahead of the
+    // sleeping retry; the retry is re-enqueued only after the freeze ends.
+    let bot = FakeBot::ok().failing_first(1, Duration::from_secs(10));
+    let (compat, actor) = ThrottleCompat::new(bot, default_limits());
     let actor_task = tokio::spawn(actor);
-    let compat_order =
-        drive_freeze_then_request(compat, (1, "a"), (2, "b"), Duration::from_secs(10)).await;
-
-    worker_task.abort();
+    let order =
+        drive_compat_freeze_then_request(compat, (1, "a"), (2, "b"), Duration::from_secs(10)).await;
     actor_task.abort();
-    assert_eq!(legacy_order, compat_order, "legacy: {legacy_order:?} compat: {compat_order:?}");
-    assert_eq!(compat_order, vec![1, 0], "запрос во время freeze проходит раньше retry");
+    assert_eq!(order, vec![1, 0], "запрос во время freeze проходит раньше retry");
 }
 
 #[tokio::test(start_paused = true)]
@@ -2041,7 +1845,7 @@ async fn queue_full_after_cancel_lag_preserves_waiter_fifo() {
 
 #[tokio::test(start_paused = true)]
 async fn compat_on_queue_full_fires_when_the_backlog_reaches_capacity() {
-    // The legacy worker fires when its queue REACHES the capacity (the
+    // The compatibility callback fires when the backlog REACHES the capacity (the
     // N-th pending request), not when the N+1-th is rejected. Two
     // requests to a 1/s chat fill the backlog exactly (the chat limit
     // keeps the second one pending); no overflow request is submitted.
@@ -2088,9 +1892,9 @@ async fn compat_on_queue_full_fires_when_the_backlog_reaches_capacity() {
 
 #[tokio::test]
 #[should_panic(expected = "worker died before last `Throttle` instance")]
-async fn limits_panics_when_the_actor_is_dead() {
-    // The legacy `LegacyThrottle::limits` panics when the worker died; the
-    // compatibility layer must not silently hand out defaults.
+async fn limits_panics_when_the_scheduler_is_dead() {
+    // The compatibility layer must not silently hand out defaults when
+    // its scheduler actor has died.
     let (compat, actor) = ThrottleCompat::new(FakeBot::ok(), default_limits());
     let actor_task = tokio::spawn(actor);
     actor_task.abort();
@@ -2103,84 +1907,38 @@ async fn limits_panics_when_the_actor_is_dead() {
 // ----------
 
 #[tokio::test(start_paused = true)]
-async fn parity_late_processed_completion_does_not_extend_the_freeze() {
-    // The legacy worker freezes until the ABSOLUTE `until` computed at
-    // the error site: a freeze processed late (its deadline already past)
-    // adds no delay. The compat must anchor its scheduler penalty at the
-    // same observed moment (`observed_at` in the completion command), not
-    // at the actor's processing time — otherwise a completion handled
-    // five seconds late would freeze for another three.
+async fn compat_late_processed_completion_does_not_extend_the_freeze() {
+    // A RetryAfter completion carries the observation timestamp. Processing
+    // it five seconds later must not extend a three-second freeze from the
+    // actor's processing time.
     let fail_after = Duration::from_secs(3);
-
-    // --- legacy ---
-    let legacy_start = tokio::time::Instant::now();
-    let legacy_bot = FakeBot::ok().failing_first(1, fail_after);
-    let (legacy, worker) = LegacyThrottle::new(legacy_bot, default_limits());
-    let mut worker = Box::pin(worker);
-    let legacy_done = Arc::new(Mutex::new(None));
-    let legacy_req = legacy.send_message(ChatId(1), "a");
-    let legacy_done2 = Arc::clone(&legacy_done);
-    let mut legacy_fut = Box::pin(async move {
-        let _ = legacy_req.await;
-        *legacy_done2.lock().unwrap() = Some(tokio::time::Instant::now() - legacy_start);
-    });
-    let _ = poll_once(legacy_fut.as_mut());
-    let _ = poll_once(worker.as_mut());
-    // The request fails with RetryAfter(3); the freeze (deadline t=3) is
-    // sent to the worker, which is NOT polled again until t=5.
-    let _ = poll_once(legacy_fut.as_mut());
-    tokio::time::advance(Duration::from_secs(5)).await;
-    for _ in 0..16 {
-        if legacy_done.lock().unwrap().is_some() {
-            break;
-        }
-        let _ = poll_once(legacy_fut.as_mut());
-        let _ = poll_once(worker.as_mut());
-        tokio::task::yield_now().await;
-    }
-    assert!(
-        legacy_done.lock().unwrap().is_some(),
-        "legacy: запрос завершился после поздней обработки freeze-а"
-    );
-
-    // --- compat (its own clock: the legacy side already advanced) ---
-    let compat_start = tokio::time::Instant::now();
-    let compat_bot = FakeBot::ok().failing_first(1, fail_after);
-    let (compat, actor) = ThrottleCompat::new(compat_bot, default_limits());
+    let start = tokio::time::Instant::now();
+    let bot = FakeBot::ok().failing_first(1, fail_after);
+    let (compat, actor) = ThrottleCompat::new(bot, default_limits());
     let mut actor = Box::pin(actor);
-    let compat_done = Arc::new(Mutex::new(None));
-    let compat_req = compat.send_message(ChatId(1), "a");
-    let compat_done2 = Arc::clone(&compat_done);
-    let mut compat_fut = Box::pin(async move {
-        let _ = compat_req.await;
-        *compat_done2.lock().unwrap() = Some(tokio::time::Instant::now() - compat_start);
+    let done = Arc::new(Mutex::new(None));
+    let request = compat.send_message(ChatId(1), "a");
+    let done2 = Arc::clone(&done);
+    let mut future = Box::pin(async move {
+        let _ = request.await;
+        *done2.lock().unwrap() = Some(tokio::time::Instant::now() - start);
     });
-    let _ = poll_once(compat_fut.as_mut());
+
+    let _ = poll_once(future.as_mut());
     let _ = poll_once(actor.as_mut());
-    // The request fails with RetryAfter(3) and sends the completion
-    // (observed_at = t=0); the actor is NOT polled again until t=5.
-    let _ = poll_once(compat_fut.as_mut());
+    let _ = poll_once(future.as_mut());
     tokio::time::advance(Duration::from_secs(5)).await;
     for _ in 0..16 {
-        if compat_done.lock().unwrap().is_some() {
+        if done.lock().unwrap().is_some() {
             break;
         }
-        let _ = poll_once(compat_fut.as_mut());
+        let _ = poll_once(future.as_mut());
         let _ = poll_once(actor.as_mut());
         tokio::task::yield_now().await;
     }
-    assert!(
-        compat_done.lock().unwrap().is_some(),
-        "compat: запрос завершился после поздней обработки completion-а"
-    );
 
-    let legacy_done = legacy_done.lock().unwrap().unwrap();
-    let compat_done = compat_done.lock().unwrap().unwrap();
-    assert_eq!(legacy_done, compat_done, "legacy: {legacy_done:?} compat: {compat_done:?}");
-    assert!(
-        compat_done <= Duration::from_secs(5) + Duration::from_millis(1),
-        "freeze не продлевается поздней обработкой: {compat_done:?}"
-    );
+    let done = done.lock().unwrap().unwrap();
+    assert!(done <= Duration::from_secs(5) + Duration::from_millis(1), "freeze продлён: {done:?}");
 }
 
 #[tokio::test(start_paused = true)]
@@ -2225,75 +1983,18 @@ async fn stateful_retry_after_is_classified_once() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn parity_on_queue_full_is_silent_during_a_freeze() {
-    // The legacy worker does not run its queue checks while frozen: with
-    // a 15s RetryAfter and exactly `capacity` requests arriving during
-    // the freeze, `on_queue_full` must NOT fire before the thaw. The
-    // compat defers the full-backlog notification until the acquire
-    // succeeds (grants are blocked by the freeze) and the monitor sleeps
-    // until the freeze ends, so it is equally silent. After the thaw
-    // both engines report the filled backlog.
+async fn compat_queue_full_is_silent_during_a_freeze() {
+    // A full-backlog notification is deferred while a global RetryAfter
+    // freeze is active and emitted only after the thaw.
     let mut limits = default_limits();
     limits.messages_per_sec_chat = 30;
-    limits.messages_per_sec_overall = 2; // backlog bound = 2
+    limits.messages_per_sec_overall = 2;
     let start = tokio::time::Instant::now();
-
-    // --- legacy ---
-    let legacy_fires: Arc<Mutex<Vec<(Duration, usize)>>> = Arc::new(Mutex::new(Vec::new()));
+    let fires: Arc<Mutex<Vec<(Duration, usize)>>> = Arc::new(Mutex::new(Vec::new()));
     let settings = Settings {
         limits,
         on_queue_full: {
-            let fires = Arc::clone(&legacy_fires);
-            Box::new(move |pending| {
-                fires.lock().unwrap().push((tokio::time::Instant::now() - start, pending));
-                Box::pin(async move {})
-            })
-        },
-        retry: true,
-        check_slow_mode: false,
-    };
-    let (legacy, worker) = LegacyThrottle::with_settings(
-        FakeBot::ok().failing_first(1, Duration::from_secs(15)),
-        settings,
-    );
-    let worker_task = tokio::spawn(worker);
-    let mut futs: Vec<Pin<Box<dyn Future<Output = ()>>>> = Vec::new();
-    let freezer = legacy.send_message(ChatId(1), "freeze");
-    futs.push(Box::pin(async move {
-        let _ = freezer.await;
-    }));
-    let mut resolved = vec![false; 3];
-    let _ = poll_once(futs[0].as_mut());
-    drain_rounds(&mut futs, &mut resolved, false).await;
-    for i in 1..3 {
-        let send = legacy.send_message(ChatId(i as i64 + 1), "m");
-        futs.push(Box::pin(async move {
-            let _ = send.await;
-        }));
-    }
-    for fut in futs.iter_mut() {
-        let _ = poll_once(fut.as_mut());
-    }
-    drain_rounds(&mut futs, &mut resolved, false).await;
-    // Still frozen: no callbacks.
-    tokio::time::advance(Duration::from_secs(14)).await;
-    drain_rounds(&mut futs, &mut resolved, false).await;
-    assert!(legacy_fires.lock().unwrap().is_empty(), "legacy не вызывает callback во время freeze");
-    // Past the thaw: the worker reads the two requests and reports.
-    tokio::time::advance(Duration::from_secs(2)).await;
-    drain_rounds(&mut futs, &mut resolved, false).await;
-    assert!(
-        !legacy_fires.lock().unwrap().is_empty(),
-        "legacy сообщает о заполнении после разморозки"
-    );
-    worker_task.abort();
-
-    // --- compat ---
-    let compat_fires: Arc<Mutex<Vec<(Duration, usize)>>> = Arc::new(Mutex::new(Vec::new()));
-    let settings = Settings {
-        limits,
-        on_queue_full: {
-            let fires = Arc::clone(&compat_fires);
+            let fires = Arc::clone(&fires);
             Box::new(move |pending| {
                 fires.lock().unwrap().push((tokio::time::Instant::now() - start, pending));
                 Box::pin(async move {})
@@ -2316,88 +2017,45 @@ async fn parity_on_queue_full_is_silent_during_a_freeze() {
     let _ = poll_once(futs[0].as_mut());
     drain_rounds(&mut futs, &mut resolved, false).await;
     for i in 1..3 {
-        let send = compat.send_message(ChatId(i as i64 + 1), "m");
+        let request = compat.send_message(ChatId(i as i64 + 1), "m");
         futs.push(Box::pin(async move {
-            let _ = send.await;
+            let _ = request.await;
         }));
     }
     for fut in futs.iter_mut() {
         let _ = poll_once(fut.as_mut());
     }
     drain_rounds(&mut futs, &mut resolved, false).await;
-    // Still frozen: no callbacks (the acquire is blocked by the freeze,
-    // so the deferred full-backlog notification cannot fire either).
+
     tokio::time::advance(Duration::from_secs(14)).await;
     drive_rounds(&mut futs, &mut resolved, 4).await;
-    assert!(compat_fires.lock().unwrap().is_empty(), "compat не вызывает callback во время freeze");
-    // Past the thaw: both requests are granted and the notification
-    // fires (the acquire succeeded, the backlog is a real one).
+    assert!(fires.lock().unwrap().is_empty(), "callback во время freeze не вызывается");
+
     tokio::time::advance(Duration::from_secs(2)).await;
     drive_rounds(&mut futs, &mut resolved, 4).await;
-    assert!(
-        !compat_fires.lock().unwrap().is_empty(),
-        "compat сообщает о заполнении после разморозки"
-    );
+    let fires = fires.lock().unwrap().clone();
+    assert!(!fires.is_empty(), "callback после thaw не вызван");
+    assert_eq!(fires[0].1, 2, "pending = capacity: {fires:?}");
+    assert!(fires[0].0 >= Duration::from_secs(15), "callback до thaw: {fires:?}");
     actor_task.abort();
 }
 
 #[tokio::test(start_paused = true)]
-async fn parity_on_queue_full_repeats_while_the_backlog_stays_full() {
-    // The legacy worker re-checks `queue.len() == capacity()` on every
-    // iteration and re-fires once the 4-second rate limit expired, so a
-    // backlog that stays full for many seconds produces several
-    // notifications. The compat saturation monitor must reproduce the
-    // pattern. Chat limit 1/s paces the grants; 14 pre-submitted requests
-    // keep the backlog at capacity for ~12 seconds.
+async fn compat_queue_full_repeats_while_the_backlog_stays_full() {
+    // The saturation monitor re-fires while the backlog remains full. Chat
+    // limit 1/s paces grants; fourteen requests keep capacity two occupied
+    // long enough to observe several notifications.
     let mut limits = default_limits();
     limits.messages_per_sec_chat = 1;
     limits.messages_per_min_chat = 100;
-    limits.messages_per_sec_overall = 2; // backlog bound = 2
+    limits.messages_per_sec_overall = 2;
     let sends: Vec<(i64, &str)> = (0..14).map(|_| (1, "m")).collect();
-
     let start = tokio::time::Instant::now();
-    let legacy_fires: Arc<Mutex<Vec<(Duration, usize)>>> = Arc::new(Mutex::new(Vec::new()));
+    let fires: Arc<Mutex<Vec<(Duration, usize)>>> = Arc::new(Mutex::new(Vec::new()));
     let settings = Settings {
         limits,
         on_queue_full: {
-            let fires = Arc::clone(&legacy_fires);
-            Box::new(move |pending| {
-                fires.lock().unwrap().push((tokio::time::Instant::now() - start, pending));
-                Box::pin(async move {})
-            })
-        },
-        retry: true,
-        check_slow_mode: false,
-    };
-    let (legacy, worker) = LegacyThrottle::with_settings(FakeBot::ok(), settings);
-    let worker_task = tokio::spawn(worker);
-    let mut futs: Vec<Pin<Box<dyn Future<Output = ()>>>> = Vec::new();
-    for &(chat, text) in &sends {
-        let send = legacy.send_message(ChatId(chat), text);
-        futs.push(Box::pin(async move {
-            let _ = send.await;
-        }));
-    }
-    let mut resolved = vec![false; futs.len()];
-    for fut in futs.iter_mut() {
-        let _ = poll_once(fut.as_mut());
-    }
-    drain_rounds(&mut futs, &mut resolved, false).await;
-    let mut ticks = 0;
-    while resolved.iter().any(|r| !*r) && ticks < 200 {
-        tokio::time::advance(TICK).await;
-        drain_rounds(&mut futs, &mut resolved, false).await;
-        ticks += 1;
-    }
-    assert!(resolved.iter().all(|r| *r), "legacy: все запросы завершились");
-    worker_task.abort();
-    let legacy_fires = legacy_fires.lock().unwrap().clone();
-
-    let compat_fires: Arc<Mutex<Vec<(Duration, usize)>>> = Arc::new(Mutex::new(Vec::new()));
-    let settings = Settings {
-        limits,
-        on_queue_full: {
-            let fires = Arc::clone(&compat_fires);
+            let fires = Arc::clone(&fires);
             Box::new(move |pending| {
                 fires.lock().unwrap().push((tokio::time::Instant::now() - start, pending));
                 Box::pin(async move {})
@@ -2410,9 +2068,9 @@ async fn parity_on_queue_full_repeats_while_the_backlog_stays_full() {
     let actor_task = tokio::spawn(actor);
     let mut futs: Vec<Pin<Box<dyn Future<Output = ()>>>> = Vec::new();
     for &(chat, text) in &sends {
-        let send = compat.send_message(ChatId(chat), text);
+        let request = compat.send_message(ChatId(chat), text);
         futs.push(Box::pin(async move {
-            let _ = send.await;
+            let _ = request.await;
         }));
     }
     let mut resolved = vec![false; futs.len()];
@@ -2421,68 +2079,39 @@ async fn parity_on_queue_full_repeats_while_the_backlog_stays_full() {
     }
     drain_rounds(&mut futs, &mut resolved, false).await;
     let mut ticks = 0;
-    while resolved.iter().any(|r| !*r) && ticks < 200 {
+    while resolved.iter().any(|resolved| !*resolved) && ticks < 200 {
         tokio::time::advance(TICK).await;
         drain_rounds(&mut futs, &mut resolved, false).await;
         ticks += 1;
     }
-    assert!(resolved.iter().all(|r| *r), "compat: все запросы завершились");
+    assert!(resolved.iter().all(|resolved| *resolved), "все запросы завершились");
     actor_task.abort();
-    let compat_fires = compat_fires.lock().unwrap().clone();
 
-    assert_eq!(
-        legacy_fires.len(),
-        compat_fires.len(),
-        "legacy: {legacy_fires:?} compat: {compat_fires:?}"
-    );
-    assert!(legacy_fires.len() >= 3, "обе стороны повторяют callback: {legacy_fires:?}");
-    for fires in [&legacy_fires, &compat_fires] {
-        assert!(fires.iter().all(|(_, pending)| *pending == 2), "pending = capacity");
-        for pair in fires.windows(2) {
-            assert!(
-                pair[1].0 - pair[0].0 >= Duration::from_secs(4),
-                "интервалы между callback-ами >= 4s: {fires:?}"
-            );
-        }
+    let fires = fires.lock().unwrap().clone();
+    assert!(fires.len() >= 3, "callback повторяется: {fires:?}");
+    assert!(fires.iter().all(|(_, pending)| *pending == 2), "pending = capacity: {fires:?}");
+    for pair in fires.windows(2) {
+        assert!(
+            pair[1].0 - pair[0].0 >= Duration::from_secs(4),
+            "интервалы между callback-ами >= 4s: {fires:?}"
+        );
     }
 }
 
 #[tokio::test(start_paused = true)]
-async fn compat_implements_debug_like_the_legacy() {
-    // The legacy `Throttle` derives `Debug`; the compatibility layer must
-    // keep the same contract (downstream code with `Debug` bounds breaks
-    // otherwise).
-    let (legacy, worker) = LegacyThrottle::new(FakeBot::ok(), default_limits());
-    let legacy_debug = format!("{legacy:?}");
-    std::mem::drop(worker);
-
+async fn compat_implements_debug() {
     let (compat, actor) = ThrottleCompat::new(FakeBot::ok(), default_limits());
-    let compat_debug = format!("{compat:?}");
+    let debug = format!("{compat:?}");
     std::mem::drop(actor);
-    assert!(compat_debug.contains("ThrottleCompat"), "{compat_debug}");
-    assert!(!legacy_debug.is_empty());
+    assert!(debug.contains("ThrottleCompat"), "{debug}");
 }
 
 // ---------- shared/owned semantics, actor liveness, monitor respawn ----------
 
 #[tokio::test(start_paused = true)]
-async fn cloned_no_retry_owned_send_uses_inner_send_ref() {
-    // The legacy wrapper shares the inner request through an `Arc`:
-    // cloning the WRAPPER makes an owned `send()` shared, and even with
-    // `retry = false` the inner path is `send_ref()`, not `send()`. The
-    // fake bot distinguishes the paths by the message id (2 vs 1).
-    let settings = Settings { limits: default_limits(), ..<_>::default() }.no_retry();
-
-    let (legacy, worker) = LegacyThrottle::with_settings(FakeBot::ok(), settings);
-    let worker_task = tokio::spawn(worker);
-    let request = legacy.send_message(ChatId(1), "x");
-    let clone = request.clone();
-    let output =
-        tokio::time::timeout(Duration::from_secs(1), request.send()).await.unwrap().unwrap();
-    drop(clone);
-    assert_eq!(output.id.0, 2, "legacy: cloned + owned + retry=false -> inner send_ref");
-    worker_task.abort();
-
+async fn compat_cloned_no_retry_owned_send_uses_inner_send_ref() {
+    // Cloning the wrapper shares an owned send, so retry=false still uses
+    // the inner send_ref() path rather than cloning or consuming the request.
     let settings = Settings { limits: default_limits(), ..<_>::default() }.no_retry();
     let (compat, actor) = ThrottleCompat::with_settings(FakeBot::ok(), settings);
     let actor_task = tokio::spawn(actor);
@@ -2491,47 +2120,24 @@ async fn cloned_no_retry_owned_send_uses_inner_send_ref() {
     let output =
         tokio::time::timeout(Duration::from_secs(1), request.send()).await.unwrap().unwrap();
     drop(clone);
-    assert_eq!(output.id.0, 2, "compat: cloned + owned + retry=false -> inner send_ref");
+    assert_eq!(output.id.0, 2, "cloned + owned + retry=false -> inner send_ref");
     actor_task.abort();
 }
 
 #[tokio::test(start_paused = true)]
-async fn outer_send_ref_does_not_clone_the_inner_request() {
-    // The legacy wrapper clones only the `Arc`, never the inner request
-    // (`R::clone()` may carry side effects). The compat must not call
-    // `R::clone()` in `CompatRequest::send_ref()` — the fake request
-    // counts every clone.
+async fn compat_outer_send_ref_does_not_clone_the_inner_request() {
+    // send_ref() clones only the Arc wrapper; a side-effecting inner
+    // Request::clone() must not be invoked.
+    let bot = FakeBot::ok();
+    let clones = bot.clones.clone();
     let settings = Settings { limits: default_limits(), ..<_>::default() }.no_retry();
-
-    let legacy_bot = FakeBot::ok();
-    let legacy_clones = legacy_bot.clones.clone();
-    let (legacy, worker) = LegacyThrottle::with_settings(legacy_bot, settings);
-    let worker_task = tokio::spawn(worker);
-    let before = legacy_clones.load(Ordering::SeqCst);
-    let request = legacy.send_message(ChatId(1), "x");
-    let _ =
-        tokio::time::timeout(Duration::from_secs(1), request.send_ref()).await.unwrap().unwrap();
-    assert_eq!(
-        legacy_clones.load(Ordering::SeqCst),
-        before,
-        "legacy send_ref не клонирует inner request"
-    );
-    worker_task.abort();
-
-    let compat_bot = FakeBot::ok();
-    let compat_clones = compat_bot.clones.clone();
-    let settings = Settings { limits: default_limits(), ..<_>::default() }.no_retry();
-    let (compat, actor) = ThrottleCompat::with_settings(compat_bot, settings);
+    let (compat, actor) = ThrottleCompat::with_settings(bot, settings);
     let actor_task = tokio::spawn(actor);
-    let before = compat_clones.load(Ordering::SeqCst);
+    let before = clones.load(Ordering::SeqCst);
     let request = compat.send_message(ChatId(1), "x");
     let _ =
         tokio::time::timeout(Duration::from_secs(1), request.send_ref()).await.unwrap().unwrap();
-    assert_eq!(
-        compat_clones.load(Ordering::SeqCst),
-        before,
-        "compat send_ref не клонирует inner request"
-    );
+    assert_eq!(clones.load(Ordering::SeqCst), before, "send_ref не клонирует inner request");
     actor_task.abort();
 }
 
@@ -2662,7 +2268,7 @@ async fn saturation_monitor_respawns_after_re_saturation() {
 
 #[tokio::test(start_paused = true)]
 async fn on_queue_full_fires_before_the_last_pending_job_is_granted() {
-    // The legacy worker fires `on_queue_full` when its queue REACHES the
+    // The previous worker contract fires `on_queue_full` when its queue REACHES the
     // capacity — BEFORE the rate limits are applied and BEFORE any grant.
     // The compat layer must fire it on the ENQUEUE ACCEPTANCE of the last
     // slot: a last pending request that is cancelled before its grant must
@@ -2696,8 +2302,8 @@ async fn on_queue_full_fires_before_the_last_pending_job_is_granted() {
     });
 
     // Both requests take their slots and enqueue BEFORE the actor grants
-    // anything — exactly the legacy timing where the worker's queue
-    // reaches capacity before the first unlock. B takes the LAST slot.
+    // anything — the callback happens at acceptance, before the first unlock. B
+    // takes the LAST slot.
     let _ = poll_once(fut_a.as_mut());
     let _ = poll_once(fut_b.as_mut());
     // The actor accepts both jobs: A is granted at t=0 (chat limit 1/s),
@@ -2738,26 +2344,9 @@ async fn on_queue_full_fires_before_the_last_pending_job_is_granted() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn owned_direct_fallback_uses_into_future_not_send() {
-    // The direct-send fallback (the worker/actor died) executes a truly
-    // owned request through `IntoFuture` in the legacy worker
-    // (`owned.take().unwrap().await`); the compat fallback must do the
-    // same, in BOTH fallback phases (before acceptance and between
-    // acceptance and grant).
-    // Legacy: the worker future is dropped, its channel closes, and the
-    // request goes straight to the inner request.
-    let settings = Settings { limits: default_limits(), ..<_>::default() }.no_retry();
-    let (legacy, worker) = LegacyThrottle::with_settings(FakeBot::ok(), settings);
-    std::mem::drop(worker);
-    let output = tokio::time::timeout(Duration::from_secs(1), legacy.send_message(ChatId(1), "x"))
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(output.id.0, 3, "legacy direct fallback: owned -> IntoFuture");
-    std::mem::drop(legacy);
-
-    // Compat, enqueue-phase fallback: the actor future is dropped before
-    // it accepts anything.
+async fn compat_owned_direct_fallback_uses_into_future_not_send() {
+    // Direct-send fallback executes a truly owned request through
+    // IntoFuture in both fallback phases.
     let settings = Settings { limits: default_limits(), ..<_>::default() }.no_retry();
     let (compat, actor) = ThrottleCompat::with_settings(FakeBot::ok(), settings);
     std::mem::drop(actor);
@@ -2765,35 +2354,29 @@ async fn owned_direct_fallback_uses_into_future_not_send() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(output.id.0, 3, "compat direct fallback (enqueue phase): owned -> IntoFuture");
+    assert_eq!(output.id.0, 3, "direct fallback (enqueue phase): owned -> IntoFuture");
     std::mem::drop(compat);
 
-    // Compat, grant-phase fallback: the actor accepts the job and dies
-    // BEFORE granting it. The grant is provably blocked by the per-chat
-    // window: a single-grant actor poll could otherwise both accept AND
-    // grant the request, and the "fallback" assertion would silently test
-    // the regular owned path.
+    // The actor accepts R1 but dies before its grant. Its grant is blocked
+    // by the per-chat window, so this exercises the grant-phase fallback.
     let settings = Settings { limits: default_limits(), ..<_>::default() }.no_retry();
     let (compat, actor) = ThrottleCompat::with_settings(FakeBot::ok(), settings);
     let mut actor = Box::pin(actor);
-    // R0 consumes the per-chat second window at t=0.
     let send0 = compat.send_message(ChatId(1), "r0");
     let mut fut0 = Box::pin(async move {
         let _ = send0.await;
     });
     let _ = poll_once(fut0.as_mut());
-    let _ = poll_once(actor.as_mut()); // acceptance + grant of R0
-    let _ = poll_once(fut0.as_mut()); // R0 resolves at t=0
-                                      // R1 is accepted; its grant waits for t=1 (the window is held by R0).
+    let _ = poll_once(actor.as_mut());
+    let _ = poll_once(fut0.as_mut());
+
     let send = compat.send_message(ChatId(1), "x");
     let mut fut = Box::pin(async move { send.await.unwrap() });
-    let _ = poll_once(fut.as_mut()); // semaphore slot + enqueue phase
-    let _ = poll_once(actor.as_mut()); // acceptance only — grant blocked
-                                       // The snapshot future sends its command on the FIRST poll, so poll it
-                                       // once, then drive the actor until the reply arrives.
+    let _ = poll_once(fut.as_mut());
+    let _ = poll_once(actor.as_mut());
     let snapshot_fut = compat.queue.handle().snapshot();
     tokio::pin!(snapshot_fut);
-    let _ = poll_once(snapshot_fut.as_mut()); // the GetSnapshot command
+    let _ = poll_once(snapshot_fut.as_mut());
     let mut snapshot = None;
     for _ in 0..8 {
         let _ = poll_once(actor.as_mut());
@@ -2803,9 +2386,10 @@ async fn owned_direct_fallback_uses_into_future_not_send() {
         }
     }
     let snapshot = snapshot.expect("snapshot должен ответить");
-    assert_eq!(snapshot.pending, 1, "R1 accepted и ждёт grant: {snapshot:?}");
-    assert_eq!(snapshot.in_flight, 0, "R0 уже завершился: {snapshot:?}");
-    std::mem::drop(actor); // dies before the grant
+    assert_eq!(snapshot.pending, 1, "R1 accepted and waits for grant: {snapshot:?}");
+    assert_eq!(snapshot.in_flight, 0, "R0 already completed: {snapshot:?}");
+    std::mem::drop(actor);
+
     let mut output = None;
     for _ in 0..16 {
         if let Poll::Ready(out) = poll_once(fut.as_mut()) {
@@ -2815,14 +2399,14 @@ async fn owned_direct_fallback_uses_into_future_not_send() {
         tokio::task::yield_now().await;
     }
     let output = output.expect("grant-phase fallback должен завершиться");
-    assert_eq!(output.id.0, 3, "compat direct fallback (grant phase): owned -> IntoFuture");
+    assert_eq!(output.id.0, 3, "direct fallback (grant phase): owned -> IntoFuture");
 }
 
 #[tokio::test(start_paused = true)]
 async fn granted_request_completes_without_an_additional_actor_poll() {
-    // The legacy request loop returns its result right after the inner
-    // request finished; only a RetryAfter tells the worker about the
-    // freeze, and even that without waiting for the worker to apply it.
+    // A granted request returns its result right after the inner request
+    // finishes; RetryAfter notification is asynchronous and must not add
+    // another actor round-trip to ordinary completion.
     // The compat layer must NOT stall a granted request on an actor ack
     // round-trip: success and plain failure resolve without polling the
     // actor after the grant.
@@ -2874,93 +2458,19 @@ async fn granted_request_completes_without_an_additional_actor_poll() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn parity_full_backlog_cancelled_during_freeze_still_reports_after_thaw() {
-    // A RetryAfter freeze starts; DURING the freeze exactly `capacity`
-    // requests are accepted (the backlog reaches the bound) and then all
-    // of them are cancelled before the thaw. The legacy worker still
-    // reads the messages out of its bounded channel after the thaw and
-    // fires `on_queue_full` — the messages were IN the queue, the
-    // cancellation only killed the waiters. The compat layer must
-    // reproduce this: the full-backlog event is deferred during the
-    // freeze and emitted once at the thaw boundary, even though every
-    // pending job was cancelled in the meantime.
+async fn compat_full_backlog_cancelled_during_freeze_still_reports_after_thaw() {
+    // A RetryAfter freeze starts; two requests fill the backlog during the
+    // freeze and are cancelled before thaw. The deferred full-backlog event
+    // still fires at the thaw boundary because acceptance already happened.
     let freeze = Duration::from_secs(15);
-
-    // ---------- legacy ----------
-    let mut limits = default_limits();
-    limits.messages_per_sec_overall = 2; // capacity = 2
-    let start = tokio::time::Instant::now();
-    let legacy_fires: Arc<Mutex<Vec<(Duration, usize)>>> = Arc::new(Mutex::new(Vec::new()));
-    let settings = Settings {
-        limits,
-        on_queue_full: {
-            let fires = Arc::clone(&legacy_fires);
-            Box::new(move |pending| {
-                fires.lock().unwrap().push((tokio::time::Instant::now() - start, pending));
-                Box::pin(async move {})
-            })
-        },
-        retry: true,
-        check_slow_mode: false,
-    };
-    let (legacy, worker) =
-        LegacyThrottle::with_settings(FakeBot::ok().failing_first(1, freeze), settings);
-    let mut worker = Box::pin(worker);
-    let send_a = legacy.send_message(ChatId(1), "a");
-    let mut fut_a = Box::pin(async move {
-        let _ = send_a.await;
-    });
-    let _ = poll_once(fut_a.as_mut());
-    let _ = poll_once(worker.as_mut()); // A читается и unlock-ается
-    let _ = poll_once(fut_a.as_mut()); // RetryAfter(15) -> freeze message
-    let _ = poll_once(worker.as_mut()); // worker входит во freeze
-                                        // Два запроса во время freeze; оба отменяются до thaw.
-    let send_b = legacy.send_message(ChatId(1), "b");
-    let send_c = legacy.send_message(ChatId(1), "c");
-    let mut fut_b = Box::pin(async move {
-        let _ = send_b.await;
-    });
-    let mut fut_c = Box::pin(async move {
-        let _ = send_c.await;
-    });
-    let _ = poll_once(fut_b.as_mut());
-    let _ = poll_once(fut_c.as_mut());
-    drop(fut_b);
-    drop(fut_c);
-    // До thaw callback молчит.
-    tokio::time::advance(Duration::from_secs(14)).await;
-    let _ = poll_once(worker.as_mut());
-    assert!(
-        legacy_fires.lock().unwrap().is_empty(),
-        "legacy: во время freeze callback не вызывается"
-    );
-    // Thaw: worker читает B/C из канала и сообщает о заполнении.
-    tokio::time::advance(Duration::from_secs(2)).await;
-    let mut a_done = false;
-    for _ in 0..128 {
-        let _ = poll_once(worker.as_mut());
-        if !a_done {
-            a_done = poll_once(fut_a.as_mut()).is_ready();
-        }
-        if !legacy_fires.lock().unwrap().is_empty() && a_done {
-            break;
-        }
-        tokio::task::yield_now().await;
-    }
-    let legacy_fires = legacy_fires.lock().unwrap().clone();
-    assert!(!legacy_fires.is_empty(), "legacy: callback после thaw");
-    assert_eq!(legacy_fires[0].1, 2, "legacy pending = capacity: {legacy_fires:?}");
-    assert!(legacy_fires[0].0 >= freeze, "legacy: callback только после thaw: {legacy_fires:?}");
-
-    // ---------- compat ----------
     let mut limits = default_limits();
     limits.messages_per_sec_overall = 2;
     let start = tokio::time::Instant::now();
-    let compat_fires: Arc<Mutex<Vec<(Duration, usize)>>> = Arc::new(Mutex::new(Vec::new()));
+    let fires: Arc<Mutex<Vec<(Duration, usize)>>> = Arc::new(Mutex::new(Vec::new()));
     let settings = Settings {
         limits,
         on_queue_full: {
-            let fires = Arc::clone(&compat_fires);
+            let fires = Arc::clone(&fires);
             Box::new(move |pending| {
                 fires.lock().unwrap().push((tokio::time::Instant::now() - start, pending));
                 Box::pin(async move {})
@@ -2972,14 +2482,15 @@ async fn parity_full_backlog_cancelled_during_freeze_still_reports_after_thaw() 
     let (compat, actor) =
         ThrottleCompat::with_settings(FakeBot::ok().failing_first(1, freeze), settings);
     let mut actor = Box::pin(actor);
+
     let send_a = compat.send_message(ChatId(1), "a");
     let mut fut_a = Box::pin(async move {
         let _ = send_a.await;
     });
     let _ = poll_once(fut_a.as_mut());
-    let _ = poll_once(actor.as_mut()); // acceptance + grant A
-    let _ = poll_once(fut_a.as_mut()); // RetryAfter(15) -> freeze, retry sleep
-                                       // Два запроса во время freeze: B занимает второй слот, C — последний.
+    let _ = poll_once(actor.as_mut());
+    let _ = poll_once(fut_a.as_mut());
+
     let send_b = compat.send_message(ChatId(1), "b");
     let send_c = compat.send_message(ChatId(1), "c");
     let mut fut_b = Box::pin(async move {
@@ -2990,18 +2501,16 @@ async fn parity_full_backlog_cancelled_during_freeze_still_reports_after_thaw() 
     });
     let _ = poll_once(fut_b.as_mut());
     let _ = poll_once(fut_c.as_mut());
-    let _ = poll_once(actor.as_mut()); // acceptance B и C
+    let _ = poll_once(actor.as_mut());
     let _ = poll_once(fut_b.as_mut());
-    let _ = poll_once(fut_c.as_mut()); // C: последний слот accepted во время freeze
+    let _ = poll_once(fut_c.as_mut());
     drop(fut_b);
-    drop(fut_c); // отменены до thaw — событие уже отложено
+    drop(fut_c);
+
     tokio::time::advance(Duration::from_secs(14)).await;
     let _ = poll_once(actor.as_mut());
-    assert!(
-        compat_fires.lock().unwrap().is_empty(),
-        "compat: во время freeze callback не вызывается"
-    );
-    // Thaw: deferred full-event эмитится один раз, несмотря на отмены.
+    assert!(fires.lock().unwrap().is_empty(), "callback во время freeze не вызывается");
+
     tokio::time::advance(Duration::from_secs(2)).await;
     let mut a_done = false;
     for _ in 0..128 {
@@ -3010,17 +2519,12 @@ async fn parity_full_backlog_cancelled_during_freeze_still_reports_after_thaw() 
             a_done = poll_once(fut_a.as_mut()).is_ready();
         }
         tokio::task::yield_now().await;
-        if !compat_fires.lock().unwrap().is_empty() && a_done {
+        if !fires.lock().unwrap().is_empty() && a_done {
             break;
         }
     }
-    let compat_fires = compat_fires.lock().unwrap().clone();
-    assert!(!compat_fires.is_empty(), "compat: callback после thaw");
-    assert_eq!(compat_fires[0].1, 2, "compat pending = capacity: {compat_fires:?}");
-    assert!(compat_fires[0].0 >= freeze, "compat: callback только после thaw: {compat_fires:?}");
-    assert_eq!(
-        legacy_fires.len(),
-        compat_fires.len(),
-        "legacy: {legacy_fires:?} compat: {compat_fires:?}"
-    );
+    let fires = fires.lock().unwrap().clone();
+    assert!(!fires.is_empty(), "callback после thaw не вызван");
+    assert_eq!(fires[0].1, 2, "pending = capacity: {fires:?}");
+    assert!(fires[0].0 >= freeze, "callback только после thaw: {fires:?}");
 }

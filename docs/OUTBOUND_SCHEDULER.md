@@ -1,4 +1,4 @@
-# Outbound scheduler — design note (Commits 1–8)
+# Outbound scheduler — design note (Commits 1–9)
 
 Deterministic outbound scheduling model in `crates/teloxide-core/src/outbound/`.
 
@@ -24,9 +24,8 @@ Deterministic outbound scheduling model in `crates/teloxide-core/src/outbound/`.
   commit. `OutboundScope`/`OutboundChatKey`/`OutboundMetadata` are
   intentionally not `Copy` (the chat key stores the username as text).
 - **Commit 5**: the `Throttle` compatibility layer (`ThrottleCompat`)
-  over the scheduler with parity tests against the legacy worker, plus
-  the chat-kind window limits extension (`WindowLimit::kind`,
-  `WindowChatKind`).
+  over the scheduler, plus the chat-kind window limits extension
+  (`WindowLimit::kind`, `WindowChatKind`).
 - **Commit 6**: the `Drafter` migration. The Drafter actor remains the
   lifecycle/coalescing state machine, while every real Telegram request
   (send, edit, native draft and delete) receives its own queue permit.
@@ -39,8 +38,12 @@ Deterministic outbound scheduling model in `crates/teloxide-core/src/outbound/`.
   legacy global rate is zero, because the rate pause must still be able to
   receive a job and later release it after reconfiguration.
 - **Commit 8**: the public `Throttle` alias is switched to `ThrottleCompat`.
-  The legacy worker remains compiled only for in-crate parity tests; it is no
-  longer part of the production request path.
+  `check_slow_mode` is retained as an explicit documented no-op rather than
+  silently probing `get_chat`.
+- **Commit 9**: the old `Throttle` worker, request-lock and legacy requester
+  modules are removed physically. The compatibility tests now exercise only
+  the scheduler-backed implementation; `OrderedStart` remains a separate
+  future ordering-lane design.
 
 ## Scope
 
@@ -514,18 +517,18 @@ pub trait OutboundPayload {
   (`on_lane` stays an explicit choice), retry policy and correlation ids.
   The payload classifies only what is actually being sent.
 
-## Throttle compatibility layer (Commit 5)
+## Throttle compatibility layer (Commits 5 and 9)
 
 `ThrottleCompat<B>` (`crates/teloxide-core/src/adaptors/throttle_compat/`)
 implements the public `Throttle` contract on top of the outbound scheduler.
-The public `adaptors::Throttle` type is now an alias of `ThrottleCompat`; the
-legacy worker is compiled only for in-crate head-to-head parity tests and is
-not used by production request paths.
+The public `adaptors::Throttle` type is an alias of `ThrottleCompat`, and the
+old worker/request-lock implementation has been removed. The section below
+describes the compatibility contract retained by the scheduler-backed path.
 
-Reproduced legacy semantics:
+Retained compatibility contract:
 
-- **Allowlist**: the throttled method list matches the legacy
-  `requester_impl` exactly (25 message-send methods). It is an explicit
+- **Allowlist**: the throttled method list matches the historical
+  throttled-method set exactly (25 message-send methods). It is an explicit
   compatibility predicate, NOT derived from the `class` taxonomy —
   `copy_message(s)`/`forward_message(s)` are `OTHER`, so a
   `queue only MESSAGE_SEND` predicate would have silently let them
@@ -541,7 +544,7 @@ Reproduced legacy semantics:
   creation; global windows must be `Any` (validated).
 - **Weight 1**: every throttled request overrides the payload weight to
   1 (`ScheduledRequest::weight`), so a media group of ten items costs
-  one unit, like the legacy worker. Without this, the generated batch
+  one unit, matching the historical worker contract. Without this, the generated batch
   weights would make batch requests permanently inadmissible against
   `messages_per_sec_chat = 1`.
 - **Per-chat FIFO**: all throttled requests share one priority, so the
@@ -553,7 +556,7 @@ Reproduced legacy semantics:
   permit with `OutboundCompletion::RetryAfter { scope: Global, .. }`
   (the penalty scope is written directly by the compatibility layer —
   the adaptor's own `ScheduledRequest` keeps the default policy, which
-  follows the request scope), because the legacy worker freezes the
+  follows the request scope), because the historical worker contract freezes the
   whole bot. With `Settings::retry` the request SLEEPS until the
   penalty expires (outside the queue — it holds no pending slot) and
   only THEN re-queues, exactly like the legacy re-send-after-freeze:
@@ -566,10 +569,10 @@ Reproduced legacy semantics:
   penalty (`OutboundPermit::complete_observed_at`), the local retry
   sleep and the compat-side freeze deadline, so a completion processed
   late by the actor cannot extend a freeze whose deadline already
-  passed — the legacy worker receives the absolute `until` computed at
+  passed — the historical worker contract receives the absolute `until` computed at
   the error site. Without retries the error is returned.
 - **`on_queue_full` + FIFO admission**: the backlog is bounded by
-  `max(messages_per_sec_overall, 1)` (the legacy channel capacity for
+  `max(messages_per_sec_overall, 1)` (the historical channel capacity for
   positive limits) through a
   capacity semaphore (`tokio::sync::Semaphore`, one permit per slot). A
   request acquires its slot through a SINGLE `acquire_owned()` future —
@@ -577,9 +580,9 @@ Reproduced legacy semantics:
   released between a failed `try_acquire` and the waitlist registration
   can never be taken by a newer request. The callback fires at most
   once per 4 seconds (passing the bound), both when the LAST slot is
-  taken (the legacy worker fires when its queue REACHES the capacity,
+  taken (the historical worker contract fires when its queue REACHES the capacity,
   on the N-th request) and when a request has to wait. The moment
-  matters: the legacy worker checks `queue.len() == capacity()` BEFORE
+  matters: the historical worker contract checks `queue.len() == capacity()` BEFORE
   applying the rate limits and granting anything, so the compatibility
   layer fires the callback on the ENQUEUE ACCEPTANCE of the last slot —
   the instant the actor put the job into the scheduler backlog — and
@@ -591,7 +594,7 @@ Reproduced legacy semantics:
   t=0 reports the backlog of t=0. A slot freed by a grant, a
   cancellation or the actor's death automatically wakes the next
   waiter. The permit is held while the job is pending and released on
-  grant — exactly like the legacy worker popping a request from its
+  grant — exactly matching the historical worker contract popping a request from its
   channel before sending it. The semaphore removes the entire class of
   hand-rolled gate races (lost wakeups, dead waiters blocking the
   queue, waiters not woken by the actor's death): admission turns are
@@ -599,18 +602,18 @@ Reproduced legacy semantics:
   notification never fires for a request going straight into a direct
   send (the actor died before the acceptance): the queue no longer
   exists. While a global `RetryAfter` freeze is active the callback is
-  silent as well — exactly like the legacy worker, which does not run
+  silent as well — exactly matching the historical worker contract, which does not run
   its queue checks while frozen; `CompatState` tracks the freeze
   deadline (`observed_at + duration`, max semantics) and the saturation
   monitor sleeps past it before re-checking. A full-backlog event that
   happened during the freeze is DEFERRED and emitted exactly once at
-  the thaw boundary: the legacy worker still reads the messages out of
+  the thaw boundary: the historical worker contract still reads the messages out of
   its bounded channel after the thaw and reports `queue.len() ==
   capacity()` even if every pending request was cancelled before it.
   The deferred event is cleared when the actor dies (a dead legacy
   worker would never run the callback again); the monitor probes the
   actor's liveness before emitting. The monitor keeps the
-  notifications going while the backlog stays full: the legacy worker
+  notifications going while the backlog stays full: the historical worker contract
   re-checks `queue.len() == capacity()` on every iteration and re-fires
   once the 4-second rate limit expired, so a backlog that stays full
   for a long time produces several notifications even without new
@@ -634,16 +637,16 @@ Reproduced legacy semantics:
   between the actor's acceptance reply and the caller's observation can
   never leave a ghost job pending in the scheduler.
   The completion is NON-BLOCKING (`OutboundPermit::complete`, not the
-  adaptor's per-request `complete_and_await` barrier): the legacy
+  adaptor's per-request `complete_and_await` barrier): the compatibility
   request loop returns its result right after the inner request
-  finished (the worker is only told about a `RetryAfter` freeze, and
+  finished (the scheduler is only notified about a `RetryAfter` freeze, and
   even that without waiting for it to be applied), so a granted
   request must not stall on an actor ack. Ordering is preserved
   anyway: the completion lands synchronously in the actor's lifecycle
   channel, and the actor drains lifecycle commands (applying the
   penalty) before it considers any later enqueue from the same
   caller.
-- **Inner execution path + shared/owned semantics**: the legacy worker
+- **Inner execution path + shared/owned semantics**: the historical worker contract
   picks the inner request path by an exact table — `retry = true`
   (default) always uses inner `send_ref()`, an outer `send_ref()` uses
   inner `send_ref()`, and only an owned `send()` with retries disabled
@@ -657,7 +660,7 @@ Reproduced legacy semantics:
   `Arc::make_mut`. A TRULY owned execution runs the inner request
   through `IntoFuture::into_future` (`owned.take().unwrap().await`),
   NOT through `Request::send` — in the regular `retry = false` path and
-  in the direct-send fallback alike, because the legacy worker only
+  in the direct-send fallback alike, because the historical worker contract only
   ever calls `.await` on the taken request and a custom requester may
   distinguish the two.
 - **`limits()`/`set_limits()`**: the legacy async API is preserved; the
@@ -667,18 +670,18 @@ Reproduced legacy semantics:
   maps the windows back to the legacy `Limits`, and `set_limits` only
   forwards the update. There is deliberately no client-side mirror, so
   concurrent or cancelled updates cannot desync the two views. Like the
-  legacy worker, `limits()` PANICS when the actor is gone (a silent
+  historical worker contract, `limits()` PANICS when the actor is gone (a silent
   default could hand the caller a completely wrong state). Invalid new
   limits with zero-duration windows are rejected and logged; a
   zero-capacity window is accepted as a pause until a later settings update.
 
 - **`Debug`**: `ThrottleCompat<B>` keeps the legacy `Debug` contract
-  (the legacy type derives it); the callback closure is not printable
+  (the previous public type derived it); the callback closure is not printable
   and is skipped by the manual impl.
 
 Documented temporary incompatibilities:
 
-- `Settings::check_slow_mode` is accepted but ignored (the legacy worker
+- `Settings::check_slow_mode` is accepted but ignored (the historical worker contract
   asks `get_chat` whether slow mode explains a freeze);
 - channel usernames are canonicalized (the legacy hashed the raw
   spelling, so `@Foo` and `foo` were different identities);
@@ -687,56 +690,17 @@ Documented temporary incompatibilities:
   The blocked jobs use an external-event wakeup rather than a timer, so
   zero-capacity configuration cannot create a busy loop.
 
-The legacy worker was switched from `std::time::Instant` to
-`tokio::time::Instant` (production-identical: tokio's Instant is the
-same clock unless the runtime is paused) so that parity tests can drive
-both engines on the same paused clock.
-
-Parity tests (`throttle_compat/tests.rs`) run identical scenarios
-through the legacy worker and `ThrottleCompat` on paused time and
-compare the grant order: per-chat second limits, interleaved chats,
-global second limits, the full-backlog drain, the RetryAfter freeze
-(B1 granted before the freeze, A2 after it, the retried A1 last), a
-request arriving DURING a freeze preceding the retried request (the
-retry sleeps outside the queue), a saturated backlog with a REVERSED
-poll order (the FIFO admission must hold regardless of the ingress
-tie-break), the inner `send()`/`send_ref()` path table, `on_queue_full`
-being SILENT during a freeze on both engines (0 callbacks before the
-thaw, >= 1 after it) and REPEATING at >= 4s intervals while the backlog
-stays full on both engines. The compat-only tests additionally pin
-exact timings, the weight-1 batch accounting, the passthrough bypass,
-`set_limits` (actor round-trip, zero-capacity pause and re-arm), the per-kind
-minute windows and the capacity-semaphore lifecycle regressions: FIFO
-among released waiters, a cancelled waiter not blocking the queue, a
-cancelled pending request waking a parked waiter, a slot freed before
-registration not being lost, the actor's death waking every waiter into
-a direct send with the slot released BEFORE the direct request runs
-(verified with hanging direct sends), a `QueueFull` behind an
-unprocessed cancel preserving the waiter FIFO (the race is a coin flip
-inside the actor, so the scenario is replayed), `on_queue_full` firing
-when the backlog REACHES the capacity without an overflow request, the
-actor's death NOT firing `on_queue_full` (the notification is deferred
-until a real acquire succeeds), `on_queue_full` firing at the ENQUEUE
-ACCEPTANCE of the last slot — before its grant, and surviving the
-cancellation of that last pending request, a full backlog reached
-during a freeze being reported exactly once after the thaw even when
-every pending request was cancelled before it (parity with the legacy
-worker reading the messages out of its bounded channel), dropping the
-enqueue future after the actor's acceptance but before observing the
-reply leaving NO ghost job in the scheduler (the token cancel), the
-saturation monitor
-respawning after the backlog re-fills (a monitor that observed a freed
-slot must not leave the next saturation wave silent), a late-processed
-completion not extending the freeze (parity with the legacy's absolute
-`until`), a stateful `retry_after()` being classified exactly once, the
-shared/owned `Arc` semantics (a cloned wrapper with `retry = false`
-still sends through inner `send_ref()`, an outer `send_ref()` never
-clones the inner request, and a truly owned execution resolves through
-`IntoFuture` instead of `Request::send` — in the regular path and in
-the direct-send fallback), a granted request completing without an
-additional actor poll (the completion is fire-and-forget), the `Debug`
-contract, a cancelled `set_limits` future not staling `limits()`, and
-`limits()` panicking when the actor is dead.
+Tests in `throttle_compat/tests.rs` now exercise the scheduler-backed
+implementation directly. They pin per-chat/global limits, FIFO arbitration,
+RetryAfter freeze ordering, weight-1 batch accounting, passthrough methods,
+per-kind minute windows, zero-capacity pause and re-arm, capacity-semaphore
+lifecycle, cancellation, actor-death direct fallback, queue-full callback
+semantics, saturation monitor respawn, late completion timestamps, stateful
+`retry_after()` classification, shared/owned `Arc` behavior, the `Debug`
+contract, cancelled `set_limits`, and completion without an extra actor poll.
+In particular, the regressions for a full backlog during a freeze and for a
+finite deadline hidden behind a permanent zero-window pause remain covered
+without depending on a second implementation.
 
 ## Drafter migration (Commit 6)
 
@@ -776,5 +740,5 @@ into the new hook when they issue cleanup requests.
 
 `OrderedStart` lanes (Commit 2 is serial-only), `Bot::outbound`-style
 extension sugar, class-aware window sets for the raw `Outbound` adaptor,
-legacy worker removal, durable outbox,
+durable outbox,
 observability hooks.

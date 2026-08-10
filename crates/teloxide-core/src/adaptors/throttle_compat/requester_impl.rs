@@ -1,33 +1,33 @@
-use std::sync::Arc;
-
 use url::Url;
 
+use std::sync::Arc;
+
 use crate::{
-    adaptors::{throttle::ThrottlingRequest, Throttle},
+    adaptors::throttle_compat::{CompatRequest, ThrottleCompat},
     errors::AsResponseParameters,
-    requests::{HasPayload, Requester},
+    requests::{HasPayload, Payload, Requester},
     types::*,
 };
 
 macro_rules! f {
     ($m:ident $this:ident ($($arg:ident : $T:ty),*)) => {
-        ThrottlingRequest {
-            request: Arc::new($this.inner().$m($($arg),*)),
-            chat_id: |p| (&p.payload_ref().chat_id).into(),
-            worker: $this.queue.clone(),
+        CompatRequest {
+            request: Arc::new($this.bot.$m($($arg),*)),
+            queue: $this.queue.clone(),
+            state: $this.state.clone(),
         }
     };
 }
 
 macro_rules! fty {
     ($T:ident) => {
-        ThrottlingRequest<B::$T>
+        CompatRequest<B::$T>
     };
 }
 
 macro_rules! fid {
     ($m:ident $this:ident ($($arg:ident : $T:ty),*)) => {
-        $this.inner().$m($($arg),*)
+        $this.bot.$m($($arg),*)
     };
 }
 
@@ -37,35 +37,77 @@ macro_rules! ftyid {
     };
 }
 
-impl<B: Requester> Requester for Throttle<B>
+impl<B: Requester> Requester for ThrottleCompat<B>
 where
     B::Err: AsResponseParameters,
 
     B::SendMessage: Clone + Send + Sync + 'static,
+    <B::SendMessage as HasPayload>::Payload:
+        Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendRichMessage: Clone + Send + Sync + 'static,
+    <B::SendRichMessage as HasPayload>::Payload:
+        Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::ForwardMessage: Clone + Send + Sync + 'static,
+    <B::ForwardMessage as HasPayload>::Payload:
+        Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::ForwardMessages: Clone + Send + Sync + 'static,
+    <B::ForwardMessages as HasPayload>::Payload:
+        Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::CopyMessage: Clone + Send + Sync + 'static,
+    <B::CopyMessage as HasPayload>::Payload:
+        Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::CopyMessages: Clone + Send + Sync + 'static,
+    <B::CopyMessages as HasPayload>::Payload:
+        Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendPhoto: Clone + Send + Sync + 'static,
+    <B::SendPhoto as HasPayload>::Payload: Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendLivePhoto: Clone + Send + Sync + 'static,
+    <B::SendLivePhoto as HasPayload>::Payload:
+        Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendAudio: Clone + Send + Sync + 'static,
+    <B::SendAudio as HasPayload>::Payload: Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendDocument: Clone + Send + Sync + 'static,
+    <B::SendDocument as HasPayload>::Payload:
+        Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendVideo: Clone + Send + Sync + 'static,
+    <B::SendVideo as HasPayload>::Payload: Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendAnimation: Clone + Send + Sync + 'static,
+    <B::SendAnimation as HasPayload>::Payload:
+        Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendVoice: Clone + Send + Sync + 'static,
+    <B::SendVoice as HasPayload>::Payload: Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendVideoNote: Clone + Send + Sync + 'static,
+    <B::SendVideoNote as HasPayload>::Payload:
+        Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendPaidMedia: Clone + Send + Sync + 'static,
+    <B::SendPaidMedia as HasPayload>::Payload:
+        Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendMediaGroup: Clone + Send + Sync + 'static,
+    <B::SendMediaGroup as HasPayload>::Payload:
+        Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendLocation: Clone + Send + Sync + 'static,
+    <B::SendLocation as HasPayload>::Payload:
+        Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendVenue: Clone + Send + Sync + 'static,
+    <B::SendVenue as HasPayload>::Payload: Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendContact: Clone + Send + Sync + 'static,
+    <B::SendContact as HasPayload>::Payload:
+        Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendPoll: Clone + Send + Sync + 'static,
+    <B::SendPoll as HasPayload>::Payload: Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendChecklist: Clone + Send + Sync + 'static,
+    <B::SendChecklist as HasPayload>::Payload:
+        Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendDice: Clone + Send + Sync + 'static,
+    <B::SendDice as HasPayload>::Payload: Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendSticker: Clone + Send + Sync + 'static,
+    <B::SendSticker as HasPayload>::Payload:
+        Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendInvoice: Clone + Send + Sync + 'static,
+    <B::SendInvoice as HasPayload>::Payload:
+        Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendGame: Clone + Send + Sync + 'static,
+    <B::SendGame as HasPayload>::Payload: Payload<Output: Send> + crate::outbound::OutboundPayload,
 {
     type Err = B::Err;
 
@@ -275,6 +317,6 @@ where
 
 download_forward! {
     B
-    Throttle<B>
-    { this => this.inner() }
+    ThrottleCompat<B>
+    { this => this.bot }
 }

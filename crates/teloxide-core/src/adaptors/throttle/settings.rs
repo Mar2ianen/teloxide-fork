@@ -27,6 +27,9 @@ pub struct Settings {
     pub limits: Limits,
     pub on_queue_full: BoxedFnMut<usize, BoxedFuture>,
     pub retry: bool,
+    /// Legacy compatibility flag. The scheduler-backed public `Throttle`
+    /// accepts it but does not issue auxiliary `get_chat` probes; enabling it
+    /// therefore has no effect beyond the compatibility warning.
     pub check_slow_mode: bool,
 }
 

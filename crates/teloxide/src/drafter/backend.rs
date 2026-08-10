@@ -6,7 +6,10 @@ use std::{
 
 use teloxide_core::types::{ChatId, MessageId};
 
-use super::{DrafterErrorDisposition, DrafterOperation, DrafterRateLimitKey};
+use super::{
+    DrafterErrorDisposition, DrafterOperation, DrafterRateLimitKey, DrafterRequestClass,
+    DrafterRequestContext,
+};
 
 /// Successful acknowledgement of a preview request.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -79,6 +82,94 @@ pub trait DrafterBackend: Send + 'static {
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send;
 
     fn abort(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    /// Runs best-effort cleanup after a segment or final delivery has already
+    /// succeeded. Scheduler-aware backends must keep this cleanup separate
+    /// from [`Self::commit_segment`] and [`Self::finish`], so cleanup admission
+    /// cannot change the primary delivery result.
+    fn cleanup_after_delivery(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
+    }
+
+    /// Whether successful delivery currently has an external cleanup request
+    /// to run through [`Self::cleanup_after_delivery`].
+    fn cleanup_after_delivery_possible(&self) -> bool {
+        false
+    }
+
+    /// Detaches successful-delivery cleanup targets from the active preview
+    /// state before admission is attempted. This prevents a cleanup timeout
+    /// from making a later segment edit an older segment's preview.
+    ///
+    /// The default preserves the capability-only contract for custom backends;
+    /// stateful backends should override this together with
+    /// [`Self::cleanup_after_delivery`].
+    fn prepare_cleanup_after_delivery(&mut self) -> bool {
+        self.cleanup_after_delivery_possible()
+    }
+
+    /// Classifies the first real request made by an operation. Scheduler-aware
+    /// custom backends must override this when their first request differs from
+    /// the default state-based Telegram backend classification.
+    fn first_request_class(&self, operation: DrafterOperation) -> DrafterRequestClass {
+        if matches!(operation, DrafterOperation::Cleanup) {
+            DrafterRequestClass::Mutation
+        } else if matches!(operation, DrafterOperation::SegmentCommit | DrafterOperation::Final)
+            && self.capabilities().mode == DrafterMode::StatusEditThenSendFinal
+        {
+            DrafterRequestClass::Send
+        } else if self.preview_message_id().is_some() {
+            DrafterRequestClass::Mutation
+        } else {
+            DrafterRequestClass::Send
+        }
+    }
+
+    /// Whether this backend error means that one admitted request exceeded its
+    /// per-request timeout. The worker uses this to preserve its existing
+    /// timeout result shape for scheduler-aware backends.
+    fn is_request_timeout(&self, _error: &Self::Error) -> bool {
+        false
+    }
+
+    /// Whether this backend can identify a preview update that performs no
+    /// external request before admission. This is an optimization for
+    /// scheduler-aware backends; the default keeps the existing behavior.
+    fn may_skip_preview(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this particular preview is a local no-op. Called only
+    /// when [`Self::may_skip_preview`] returns `true`.
+    fn preview_is_noop(&self, _preview: &Self::Preview) -> bool {
+        false
+    }
+
+    /// Whether this backend consumes a request context and schedules every
+    /// underlying Bot API request separately.
+    ///
+    /// The default is `false`: custom backends retain the legacy
+    /// operation-level permit contract until they opt into per-request
+    /// accounting explicitly. A backend that opts in and can issue a real
+    /// request from [`Self::abort`] must also return `true` from
+    /// [`Self::abort_request_possible`] while that request is possible.
+    fn supports_request_scheduler(&self) -> bool {
+        false
+    }
+
+    /// Installs the context for the next backend operation. Standard Telegram
+    /// backends consume it at the operation boundary and schedule every typed
+    /// request. Custom backends must override this together with
+    /// [`Self::supports_request_scheduler`] to use per-request accounting.
+    fn set_request_context(&mut self, _context: Option<DrafterRequestContext>) {}
+
+    /// Whether `abort` can issue a real cleanup request for the current
+    /// backend state. A scheduler-enabled custom backend must override this
+    /// whenever `abort` can issue a request; the conservative default avoids
+    /// granting a phantom permit for a no-op cleanup.
+    fn abort_request_possible(&self) -> bool {
+        false
+    }
 
     fn classify_error(
         &self,

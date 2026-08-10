@@ -7,13 +7,104 @@ It applies to the entire repository unless a more specific `AGENTS.md` exists in
 
 This repository is a development fork of `teloxide` focused on keeping Telegram Bot API support current while preserving upstream compatibility and code quality.
 
-The fork has two important long-lived branches:
+## Branch, release, and versioning policy
 
-- `master` is the primary integration branch and contains the supported fork release line, including accepted fork-specific changes
-- `next` is an optional staging branch for broad or high-risk integration work before it is promoted to `master`
+`master` is the supported **release line**, not the day-to-day integration
+branch. A code commit on `master` is eligible for release only when it belongs
+to a versioned release or an explicitly versioned hotfix. An administrative
+governance commit is not a crate release. Do not use `master` as a scratch
+branch and do not merge ordinary feature work there.
 
-Synchronize upstream changes into `master` before integrating fork changes when possible.
-Create feature branches from `master` and target fork feature PRs back to `master`. Use `next` only when an explicitly staged integration workflow is needed.
+- `next` is the normal integration branch for fork work. Feature branches are
+  based on `next` and their PRs target `next`.
+- `master` receives only release PRs, explicitly authorized hotfix PRs, or
+  the governance exception described below. A release PR promotes a reviewed
+  range from `next` to `master`; a hotfix branch starts from the exact commit
+  pointed to by its base package tag. A release-blocking fix is not a separate
+  route: include it in the existing release/hotfix branch and PR, or develop it
+  on `next` for the next release.
+- An explicitly requested repository-governance PR may update `AGENTS.md`, CI
+  policy, or release documentation independently. It is an administrative
+  change, not a crate release, and must not receive a package release tag.
+  After it merges into `master`, the same governance state must be reconciled
+  into `next` before ordinary feature work resumes.
+- Upstream synchronization and broad/high-risk work happen on `next`. Do not
+  mix an upstream sync into a release PR unless the release description lists
+  and validates it explicitly.
+- A release PR must state its target versions, Bot API version, changelog
+  entry, package impact, and exact tag plan. It is not ready to merge merely
+  because the code is green.
+
+### Release promotion workflow
+
+1. Develop and integrate on `next` through focused feature PRs.
+2. Choose a release branch name that does not pretend independently versioned
+   crates share one number: use `release/<release-id>` for a multi-package
+   release train, `release/<package>-vX.Y.Z` for a single-package release, or
+   `hotfix/<package>-vX.Y.Z` for a package-specific hotfix. Start release
+   branches from the reviewed `next` head; start hotfix branches from the exact
+   commit pointed to by the base package tag, never from an untagged `master`
+   head, and record that tag in the PR body. Package keys are `teloxide`,
+   `core`, and `macros`, matching the published tag prefixes.
+3. Update the semver versions of every affected published crate in its own
+   `Cargo.toml`, update `CHANGELOG.md`, and document the release scope. Keep
+   `teloxide`, `teloxide-core`, and `teloxide-macros` versioned independently;
+   do not invent a workspace version that is not the source of truth.
+4. Run the complete release validation matrix and review the package diffs,
+   generated output, lockfile effects, and public API changes.
+5. Merge the release PR into `master`. The merge commit is the release source;
+   do not continue ordinary development on it.
+6. Create immutable annotated tags on that exact merge commit for each package
+   being released: `vX.Y.Z` for `teloxide`, `core-vX.Y.Z` for
+   `teloxide-core`, and `macros-vX.Y.Z` for `teloxide-macros`. Never move or
+   reuse a published tag.
+7. Publish crates only from the tagged release commit. After tagging,
+   reconcile `next` with that release commit before starting the next work
+   cycle, then continue development with the next unreleased version plan.
+   `HEAD` of `master` without a release tag is not considered released.
+
+### Governance propagation
+
+A governance PR can be untagged on `master`, but it cannot remain isolated
+there while `next` is used for ordinary development:
+
+1. Record the merged governance commit SHA on `master`.
+2. Create an `integration/governance-<short-id>` branch from `next` and apply
+   the same governance commit/diff. Open and merge a PR into `next`; do not
+   silently discard unrelated `next` work or use a full `master` merge as a
+   substitute unless a release synchronization is intended.
+3. Block ordinary feature branches and feature PRs from `next` until `next`
+   contains the current governance state from `master`. The integration PR
+   carries the source `master` SHA in its description for traceability.
+
+The pre-feature check is therefore two-part: `next` must contain the latest
+applicable tagged `master` release **and** a reconciled governance state
+corresponding to every governance commit that landed on `master` after that
+release tag. The integration PR must record each source `master` SHA; the gate
+checks state plus traceability, not ancestry of the original governance commit.
+If either condition fails, reconcile first.
+
+### Versioning rules
+
+- Follow semver independently per published crate, with the stability level
+  taken into account. For crates at `1.0.0` or later, use patch for compatible
+  fixes/refactors, minor for compatible public additions, and major for
+  breaking public API changes. For current `0.y.z` crates, use patch for
+  compatible fixes/refactors and minor for public additions or breaking public
+  changes; do not jump to `1.0.0` for an ordinary pre-1.0 breaking change.
+  `1.0.0` is a deliberate project-wide stability milestone. A dependency or
+  generated API change may require bumps in more than one crate; explain the
+  dependency graph in the release PR.
+- A change can be developed on `next` without changing the published version.
+  Before it reaches `master`, it must be included in a release PR with the
+  appropriate version bump. An urgent release-blocking fix uses the same
+  package-specific hotfix PR and patch bump; it is not an independent route
+  for changing `master`.
+- Crate semver and Telegram Bot API version are separate axes. Record both in
+  the release PR and changelog; never imply that a Bot API update automatically
+  determines a Rust crate version.
+- Release tags are the only deployment/release authority. Do not infer the
+  deployed version from branch names, `HEAD`, or a successful CI run.
 
 ## Start every task by checking the repository state
 
@@ -22,13 +113,42 @@ Before editing code:
 ```shell
 git status --short --branch
 git fetch --all --prune
-git switch master
-git pull --ff-only origin master
-git switch -c <type>/<short-task-name>
+git branch --show-current
 ```
 
-Do not assume that a SHA, API version, generated file, or known TODO from an old conversation is still current.
-Inspect the branch and the relevant source files first.
+Choose the base explicitly instead of switching to `master` automatically:
+
+```shell
+# Normal feature work: integrate through next.
+git switch next
+git pull --ff-only origin next
+git switch -c <type>/<short-task-name>
+
+# Release preparation: start from the reviewed next head.
+git switch next
+git pull --ff-only origin next
+git switch -c release/<release-id>       # release train
+# or: git switch -c release/<package>-vX.Y.Z
+
+# Hotfix preparation: use the exact base package tag, never current master HEAD.
+git fetch --tags origin
+git switch --detach <base-package-tag>
+git switch -c hotfix/<package>-vX.Y.Z
+```
+
+Only release/hotfix or explicitly authorized governance work should switch
+to `master`. Do not create ordinary feature branches from `master` or target
+ordinary feature PRs there. Before branching from `next`, verify both that it
+contains the latest applicable tagged `master` release and that it contains a
+reconciled governance state corresponding to every governance commit from
+`master` after that tag. Verify the source `master` SHAs in the integration PR;
+check state and traceability, not ancestry of the original commits. If either
+condition fails, reconcile through an explicit integration PR before starting
+new feature work.
+
+Do not assume that a SHA, API version, generated file, package version, release
+tag, or known TODO from an old conversation is still current. Inspect the
+branch, latest release tags, package manifests, and relevant source files first.
 
 Useful initial commands:
 
@@ -40,7 +160,10 @@ cargo metadata --no-deps --format-version 1 >/dev/null
 
 ## Non-negotiable rules
 
-1. Do not push directly to `master` unless the user explicitly authorizes it; prefer reviewed feature branches and PRs.
+1. Do not push directly to `master`; update it through a reviewed, versioned
+   release/hotfix PR, or through the explicitly authorized governance exception.
+   Tag the exact resulting merge commit only for release/hotfix code changes;
+   governance merges receive no package tag.
 2. Do not use stale technical branches as a base
 3. Do not edit generated files as the primary source of a change
 4. Do not claim complete Telegram Bot API coverage without an external audit against the official documentation
@@ -321,7 +444,11 @@ A complete GitHub CI run should cover:
 
 ## Current integration direction
 
-`master` contains the integrated Telegram Bot API 10.0 work. The next API update targets Bot API 10.2.
+`master` is the release line. Use the latest immutable package tags to
+identify the released code; do not treat the current branch head as a release
+without a matching tag and version entry. The next API update targets Bot API
+10.2 and should be integrated on `next` before a versioned promotion to
+`master`.
 
 Do not state complete Bot API 10.0 coverage without an independent external audit against the official documentation. Treat the 10.0 coverage claim as qualified until that audit is recorded.
 
@@ -398,6 +525,12 @@ Do not claim a check was run unless it actually completed successfully.
 
 Do not merge a PR merely because codegen and compilation are green. For transport and serde changes, require behavior tests.
 
+For release/hotfix PRs targeting `master`, verify the release/hotfix version
+bump, `CHANGELOG.md` entry, target package tags, and the exact merge-commit tag
+plan. For an explicitly authorized governance PR, verify that it makes no
+crate-release claim, does not require a package version bump, and receives no
+package tag.
+
 ## Agent reporting format
 
 When finishing a task, report:
@@ -423,7 +556,9 @@ A task is done only when:
 - formatting and clippy pass
 - relevant workspace and feature combinations pass
 - documentation and changelog are updated when user-visible behavior changed
-- the PR targets `master`, unless the work explicitly uses the `next` staging workflow
+- ordinary feature PRs target `next`; versioned release/hotfix PRs and explicitly authorized governance PRs target `master`
+- every code promotion to `master` has the appropriate package version bump, changelog entry, and immutable tag plan; governance promotions explicitly have none of these release artifacts
+- governance commits merged to `master` are reconciled into `next` before ordinary feature work resumes
 - remaining gaps are stated explicitly
 
 Correctness at the Telegram wire boundary is more important than making local schemas, derives, or generated code look convenient.

@@ -138,6 +138,8 @@ pub use repls::{repl, repl_with_listener};
 
 pub mod backoff;
 pub mod dispatching;
+#[cfg(feature = "drafter")]
+pub mod drafter;
 pub mod error_handlers;
 pub mod prelude;
 #[cfg(feature = "ctrlc_handler")]

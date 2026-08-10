@@ -1,11 +1,11 @@
 use serde::Serialize;
 
-use crate::types::{InputFile, MessageEntity, ParseMode, Seconds};
+use crate::types::{InputFile, InputFileLike, MessageEntity, ParseMode, Seconds};
 
 /// This object represents the content of a media message to be sent.
 ///
 /// [The official docs](https://core.telegram.org/bots/api#inputmedia).
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
@@ -18,11 +18,59 @@ pub enum InputMedia {
     LivePhoto(InputMediaLivePhoto),
 }
 
+impl InputFileLike for InputMediaPhoto {
+    fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
+        self.media.copy_into(into);
+    }
+
+    fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
+        self.media.move_into(into);
+    }
+}
+
+impl InputFileLike for InputMediaVideo {
+    fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
+        self.media.copy_into(into);
+        self.thumbnail.copy_into(into);
+        self.cover.copy_into(into);
+    }
+
+    fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
+        self.media.move_into(into);
+        self.thumbnail.move_into(into);
+        self.cover.move_into(into);
+    }
+}
+
+impl InputFileLike for InputMediaAnimation {
+    fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
+        self.media.copy_into(into);
+        self.thumbnail.copy_into(into);
+    }
+
+    fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
+        self.media.move_into(into);
+        self.thumbnail.move_into(into);
+    }
+}
+
+impl InputFileLike for InputMediaAudio {
+    fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
+        self.media.copy_into(into);
+        self.thumbnail.copy_into(into);
+    }
+
+    fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
+        self.media.move_into(into);
+        self.thumbnail.move_into(into);
+    }
+}
+
 /// Represents a photo to be sent.
 ///
 /// [The official docs](https://core.telegram.org/bots/api#inputmediaphoto).
 #[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputMediaPhoto {
     /// File to send.
@@ -108,7 +156,7 @@ impl InputMediaPhoto {
 ///
 /// [The official docs](https://core.telegram.org/bots/api#inputmedialivephoto).
 #[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputMediaLivePhoto {
     /// Video of the live photo to send.
@@ -154,7 +202,7 @@ impl InputMediaLivePhoto {
 ///
 /// [The official docs](https://core.telegram.org/bots/api#inputmedialocation).
 #[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputMediaLocation {
     pub latitude: f64,
@@ -166,7 +214,7 @@ pub struct InputMediaLocation {
 ///
 /// [The official docs](https://core.telegram.org/bots/api#inputmediasticker).
 #[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputMediaSticker {
     pub media: InputFile,
@@ -177,7 +225,7 @@ pub struct InputMediaSticker {
 ///
 /// [The official docs](https://core.telegram.org/bots/api#inputmediavenue).
 #[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputMediaVenue {
     pub latitude: f64,
@@ -194,7 +242,7 @@ pub struct InputMediaVenue {
 ///
 /// [The official docs](https://core.telegram.org/bots/api#inputmediavideo).
 #[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputMediaVideo {
     // File to send.
@@ -352,7 +400,7 @@ impl InputMediaVideo {
 ///
 /// [The official docs](https://core.telegram.org/bots/api#inputmediaanimation).
 #[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputMediaAnimation {
     /// File to send.
@@ -479,7 +527,7 @@ impl InputMediaAnimation {
 ///
 /// [The official docs](https://core.telegram.org/bots/api#inputmediaaudio).
 #[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputMediaAudio {
     /// File to send.
@@ -588,7 +636,7 @@ impl InputMediaAudio {
 ///
 /// [The official docs](https://core.telegram.org/bots/api#inputmediadocument).
 #[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputMediaDocument {
     /// File to send.

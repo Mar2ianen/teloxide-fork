@@ -15,6 +15,7 @@ pub enum AllowedUpdate {
     EditedBusinessMessage,
     DeletedBusinessMessages,
     ManagedBot,
+    Subscription,
     MessageReaction,
     MessageReactionCount,
     InlineQuery,

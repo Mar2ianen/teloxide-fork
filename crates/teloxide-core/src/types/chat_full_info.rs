@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::{
     AcceptedGiftTypes, Audio, Birthdate, BusinessIntro, BusinessLocation, BusinessOpeningHours,
-    Chat, ChatId, ChatLocation, ChatPermissions, ChatPhoto, Message, ReactionType, Seconds,
-    UniqueGiftColors, User, UserRating,
+    Chat, ChatId, ChatLocation, ChatPermissions, ChatPhoto, Community, Message, ReactionType,
+    Seconds, UniqueGiftColors, User, UserRating,
 };
 
 /// Custom emoji identifier.
@@ -45,6 +45,9 @@ pub struct ChatFullInfo {
 
     /// Guard bot configured for the chat, if any.
     pub guard_bot: Option<User>,
+
+    /// Community to which the chat belongs, if any.
+    pub community: Option<Community>,
 
     /// The time after which all messages sent to the chat will be automatically
     /// deleted; in seconds.
@@ -768,6 +771,7 @@ mod tests {
             photo: None,
             pinned_message: None,
             guard_bot: None,
+            community: None,
             message_auto_delete_time: None,
             has_hidden_members: false,
             has_aggressive_anti_spam_enabled: false,
@@ -836,6 +840,7 @@ mod tests {
             photo: None,
             pinned_message: None,
             guard_bot: None,
+            community: None,
             message_auto_delete_time: None,
             has_hidden_members: false,
             has_aggressive_anti_spam_enabled: false,
@@ -902,6 +907,7 @@ mod tests {
             photo: None,
             pinned_message: None,
             guard_bot: None,
+            community: None,
             message_auto_delete_time: None,
             has_hidden_members: false,
             has_aggressive_anti_spam_enabled: false,

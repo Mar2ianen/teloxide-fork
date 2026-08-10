@@ -5,10 +5,12 @@ use serde::Serialize;
 use crate::types::{InlineQueryResult, SentGuestMessage};
 
 impl_payload! {
+    @[multipart = result]
+    @[validate = crate::requests::validation::validate_answer_guest_query]
     /// Use this method to reply to a received guest message. On success, a [`SentGuestMessage`] object is returned.
     ///
     /// [`SentGuestMessage`]: crate::types::SentGuestMessage
-    #[derive(Debug, PartialEq, Clone, Serialize)]
+    #[derive(Debug, Clone, Serialize)]
     pub AnswerGuestQuery (AnswerGuestQuerySetters) => SentGuestMessage {
         required {
             /// Unique identifier for the query to be answered

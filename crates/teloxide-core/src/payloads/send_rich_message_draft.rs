@@ -5,6 +5,7 @@ use serde::Serialize;
 use crate::types::{InputRichMessage, ThreadId, True, UserId};
 
 impl_payload! {
+    @[validate = crate::requests::validation::validate_send_rich_message_draft]
     /// Use this method to stream a partial rich message to a user while it is being generated. Returns _True_ on success.
     #[derive(Debug, Clone, Serialize)]
     pub SendRichMessageDraft (SendRichMessageDraftSetters) => True {

@@ -1058,7 +1058,7 @@ impl Requester for Bot {
         Self::DeleteMyCommands::new(self.clone(), payloads::DeleteMyCommands::new())
     }
 
-    type AnswerInlineQuery = JsonRequest<payloads::AnswerInlineQuery>;
+    type AnswerInlineQuery = MultipartRequest<payloads::AnswerInlineQuery>;
 
     fn answer_inline_query<R>(
         &self,
@@ -1074,7 +1074,7 @@ impl Requester for Bot {
         )
     }
 
-    type AnswerWebAppQuery = JsonRequest<payloads::AnswerWebAppQuery>;
+    type AnswerWebAppQuery = MultipartRequest<payloads::AnswerWebAppQuery>;
 
     fn answer_web_app_query<W>(
         &self,
@@ -1090,7 +1090,7 @@ impl Requester for Bot {
         )
     }
 
-    type SavePreparedInlineMessage = JsonRequest<payloads::SavePreparedInlineMessage>;
+    type SavePreparedInlineMessage = MultipartRequest<payloads::SavePreparedInlineMessage>;
 
     fn save_prepared_inline_message(
         &self,
@@ -1865,7 +1865,7 @@ impl Requester for Bot {
         )
     }
 
-    type AnswerGuestQuery = JsonRequest<payloads::AnswerGuestQuery>;
+    type AnswerGuestQuery = MultipartRequest<payloads::AnswerGuestQuery>;
 
     fn answer_guest_query<G>(
         &self,

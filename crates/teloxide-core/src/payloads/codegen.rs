@@ -56,6 +56,12 @@ fn codegen_payloads() {
             .map(|field| format!("    @[multipart = {}]\n", field.join(", ")))
             .unwrap_or_default();
 
+        let validation = method
+            .validation
+            .as_deref()
+            .map(|function| format!("    @[validate = {function}]\n"))
+            .unwrap_or_default();
+
         let derive = if !multipart.is_empty() || !partial_eq_suitable(&method) {
             "#[derive(Debug, Clone, Serialize)]".to_owned()
         } else {
@@ -72,7 +78,7 @@ fn codegen_payloads() {
 {uses}
 
 impl_payload! {{
-{multipart}{timeout_secs}{method_doc}
+{multipart}{validation}{timeout_secs}{method_doc}
     {derive}
     pub {Method} ({Method}Setters) => {return_ty} {{
 {required}{optional}
@@ -308,9 +314,7 @@ fn multipart_input_file_fields(m: &Method) -> Option<Vec<&str>> {
     let mut fields: Vec<_> =
         m.params.iter().filter(|&p| ty_is_multiparty(&p.ty)).map(|p| &*p.name).collect();
 
-    if matches!(m.names.2.as_str(), "send_rich_message" | "edit_message_text") {
-        fields.push("rich_message");
-    }
+    fields.extend(m.multipart.iter().map(String::as_str));
 
     if fields.is_empty() {
         None

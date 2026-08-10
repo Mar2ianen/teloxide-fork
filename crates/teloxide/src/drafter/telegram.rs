@@ -1,6 +1,6 @@
 //! Telegram Bot API delivery backends for the generic drafter runtime.
 
-use std::time::Duration;
+use std::{collections::VecDeque, future::Future, time::Duration};
 
 use teloxide_core::{
     errors::{ApiError, RequestError},
@@ -20,13 +20,29 @@ use teloxide_core::{
 use super::{
     CleanupFailure, DeliveryCertainty, DraftConfig, DraftId, DraftSink, DraftStartError, Drafter,
     DrafterBackend, DrafterCapabilities, DrafterErrorClass, DrafterErrorDisposition, DrafterMode,
-    DrafterOperation, DrafterRateLimitKey, InProcessRateLimiter, PreviewAck, ReplacePreview,
+    DrafterOperation, DrafterRateLimitKey, DrafterRequestContext, DrafterRequestError,
+    InProcessRateLimiter, PreviewAck, ReplacePreview,
 };
 
 fn classify_request_error(
     operation: DrafterOperation,
-    error: &RequestError,
+    error: &DrafterRequestError,
 ) -> DrafterErrorDisposition {
+    let error = match error {
+        DrafterRequestError::Inner(error) => error,
+        DrafterRequestError::Acquire(_) => {
+            return DrafterErrorDisposition {
+                class: DrafterErrorClass::Permanent,
+                delivery: DeliveryCertainty::NotAttempted,
+            };
+        }
+        DrafterRequestError::Timeout => {
+            return DrafterErrorDisposition {
+                class: DrafterErrorClass::Ambiguous,
+                delivery: DeliveryCertainty::Unknown,
+            };
+        }
+    };
     let (class, delivery) = match error {
         RequestError::RetryAfter(seconds) => (
             DrafterErrorClass::RetryAfter {
@@ -56,8 +72,8 @@ fn classify_request_error(
     DrafterErrorDisposition { class, delivery }
 }
 
-fn is_message_not_modified(error: &RequestError) -> bool {
-    matches!(error, RequestError::Api(ApiError::MessageNotModified))
+fn is_message_not_modified(error: &DrafterRequestError) -> bool {
+    matches!(error, DrafterRequestError::Inner(RequestError::Api(ApiError::MessageNotModified)))
 }
 
 /// Options for permanent text and rich-message requests.
@@ -381,17 +397,42 @@ where
     request
 }
 
+async fn cancel_unused_context(context: Option<DrafterRequestContext>) {
+    if let Some(context) = context {
+        context.cancel_unused().await;
+    }
+}
+
+async fn execute_request<T, F, Fut>(
+    context: &mut Option<DrafterRequestContext>,
+    request_class: super::DrafterRequestClass,
+    request: F,
+) -> Result<T, DrafterRequestError>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<T, RequestError>>,
+{
+    match context.as_mut() {
+        Some(context) => context.execute(request_class, request).await,
+        None => request().await.map_err(DrafterRequestError::Inner),
+    }
+}
+
 async fn send_text<R>(
     bot: &R,
     chat_id: ChatId,
     text: String,
     options: &TelegramSendOptions,
-) -> Result<Message, RequestError>
+    context: &mut Option<DrafterRequestContext>,
+) -> Result<Message, DrafterRequestError>
 where
     R: Requester<Err = RequestError>,
     R::SendMessage: Send,
 {
-    apply_text_send_options(bot.send_message(chat_id, text), options).await
+    execute_request(context, super::DrafterRequestClass::Send, || async {
+        apply_text_send_options(bot.send_message(chat_id, text), options).await
+    })
+    .await
 }
 
 async fn send_rich<R>(
@@ -399,12 +440,105 @@ async fn send_rich<R>(
     chat_id: ChatId,
     rich_message: InputRichMessage,
     options: &TelegramSendOptions,
-) -> Result<Message, RequestError>
+    context: &mut Option<DrafterRequestContext>,
+) -> Result<Message, DrafterRequestError>
 where
     R: Requester<Err = RequestError>,
     R::SendRichMessage: Send,
 {
-    apply_rich_send_options(bot.send_rich_message(chat_id, rich_message), options).await
+    execute_request(context, super::DrafterRequestClass::Send, || async {
+        apply_rich_send_options(bot.send_rich_message(chat_id, rich_message), options).await
+    })
+    .await
+}
+
+async fn send_message_draft<R>(
+    bot: &R,
+    chat_id: UserId,
+    draft_id: DraftId,
+    preview: String,
+    options: &TelegramDraftOptions,
+    context: &mut Option<DrafterRequestContext>,
+) -> Result<teloxide_core::types::True, DrafterRequestError>
+where
+    R: Requester<Err = RequestError>,
+    R::SendMessageDraft: Send,
+{
+    execute_request(context, super::DrafterRequestClass::Send, || async {
+        apply_draft_options(bot.send_message_draft(chat_id, draft_id.get()).text(preview), options)
+            .await
+    })
+    .await
+}
+
+async fn send_rich_message_draft<R>(
+    bot: &R,
+    chat_id: UserId,
+    draft_id: DraftId,
+    preview: InputRichMessage,
+    options: &TelegramDraftOptions,
+    context: &mut Option<DrafterRequestContext>,
+) -> Result<teloxide_core::types::True, DrafterRequestError>
+where
+    R: Requester<Err = RequestError>,
+    R::SendRichMessageDraft: Send,
+{
+    execute_request(context, super::DrafterRequestClass::Send, || async {
+        apply_rich_draft_options(
+            bot.send_rich_message_draft(chat_id, draft_id.get(), preview),
+            options,
+        )
+        .await
+    })
+    .await
+}
+
+async fn edit_text<R>(
+    bot: &R,
+    chat_id: ChatId,
+    message_id: MessageId,
+    text: String,
+    options: &TelegramEditOptions,
+    context: &mut Option<DrafterRequestContext>,
+) -> Result<Message, DrafterRequestError>
+where
+    R: Requester<Err = RequestError>,
+    R::EditMessageText: Send,
+{
+    execute_request(context, super::DrafterRequestClass::Mutation, || async {
+        apply_edit_options(bot.edit_message_text(chat_id, message_id, text), options).await
+    })
+    .await
+}
+
+async fn delete_message<R>(
+    bot: &R,
+    chat_id: ChatId,
+    message_id: MessageId,
+    context: &mut Option<DrafterRequestContext>,
+) -> Result<(), DrafterRequestError>
+where
+    R: Requester<Err = RequestError>,
+    R::DeleteMessage: Send,
+{
+    execute_request(context, super::DrafterRequestClass::Mutation, || async {
+        bot.delete_message(chat_id, message_id).await.map(|_| ())
+    })
+    .await
+}
+
+async fn edit_rich_text(
+    bot: &Bot,
+    chat_id: ChatId,
+    message_id: MessageId,
+    text: InputRichMessage,
+    options: &TelegramEditOptions,
+    context: &mut Option<DrafterRequestContext>,
+) -> Result<Message, DrafterRequestError> {
+    execute_request(context, super::DrafterRequestClass::Mutation, || async {
+        apply_edit_options(bot.edit_message_rich_text(chat_id, message_id, text), options).await
+    })
+    .await
 }
 
 /// Native plain-text draft backend. Its target is a `UserId`, which prevents
@@ -415,6 +549,7 @@ pub struct NativeTextBackend<R> {
     draft_id: DraftId,
     send_options: TelegramSendOptions,
     draft_options: TelegramDraftOptions,
+    request_context: Option<DrafterRequestContext>,
 }
 
 impl<R> NativeTextBackend<R> {
@@ -426,6 +561,7 @@ impl<R> NativeTextBackend<R> {
             draft_id: DraftId::next(),
             send_options: TelegramSendOptions::default(),
             draft_options: TelegramDraftOptions::default(),
+            request_context: None,
         }
     }
 
@@ -471,7 +607,7 @@ where
     type Final = String;
     type SegmentOutput = Message;
     type Output = Message;
-    type Error = RequestError;
+    type Error = DrafterRequestError;
 
     fn capabilities(&self) -> DrafterCapabilities {
         DrafterCapabilities {
@@ -490,37 +626,72 @@ where
         Some(self.draft_id)
     }
 
-    async fn update(&mut self, preview: String) -> Result<PreviewAck, RequestError> {
-        apply_draft_options(
-            self.bot.send_message_draft(self.chat_id, self.draft_id.get()).text(preview),
+    async fn update(&mut self, preview: String) -> Result<PreviewAck, DrafterRequestError> {
+        let mut context = self.request_context.take();
+        send_message_draft(
+            &self.bot,
+            self.chat_id,
+            self.draft_id,
+            preview,
             &self.draft_options,
+            &mut context,
         )
         .await
         .map(|_| PreviewAck)
     }
 
-    async fn commit_segment(&mut self, final_payload: &String) -> Result<Message, RequestError> {
-        let result =
-            send_text(&self.bot, self.chat_id.into(), final_payload.clone(), &self.send_options)
-                .await;
+    async fn commit_segment(
+        &mut self,
+        final_payload: &String,
+    ) -> Result<Message, DrafterRequestError> {
+        let mut context = self.request_context.take();
+        let result = send_text(
+            &self.bot,
+            self.chat_id.into(),
+            final_payload.clone(),
+            &self.send_options,
+            &mut context,
+        )
+        .await;
         if result.is_ok() {
             self.draft_id = DraftId::next();
         }
         result
     }
 
-    async fn finish(&mut self, final_payload: &String) -> Result<Message, RequestError> {
-        send_text(&self.bot, self.chat_id.into(), final_payload.clone(), &self.send_options).await
+    async fn finish(&mut self, final_payload: &String) -> Result<Message, DrafterRequestError> {
+        let mut context = self.request_context.take();
+        send_text(
+            &self.bot,
+            self.chat_id.into(),
+            final_payload.clone(),
+            &self.send_options,
+            &mut context,
+        )
+        .await
     }
 
-    async fn abort(&mut self) -> Result<(), RequestError> {
+    async fn abort(&mut self) -> Result<(), DrafterRequestError> {
+        cancel_unused_context(self.request_context.take()).await;
         Ok(())
+    }
+
+    fn is_request_timeout(&self, error: &Self::Error) -> bool {
+        matches!(error, DrafterRequestError::Timeout)
+    }
+
+    fn supports_request_scheduler(&self) -> bool {
+        true
+    }
+
+    fn set_request_context(&mut self, context: Option<DrafterRequestContext>) {
+        self.request_context = context;
     }
 
     fn classify_error(
         &self,
         operation: DrafterOperation,
-        error: &RequestError,
+        error: &DrafterRequestError,
     ) -> DrafterErrorDisposition {
         classify_request_error(operation, error)
     }
@@ -533,6 +704,7 @@ pub struct NativeRichBackend<R> {
     draft_id: DraftId,
     send_options: TelegramSendOptions,
     draft_options: TelegramDraftOptions,
+    request_context: Option<DrafterRequestContext>,
 }
 
 impl<R> NativeRichBackend<R> {
@@ -544,6 +716,7 @@ impl<R> NativeRichBackend<R> {
             draft_id: DraftId::next(),
             send_options: TelegramSendOptions::default(),
             draft_options: TelegramDraftOptions::default(),
+            request_context: None,
         }
     }
 
@@ -589,7 +762,7 @@ where
     type Final = InputRichMessage;
     type SegmentOutput = Message;
     type Output = Message;
-    type Error = RequestError;
+    type Error = DrafterRequestError;
 
     fn capabilities(&self) -> DrafterCapabilities {
         DrafterCapabilities {
@@ -608,10 +781,18 @@ where
         Some(self.draft_id)
     }
 
-    async fn update(&mut self, preview: InputRichMessage) -> Result<PreviewAck, RequestError> {
-        apply_rich_draft_options(
-            self.bot.send_rich_message_draft(self.chat_id, self.draft_id.get(), preview),
+    async fn update(
+        &mut self,
+        preview: InputRichMessage,
+    ) -> Result<PreviewAck, DrafterRequestError> {
+        let mut context = self.request_context.take();
+        send_rich_message_draft(
+            &self.bot,
+            self.chat_id,
+            self.draft_id,
+            preview,
             &self.draft_options,
+            &mut context,
         )
         .await
         .map(|_| PreviewAck)
@@ -620,28 +801,58 @@ where
     async fn commit_segment(
         &mut self,
         final_payload: &InputRichMessage,
-    ) -> Result<Message, RequestError> {
-        let result =
-            send_rich(&self.bot, self.chat_id.into(), final_payload.clone(), &self.send_options)
-                .await;
+    ) -> Result<Message, DrafterRequestError> {
+        let mut context = self.request_context.take();
+        let result = send_rich(
+            &self.bot,
+            self.chat_id.into(),
+            final_payload.clone(),
+            &self.send_options,
+            &mut context,
+        )
+        .await;
         if result.is_ok() {
             self.draft_id = DraftId::next();
         }
         result
     }
 
-    async fn finish(&mut self, final_payload: &InputRichMessage) -> Result<Message, RequestError> {
-        send_rich(&self.bot, self.chat_id.into(), final_payload.clone(), &self.send_options).await
+    async fn finish(
+        &mut self,
+        final_payload: &InputRichMessage,
+    ) -> Result<Message, DrafterRequestError> {
+        let mut context = self.request_context.take();
+        send_rich(
+            &self.bot,
+            self.chat_id.into(),
+            final_payload.clone(),
+            &self.send_options,
+            &mut context,
+        )
+        .await
     }
 
-    async fn abort(&mut self) -> Result<(), RequestError> {
+    async fn abort(&mut self) -> Result<(), DrafterRequestError> {
+        cancel_unused_context(self.request_context.take()).await;
         Ok(())
+    }
+
+    fn is_request_timeout(&self, error: &Self::Error) -> bool {
+        matches!(error, DrafterRequestError::Timeout)
+    }
+
+    fn supports_request_scheduler(&self) -> bool {
+        true
+    }
+
+    fn set_request_context(&mut self, context: Option<DrafterRequestContext>) {
+        self.request_context = context;
     }
 
     fn classify_error(
         &self,
         operation: DrafterOperation,
-        error: &RequestError,
+        error: &DrafterRequestError,
     ) -> DrafterErrorDisposition {
         classify_request_error(operation, error)
     }
@@ -656,7 +867,9 @@ pub struct StatusThenRichBackend<R> {
     final_send_options: TelegramSendOptions,
     edit_options: TelegramEditOptions,
     cleanup: StatusCleanup,
-    cleanup_failure: Option<CleanupFailure<RequestError>>,
+    cleanup_failure: Option<CleanupFailure<DrafterRequestError>>,
+    pending_cleanup_message_ids: VecDeque<MessageId>,
+    request_context: Option<DrafterRequestContext>,
 }
 
 /// Whether the status message is removed after final delivery.
@@ -678,6 +891,8 @@ impl<R> StatusThenRichBackend<R> {
             edit_options: TelegramEditOptions::default(),
             cleanup: StatusCleanup::DeleteAfterFinalSuccess,
             cleanup_failure: None,
+            pending_cleanup_message_ids: VecDeque::new(),
+            request_context: None,
         }
     }
 
@@ -742,7 +957,7 @@ where
     type Final = InputRichMessage;
     type SegmentOutput = Message;
     type Output = Message;
-    type Error = RequestError;
+    type Error = DrafterRequestError;
 
     fn capabilities(&self) -> DrafterCapabilities {
         DrafterCapabilities {
@@ -761,16 +976,27 @@ where
         self.preview_message_id
     }
 
-    async fn update(&mut self, preview: String) -> Result<PreviewAck, RequestError> {
+    async fn update(&mut self, preview: String) -> Result<PreviewAck, DrafterRequestError> {
+        let mut context = self.request_context.take();
         let message_id = if let Some(message_id) = self.preview_message_id {
-            apply_edit_options(
-                self.bot.edit_message_text(self.chat_id, message_id, preview),
+            edit_text(
+                &self.bot,
+                self.chat_id,
+                message_id,
+                preview,
                 &self.edit_options,
+                &mut context,
             )
             .await
         } else {
-            let message =
-                send_text(&self.bot, self.chat_id, preview, &self.preview_send_options).await?;
+            let message = send_text(
+                &self.bot,
+                self.chat_id,
+                preview,
+                &self.preview_send_options,
+                &mut context,
+            )
+            .await?;
             self.preview_message_id = Some(message.id);
             Ok(message)
         };
@@ -784,47 +1010,106 @@ where
     async fn commit_segment(
         &mut self,
         final_payload: &InputRichMessage,
-    ) -> Result<Message, RequestError> {
-        let result =
-            send_rich(&self.bot, self.chat_id, final_payload.clone(), &self.final_send_options)
-                .await;
-        if result.is_ok() {
-            self.cleanup_preview().await;
-        }
+    ) -> Result<Message, DrafterRequestError> {
+        let mut context = self.request_context.take();
+        let result = send_rich(
+            &self.bot,
+            self.chat_id,
+            final_payload.clone(),
+            &self.final_send_options,
+            &mut context,
+        )
+        .await;
         result
     }
 
-    async fn finish(&mut self, final_payload: &InputRichMessage) -> Result<Message, RequestError> {
-        let result =
-            send_rich(&self.bot, self.chat_id, final_payload.clone(), &self.final_send_options)
-                .await;
-        if result.is_ok() && self.cleanup == StatusCleanup::DeleteAfterFinalSuccess {
-            if let Some(message_id) = self.preview_message_id {
-                if let Err(error) = self.bot.delete_message(self.chat_id, message_id).await {
-                    self.cleanup_failure = Some(CleanupFailure { message_id, error });
-                    self.preview_message_id = None;
-                } else {
-                    self.preview_message_id = None;
-                }
-            }
-        }
-        result
+    async fn finish(
+        &mut self,
+        final_payload: &InputRichMessage,
+    ) -> Result<Message, DrafterRequestError> {
+        let mut context = self.request_context.take();
+        send_rich(
+            &self.bot,
+            self.chat_id,
+            final_payload.clone(),
+            &self.final_send_options,
+            &mut context,
+        )
+        .await
     }
 
-    async fn abort(&mut self) -> Result<(), RequestError> {
+    async fn cleanup_after_delivery(&mut self) -> Result<(), DrafterRequestError> {
+        let mut context = self.request_context.take();
         if self.cleanup != StatusCleanup::DeleteAfterFinalSuccess {
+            cancel_unused_context(context).await;
             return Ok(());
         }
-        if let Some(message_id) = self.preview_message_id {
-            self.bot.delete_message(self.chat_id, message_id).await?;
+        while let Some(message_id) = self.pending_cleanup_message_ids.front().copied() {
+            let result = delete_message(&self.bot, self.chat_id, message_id, &mut context).await;
+            self.pending_cleanup_message_ids.pop_front();
+            if let Err(error) = result {
+                self.cleanup_failure = Some(CleanupFailure { message_id, error });
+            }
         }
         Ok(())
+    }
+
+    fn cleanup_after_delivery_possible(&self) -> bool {
+        self.cleanup == StatusCleanup::DeleteAfterFinalSuccess
+            && (self.preview_message_id.is_some() || !self.pending_cleanup_message_ids.is_empty())
+    }
+
+    fn prepare_cleanup_after_delivery(&mut self) -> bool {
+        if self.cleanup != StatusCleanup::DeleteAfterFinalSuccess {
+            return false;
+        }
+        if let Some(message_id) = self.preview_message_id.take() {
+            self.pending_cleanup_message_ids.push_back(message_id);
+        }
+        !self.pending_cleanup_message_ids.is_empty()
+    }
+
+    async fn abort(&mut self) -> Result<(), DrafterRequestError> {
+        let mut context = self.request_context.take();
+        if self.cleanup != StatusCleanup::DeleteAfterFinalSuccess {
+            cancel_unused_context(context).await;
+            return Ok(());
+        }
+        if let Some(message_id) = self.preview_message_id.take() {
+            self.pending_cleanup_message_ids.push_back(message_id);
+        }
+        if self.pending_cleanup_message_ids.is_empty() {
+            cancel_unused_context(context).await;
+            return Ok(());
+        }
+        while let Some(message_id) = self.pending_cleanup_message_ids.front().copied() {
+            delete_message(&self.bot, self.chat_id, message_id, &mut context).await?;
+            self.pending_cleanup_message_ids.pop_front();
+        }
+        Ok(())
+    }
+
+    fn abort_request_possible(&self) -> bool {
+        self.cleanup == StatusCleanup::DeleteAfterFinalSuccess
+            && (self.preview_message_id.is_some() || !self.pending_cleanup_message_ids.is_empty())
+    }
+
+    fn is_request_timeout(&self, error: &Self::Error) -> bool {
+        matches!(error, DrafterRequestError::Timeout)
+    }
+
+    fn supports_request_scheduler(&self) -> bool {
+        true
+    }
+
+    fn set_request_context(&mut self, context: Option<DrafterRequestContext>) {
+        self.request_context = context;
     }
 
     fn classify_error(
         &self,
         operation: DrafterOperation,
-        error: &RequestError,
+        error: &DrafterRequestError,
     ) -> DrafterErrorDisposition {
         let operation = if self.preview_message_id.is_none()
             && matches!(operation, DrafterOperation::Preview)
@@ -841,28 +1126,6 @@ where
     }
 }
 
-impl<R> StatusThenRichBackend<R>
-where
-    R: Requester<Err = RequestError> + Clone + Send + Sync + 'static,
-    R::SendMessage: Send,
-    R::EditMessageText: Send,
-    R::DeleteMessage: Send,
-{
-    async fn cleanup_preview(&mut self) {
-        if self.cleanup == StatusCleanup::Keep {
-            return;
-        }
-        if let Some(message_id) = self.preview_message_id {
-            if let Err(error) = self.bot.delete_message(self.chat_id, message_id).await {
-                self.cleanup_failure = Some(CleanupFailure { message_id, error });
-                self.preview_message_id = None;
-            } else {
-                self.preview_message_id = None;
-            }
-        }
-    }
-}
-
 /// Plain status preview followed by a separate plain permanent message.
 pub struct StatusThenTextBackend<R> {
     bot: R,
@@ -872,7 +1135,9 @@ pub struct StatusThenTextBackend<R> {
     final_send_options: TelegramSendOptions,
     edit_options: TelegramEditOptions,
     cleanup: StatusCleanup,
-    cleanup_failure: Option<CleanupFailure<RequestError>>,
+    cleanup_failure: Option<CleanupFailure<DrafterRequestError>>,
+    pending_cleanup_message_ids: VecDeque<MessageId>,
+    request_context: Option<DrafterRequestContext>,
 }
 
 impl<R> StatusThenTextBackend<R> {
@@ -887,6 +1152,8 @@ impl<R> StatusThenTextBackend<R> {
             edit_options: TelegramEditOptions::default(),
             cleanup: StatusCleanup::DeleteAfterFinalSuccess,
             cleanup_failure: None,
+            pending_cleanup_message_ids: VecDeque::new(),
+            request_context: None,
         }
     }
 
@@ -950,7 +1217,7 @@ where
     type Final = String;
     type SegmentOutput = Message;
     type Output = Message;
-    type Error = RequestError;
+    type Error = DrafterRequestError;
 
     fn capabilities(&self) -> DrafterCapabilities {
         DrafterCapabilities {
@@ -969,11 +1236,16 @@ where
         self.preview_message_id
     }
 
-    async fn update(&mut self, preview: String) -> Result<PreviewAck, RequestError> {
+    async fn update(&mut self, preview: String) -> Result<PreviewAck, DrafterRequestError> {
+        let mut context = self.request_context.take();
         if let Some(message_id) = self.preview_message_id {
-            apply_edit_options(
-                self.bot.edit_message_text(self.chat_id, message_id, preview),
+            edit_text(
+                &self.bot,
+                self.chat_id,
+                message_id,
+                preview,
                 &self.edit_options,
+                &mut context,
             )
             .await
             .map(|_| PreviewAck)
@@ -985,53 +1257,119 @@ where
                 }
             })
         } else {
-            let message =
-                send_text(&self.bot, self.chat_id, preview, &self.preview_send_options).await?;
+            let message = send_text(
+                &self.bot,
+                self.chat_id,
+                preview,
+                &self.preview_send_options,
+                &mut context,
+            )
+            .await?;
             self.preview_message_id = Some(message.id);
             Ok(PreviewAck)
         }
     }
 
-    async fn commit_segment(&mut self, final_payload: &String) -> Result<Message, RequestError> {
-        let result =
-            send_text(&self.bot, self.chat_id, final_payload.clone(), &self.final_send_options)
-                .await;
-        if result.is_ok() {
-            self.cleanup_preview().await;
-        }
+    async fn commit_segment(
+        &mut self,
+        final_payload: &String,
+    ) -> Result<Message, DrafterRequestError> {
+        let mut context = self.request_context.take();
+        let result = send_text(
+            &self.bot,
+            self.chat_id,
+            final_payload.clone(),
+            &self.final_send_options,
+            &mut context,
+        )
+        .await;
         result
     }
 
-    async fn finish(&mut self, final_payload: &String) -> Result<Message, RequestError> {
-        let result =
-            send_text(&self.bot, self.chat_id, final_payload.clone(), &self.final_send_options)
-                .await;
-        if result.is_ok() && self.cleanup == StatusCleanup::DeleteAfterFinalSuccess {
-            if let Some(message_id) = self.preview_message_id {
-                if let Err(error) = self.bot.delete_message(self.chat_id, message_id).await {
-                    self.cleanup_failure = Some(CleanupFailure { message_id, error });
-                    self.preview_message_id = None;
-                } else {
-                    self.preview_message_id = None;
-                }
-            }
-        }
-        result
+    async fn finish(&mut self, final_payload: &String) -> Result<Message, DrafterRequestError> {
+        let mut context = self.request_context.take();
+        send_text(
+            &self.bot,
+            self.chat_id,
+            final_payload.clone(),
+            &self.final_send_options,
+            &mut context,
+        )
+        .await
     }
 
-    async fn abort(&mut self) -> Result<(), RequestError> {
-        if self.cleanup == StatusCleanup::DeleteAfterFinalSuccess {
-            if let Some(message_id) = self.preview_message_id {
-                self.bot.delete_message(self.chat_id, message_id).await?;
+    async fn cleanup_after_delivery(&mut self) -> Result<(), DrafterRequestError> {
+        let mut context = self.request_context.take();
+        if self.cleanup != StatusCleanup::DeleteAfterFinalSuccess {
+            cancel_unused_context(context).await;
+            return Ok(());
+        }
+        while let Some(message_id) = self.pending_cleanup_message_ids.front().copied() {
+            let result = delete_message(&self.bot, self.chat_id, message_id, &mut context).await;
+            self.pending_cleanup_message_ids.pop_front();
+            if let Err(error) = result {
+                self.cleanup_failure = Some(CleanupFailure { message_id, error });
             }
         }
         Ok(())
     }
 
+    fn cleanup_after_delivery_possible(&self) -> bool {
+        self.cleanup == StatusCleanup::DeleteAfterFinalSuccess
+            && (self.preview_message_id.is_some() || !self.pending_cleanup_message_ids.is_empty())
+    }
+
+    fn prepare_cleanup_after_delivery(&mut self) -> bool {
+        if self.cleanup != StatusCleanup::DeleteAfterFinalSuccess {
+            return false;
+        }
+        if let Some(message_id) = self.preview_message_id.take() {
+            self.pending_cleanup_message_ids.push_back(message_id);
+        }
+        !self.pending_cleanup_message_ids.is_empty()
+    }
+
+    async fn abort(&mut self) -> Result<(), DrafterRequestError> {
+        let mut context = self.request_context.take();
+        if self.cleanup != StatusCleanup::DeleteAfterFinalSuccess {
+            cancel_unused_context(context).await;
+            return Ok(());
+        }
+        if let Some(message_id) = self.preview_message_id.take() {
+            self.pending_cleanup_message_ids.push_back(message_id);
+        }
+        if self.pending_cleanup_message_ids.is_empty() {
+            cancel_unused_context(context).await;
+            return Ok(());
+        }
+        while let Some(message_id) = self.pending_cleanup_message_ids.front().copied() {
+            delete_message(&self.bot, self.chat_id, message_id, &mut context).await?;
+            self.pending_cleanup_message_ids.pop_front();
+        }
+        Ok(())
+    }
+
+    fn abort_request_possible(&self) -> bool {
+        self.cleanup == StatusCleanup::DeleteAfterFinalSuccess
+            && (self.preview_message_id.is_some() || !self.pending_cleanup_message_ids.is_empty())
+    }
+
+    fn is_request_timeout(&self, error: &Self::Error) -> bool {
+        matches!(error, DrafterRequestError::Timeout)
+    }
+
+    fn supports_request_scheduler(&self) -> bool {
+        true
+    }
+
+    fn set_request_context(&mut self, context: Option<DrafterRequestContext>) {
+        self.request_context = context;
+    }
+
     fn classify_error(
         &self,
         operation: DrafterOperation,
-        error: &RequestError,
+        error: &DrafterRequestError,
     ) -> DrafterErrorDisposition {
         let operation = if self.preview_message_id.is_none()
             && matches!(operation, DrafterOperation::Preview)
@@ -1048,26 +1386,6 @@ where
     }
 }
 
-impl<R> StatusThenTextBackend<R>
-where
-    R: Requester<Err = RequestError> + Clone + Send + Sync + 'static,
-    R::DeleteMessage: Send,
-{
-    async fn cleanup_preview(&mut self) {
-        if self.cleanup == StatusCleanup::Keep {
-            return;
-        }
-        if let Some(message_id) = self.preview_message_id {
-            if let Err(error) = self.bot.delete_message(self.chat_id, message_id).await {
-                self.cleanup_failure = Some(CleanupFailure { message_id, error });
-                self.preview_message_id = None;
-            } else {
-                self.preview_message_id = None;
-            }
-        }
-    }
-}
-
 /// Edit-in-place backend for plain text preview and plain final text.
 pub struct EditInPlaceBackend<R> {
     bot: R,
@@ -1078,6 +1396,7 @@ pub struct EditInPlaceBackend<R> {
     send_options: TelegramSendOptions,
     edit_options: TelegramEditOptions,
     abort_policy: EditAbortPolicy,
+    request_context: Option<DrafterRequestContext>,
 }
 
 /// Policy for the preview message when an edit-in-place drafter is aborted.
@@ -1099,6 +1418,7 @@ impl<R> EditInPlaceBackend<R> {
             send_options: TelegramSendOptions::default(),
             edit_options: TelegramEditOptions::default(),
             abort_policy: EditAbortPolicy::KeepPreview,
+            request_context: None,
         }
     }
 
@@ -1151,7 +1471,7 @@ where
     type Final = String;
     type SegmentOutput = Message;
     type Output = Message;
-    type Error = RequestError;
+    type Error = DrafterRequestError;
 
     fn capabilities(&self) -> DrafterCapabilities {
         DrafterCapabilities {
@@ -1170,19 +1490,27 @@ where
         self.message_id
     }
 
-    async fn update(&mut self, preview: String) -> Result<PreviewAck, RequestError> {
+    async fn update(&mut self, preview: String) -> Result<PreviewAck, DrafterRequestError> {
+        let mut context = self.request_context.take();
         let current_fingerprint = fingerprint(&preview);
         if self.last_fingerprint == Some(current_fingerprint) {
+            cancel_unused_context(context).await;
             return Ok(PreviewAck);
         }
         let result = if let Some(message_id) = self.message_id {
-            apply_edit_options(
-                self.bot.edit_message_text(self.chat_id, message_id, preview),
+            edit_text(
+                &self.bot,
+                self.chat_id,
+                message_id,
+                preview,
                 &self.edit_options,
+                &mut context,
             )
             .await
         } else {
-            let message = send_text(&self.bot, self.chat_id, preview, &self.send_options).await?;
+            let message =
+                send_text(&self.bot, self.chat_id, preview, &self.send_options, &mut context)
+                    .await?;
             self.message_id = Some(message.id);
             self.last_message = Some(message.clone());
             Ok(message)
@@ -1201,15 +1529,30 @@ where
         }
     }
 
-    async fn commit_segment(&mut self, final_payload: &String) -> Result<Message, RequestError> {
+    async fn commit_segment(
+        &mut self,
+        final_payload: &String,
+    ) -> Result<Message, DrafterRequestError> {
+        let mut context = self.request_context.take();
         let result = if let Some(message_id) = self.message_id {
-            apply_edit_options(
-                self.bot.edit_message_text(self.chat_id, message_id, final_payload.clone()),
+            edit_text(
+                &self.bot,
+                self.chat_id,
+                message_id,
+                final_payload.clone(),
                 &self.edit_options,
+                &mut context,
             )
             .await
         } else {
-            send_text(&self.bot, self.chat_id, final_payload.clone(), &self.send_options).await
+            send_text(
+                &self.bot,
+                self.chat_id,
+                final_payload.clone(),
+                &self.send_options,
+                &mut context,
+            )
+            .await
         };
         match result {
             Ok(message) => {
@@ -1230,11 +1573,16 @@ where
         }
     }
 
-    async fn finish(&mut self, final_payload: &String) -> Result<Message, RequestError> {
+    async fn finish(&mut self, final_payload: &String) -> Result<Message, DrafterRequestError> {
+        let mut context = self.request_context.take();
         if let Some(message_id) = self.message_id {
-            match apply_edit_options(
-                self.bot.edit_message_text(self.chat_id, message_id, final_payload.clone()),
+            match edit_text(
+                &self.bot,
+                self.chat_id,
+                message_id,
+                final_payload.clone(),
                 &self.edit_options,
+                &mut context,
             )
             .await
             {
@@ -1245,23 +1593,59 @@ where
                 Err(error) => Err(error),
             }
         } else {
-            send_text(&self.bot, self.chat_id, final_payload.clone(), &self.send_options).await
+            send_text(
+                &self.bot,
+                self.chat_id,
+                final_payload.clone(),
+                &self.send_options,
+                &mut context,
+            )
+            .await
         }
     }
 
-    async fn abort(&mut self) -> Result<(), RequestError> {
-        if self.abort_policy == EditAbortPolicy::DeletePreviewBestEffort {
-            if let Some(message_id) = self.message_id {
-                let _ = self.bot.delete_message(self.chat_id, message_id).await;
-            }
+    async fn abort(&mut self) -> Result<(), DrafterRequestError> {
+        let mut context = self.request_context.take();
+        if self.abort_policy != EditAbortPolicy::DeletePreviewBestEffort {
+            cancel_unused_context(context).await;
+            return Ok(());
         }
+        let Some(message_id) = self.message_id else {
+            cancel_unused_context(context).await;
+            return Ok(());
+        };
+        let _ = delete_message(&self.bot, self.chat_id, message_id, &mut context).await;
         Ok(())
+    }
+
+    fn abort_request_possible(&self) -> bool {
+        self.abort_policy == EditAbortPolicy::DeletePreviewBestEffort && self.message_id.is_some()
+    }
+
+    fn is_request_timeout(&self, error: &Self::Error) -> bool {
+        matches!(error, DrafterRequestError::Timeout)
+    }
+
+    fn may_skip_preview(&self) -> bool {
+        true
+    }
+
+    fn preview_is_noop(&self, preview: &Self::Preview) -> bool {
+        self.last_fingerprint == Some(fingerprint(preview))
+    }
+
+    fn supports_request_scheduler(&self) -> bool {
+        true
+    }
+
+    fn set_request_context(&mut self, context: Option<DrafterRequestContext>) {
+        self.request_context = context;
     }
 
     fn classify_error(
         &self,
         operation: DrafterOperation,
-        error: &RequestError,
+        error: &DrafterRequestError,
     ) -> DrafterErrorDisposition {
         let operation =
             if self.message_id.is_none() && matches!(operation, DrafterOperation::Preview) {
@@ -1285,6 +1669,7 @@ pub struct RichEditInPlaceBackend {
     send_options: TelegramSendOptions,
     edit_options: TelegramEditOptions,
     abort_policy: EditAbortPolicy,
+    request_context: Option<DrafterRequestContext>,
 }
 
 impl RichEditInPlaceBackend {
@@ -1299,6 +1684,7 @@ impl RichEditInPlaceBackend {
             send_options: TelegramSendOptions::default(),
             edit_options: TelegramEditOptions::default(),
             abort_policy: EditAbortPolicy::KeepPreview,
+            request_context: None,
         }
     }
 
@@ -1338,7 +1724,7 @@ impl DrafterBackend for RichEditInPlaceBackend {
     type Final = InputRichMessage;
     type SegmentOutput = Message;
     type Output = Message;
-    type Error = RequestError;
+    type Error = DrafterRequestError;
 
     fn capabilities(&self) -> DrafterCapabilities {
         DrafterCapabilities {
@@ -1357,19 +1743,34 @@ impl DrafterBackend for RichEditInPlaceBackend {
         self.message_id
     }
 
-    async fn update(&mut self, preview: InputRichMessage) -> Result<PreviewAck, RequestError> {
+    async fn update(
+        &mut self,
+        preview: InputRichMessage,
+    ) -> Result<PreviewAck, DrafterRequestError> {
+        let mut context = self.request_context.take();
         if self.last_preview.as_ref() == Some(&preview) {
+            cancel_unused_context(context).await;
             return Ok(PreviewAck);
         }
         let result = if let Some(message_id) = self.message_id {
-            apply_edit_options(
-                self.bot.edit_message_rich_text(self.chat_id, message_id, preview.clone()),
+            edit_rich_text(
+                &self.bot,
+                self.chat_id,
+                message_id,
+                preview.clone(),
                 &self.edit_options,
+                &mut context,
             )
             .await
         } else {
-            let message =
-                send_rich(&self.bot, self.chat_id, preview.clone(), &self.send_options).await?;
+            let message = send_rich(
+                &self.bot,
+                self.chat_id,
+                preview.clone(),
+                &self.send_options,
+                &mut context,
+            )
+            .await?;
             self.message_id = Some(message.id);
             Ok(message)
         };
@@ -1390,11 +1791,16 @@ impl DrafterBackend for RichEditInPlaceBackend {
     async fn commit_segment(
         &mut self,
         final_payload: &InputRichMessage,
-    ) -> Result<Message, RequestError> {
+    ) -> Result<Message, DrafterRequestError> {
+        let mut context = self.request_context.take();
         let result = if let Some(message_id) = self.message_id {
-            match apply_edit_options(
-                self.bot.edit_message_rich_text(self.chat_id, message_id, final_payload.clone()),
+            match edit_rich_text(
+                &self.bot,
+                self.chat_id,
+                message_id,
+                final_payload.clone(),
                 &self.edit_options,
+                &mut context,
             )
             .await
             {
@@ -1405,7 +1811,14 @@ impl DrafterBackend for RichEditInPlaceBackend {
                 Err(error) => Err(error),
             }
         } else {
-            send_rich(&self.bot, self.chat_id, final_payload.clone(), &self.send_options).await
+            send_rich(
+                &self.bot,
+                self.chat_id,
+                final_payload.clone(),
+                &self.send_options,
+                &mut context,
+            )
+            .await
         };
         if result.is_ok() {
             self.message_id = None;
@@ -1415,11 +1828,19 @@ impl DrafterBackend for RichEditInPlaceBackend {
         result
     }
 
-    async fn finish(&mut self, final_payload: &InputRichMessage) -> Result<Message, RequestError> {
+    async fn finish(
+        &mut self,
+        final_payload: &InputRichMessage,
+    ) -> Result<Message, DrafterRequestError> {
+        let mut context = self.request_context.take();
         if let Some(message_id) = self.message_id {
-            match apply_edit_options(
-                self.bot.edit_message_rich_text(self.chat_id, message_id, final_payload.clone()),
+            match edit_rich_text(
+                &self.bot,
+                self.chat_id,
+                message_id,
+                final_payload.clone(),
                 &self.edit_options,
+                &mut context,
             )
             .await
             {
@@ -1430,23 +1851,59 @@ impl DrafterBackend for RichEditInPlaceBackend {
                 Err(error) => Err(error),
             }
         } else {
-            send_rich(&self.bot, self.chat_id, final_payload.clone(), &self.send_options).await
+            send_rich(
+                &self.bot,
+                self.chat_id,
+                final_payload.clone(),
+                &self.send_options,
+                &mut context,
+            )
+            .await
         }
     }
 
-    async fn abort(&mut self) -> Result<(), RequestError> {
-        if self.abort_policy == EditAbortPolicy::DeletePreviewBestEffort {
-            if let Some(message_id) = self.message_id {
-                let _ = self.bot.delete_message(self.chat_id, message_id).await;
-            }
+    async fn abort(&mut self) -> Result<(), DrafterRequestError> {
+        let mut context = self.request_context.take();
+        if self.abort_policy != EditAbortPolicy::DeletePreviewBestEffort {
+            cancel_unused_context(context).await;
+            return Ok(());
         }
+        let Some(message_id) = self.message_id else {
+            cancel_unused_context(context).await;
+            return Ok(());
+        };
+        let _ = delete_message(&self.bot, self.chat_id, message_id, &mut context).await;
         Ok(())
+    }
+
+    fn abort_request_possible(&self) -> bool {
+        self.abort_policy == EditAbortPolicy::DeletePreviewBestEffort && self.message_id.is_some()
+    }
+
+    fn is_request_timeout(&self, error: &Self::Error) -> bool {
+        matches!(error, DrafterRequestError::Timeout)
+    }
+
+    fn may_skip_preview(&self) -> bool {
+        true
+    }
+
+    fn preview_is_noop(&self, preview: &Self::Preview) -> bool {
+        self.last_preview.as_ref() == Some(preview)
+    }
+
+    fn supports_request_scheduler(&self) -> bool {
+        true
+    }
+
+    fn set_request_context(&mut self, context: Option<DrafterRequestContext>) {
+        self.request_context = context;
     }
 
     fn classify_error(
         &self,
         operation: DrafterOperation,
-        error: &RequestError,
+        error: &DrafterRequestError,
     ) -> DrafterErrorDisposition {
         let operation =
             if self.message_id.is_none() && matches!(operation, DrafterOperation::Preview) {
@@ -1629,6 +2086,17 @@ mod tests {
     }
 
     #[test]
+    fn status_cleanup_detaches_preview_before_admission() {
+        let mut backend = StatusThenTextBackend::new(Bot::new("token"), ChatId(1));
+        backend.preview_message_id = Some(MessageId(7));
+
+        assert!(backend.cleanup_after_delivery_possible());
+        assert!(backend.prepare_cleanup_after_delivery());
+        assert_eq!(backend.preview_message_id, None);
+        assert_eq!(backend.pending_cleanup_message_ids.front(), Some(&MessageId(7)));
+    }
+
+    #[test]
     fn status_preview_options_drop_final_only_fields() {
         let options = TelegramSendOptions::default()
             .allow_paid_broadcast(true)
@@ -1699,7 +2167,10 @@ mod tests {
     #[test]
     fn segment_commit_network_failure_is_not_retry_safe() {
         let error = RequestError::Io(std::io::Error::other("connection lost").into());
-        let disposition = classify_request_error(DrafterOperation::SegmentCommit, &error);
+        let disposition = classify_request_error(
+            DrafterOperation::SegmentCommit,
+            &DrafterRequestError::Inner(error),
+        );
 
         assert_eq!(disposition.delivery, DeliveryCertainty::Unknown);
         assert_eq!(disposition.class, DrafterErrorClass::Transient { retry_safe: false });

@@ -27,3 +27,14 @@ impl_payload! {
         }
     }
 }
+
+impl crate::outbound::OutboundPayload for UploadStickerFile {
+    fn outbound_hint(&self) -> crate::outbound::OutboundHint {
+        crate::outbound::OutboundHint {
+            scope: crate::outbound::classify::user_id_scope(self.user_id),
+            class: crate::outbound::OutboundClass::new(crate::outbound::class::OTHER),
+            priority: crate::outbound::OutboundPriority::NORMAL,
+            weight: std::num::NonZeroU32::new(1).unwrap(),
+        }
+    }
+}

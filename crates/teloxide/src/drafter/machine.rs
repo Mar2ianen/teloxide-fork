@@ -20,10 +20,11 @@ use tracing::Instrument;
 use super::{
     observer::next_instance_id, AccumulatorSource, CleanupFailure, DeliveryCertainty,
     DraftAbortError, DraftCommitError, DraftConfig, DraftFinishError, DraftFlushError,
-    DraftPushError, DraftRevision, DraftStartError, DrafterBackend, DrafterCapabilities,
-    DrafterErrorClass, DrafterErrorDisposition, DrafterEvent, DrafterEventKind, DrafterObserver,
-    DrafterOperation, DrafterPermit, DrafterPriority, DrafterRateLimiter, PreviewAck,
-    PreviewSource, ReplacePreview,
+    DraftPushError, DraftRevision, DraftStartError, DrafterAcquireError, DrafterBackend,
+    DrafterCapabilities, DrafterErrorClass, DrafterErrorDisposition, DrafterEvent,
+    DrafterEventKind, DrafterObserver, DrafterOperation, DrafterPermit, DrafterPermitCompletion,
+    DrafterPriority, DrafterRateLimitKey, DrafterRateLimiter, DrafterRequestClass,
+    DrafterRequestContext, PreviewAck, PreviewSource, ReplacePreview,
 };
 
 /// A cloneable synchronous producer handle.
@@ -86,6 +87,7 @@ enum PreviewRunResult<B: DrafterBackend> {
 
 enum TerminalWait {
     Permit(DrafterPermit),
+    AcquireError(DrafterAcquireError),
     Deadline,
     Cancelled,
 }
@@ -105,6 +107,7 @@ enum TerminalFailure {
 enum TerminalOutcome<T, E> {
     Success(T),
     Backend(E),
+    RateLimiter(DrafterAcquireError),
     Synthetic(TerminalFailure),
 }
 
@@ -115,6 +118,7 @@ fn terminal_delivery_certainty<T, E>(
     match outcome {
         TerminalOutcome::Success(_) => None,
         TerminalOutcome::Backend(_) => disposition.map(|value| value.delivery),
+        TerminalOutcome::RateLimiter(_) => Some(DeliveryCertainty::NotAttempted),
         TerminalOutcome::Synthetic(TerminalFailure::RequestTimeout) => {
             Some(DeliveryCertainty::Unknown)
         }
@@ -122,10 +126,81 @@ fn terminal_delivery_certainty<T, E>(
     }
 }
 
+async fn complete_permit<L>(limiter: &L, permit: DrafterPermit, completion: DrafterPermitCompletion)
+where
+    L: DrafterRateLimiter,
+{
+    let retry_after = match completion {
+        DrafterPermitCompletion::RetryAfter { scope, duration } => Some((scope, duration)),
+        _ => None,
+    };
+    permit.complete(completion).await;
+    if let Some((scope, duration)) = retry_after {
+        if !limiter.completion_handles_retry_after() {
+            limiter.penalize(scope, duration);
+        }
+    }
+}
+
+fn split_request_context<L>(
+    limiter: &L,
+    permit: DrafterPermit,
+    key: super::DrafterRateLimitKey,
+    priority: DrafterPriority,
+    request_timeout: Duration,
+) -> (Option<DrafterPermit>, Option<DrafterRequestContext>)
+where
+    L: DrafterRateLimiter,
+{
+    match limiter.request_context(permit, key, priority) {
+        Ok(context) => (None, Some(context.with_request_timeout(request_timeout))),
+        Err(permit) => (Some(permit), None),
+    }
+}
+
+fn request_scheduler_enabled<L, B>(limiter: &L, backend: Option<&B>) -> bool
+where
+    L: DrafterRateLimiter,
+    B: DrafterBackend,
+{
+    limiter.uses_request_scheduler()
+        && backend.is_some_and(DrafterBackend::supports_request_scheduler)
+}
+
+async fn complete_optional_permit<L>(
+    limiter: &L,
+    permit: &mut Option<DrafterPermit>,
+    completion: DrafterPermitCompletion,
+) where
+    L: DrafterRateLimiter,
+{
+    if let Some(permit) = permit.take() {
+        complete_permit(limiter, permit, completion).await;
+    }
+}
+
+async fn acquire_request_context<L>(
+    limiter: &L,
+    key: super::DrafterRateLimitKey,
+    priority: DrafterPriority,
+    request_class: DrafterRequestClass,
+    request_timeout: Duration,
+) -> Result<DrafterRequestContext, DrafterAcquireError>
+where
+    L: DrafterRateLimiter,
+{
+    let permit = limiter.acquire(key, priority, request_class).await?;
+    limiter
+        .request_context(permit, key, priority)
+        .map(|context| context.with_request_timeout(request_timeout))
+        .map_err(|_| DrafterAcquireError::InvalidConfiguration)
+}
+
 async fn wait_for_terminal_permit<L, R>(
     limiter: &L,
     key: super::DrafterRateLimitKey,
     priority: DrafterPriority,
+    request_class: DrafterRequestClass,
     reply: &mut oneshot::Sender<R>,
     deadline: Instant,
     retry_not_before: Option<Instant>,
@@ -146,24 +221,34 @@ where
         biased;
         _ = reply.closed() => TerminalWait::Cancelled,
         _ = tokio::time::sleep_until(deadline) => TerminalWait::Deadline,
-        permit = limiter.acquire(key, priority) => TerminalWait::Permit(permit),
+        permit = limiter.acquire(key, priority, request_class) => match permit {
+            Ok(permit) => TerminalWait::Permit(permit),
+            Err(error) => TerminalWait::AcquireError(error),
+        },
     }
 }
 
 async fn await_terminal_call<F, T, E, R>(
     future: F,
-    request_timeout: Duration,
+    request_timeout: Option<Duration>,
     deadline: Instant,
     reply: &mut oneshot::Sender<R>,
 ) -> TerminalCall<T, E>
 where
     F: Future<Output = Result<T, E>>,
 {
-    let request = tokio::time::timeout(request_timeout, future);
+    let call = async move {
+        match request_timeout {
+            Some(request_timeout) => {
+                tokio::time::timeout(request_timeout, future).await.map_err(|_| ())
+            }
+            None => Ok(future.await),
+        }
+    };
     tokio::select! {
         biased;
         _ = reply.closed() => TerminalCall::Cancelled,
-        result = tokio::time::timeout_at(deadline, request) => match result {
+        result = tokio::time::timeout_at(deadline, call) => match result {
             Ok(Ok(result)) => TerminalCall::Completed(result),
             Ok(Err(_)) => TerminalCall::RequestTimeout,
             Err(_) => TerminalCall::Deadline,
@@ -413,38 +498,95 @@ where
             return PreviewRunResult::Idle;
         };
         let key = backend.rate_limit_key();
-        let _permit: DrafterPermit = tokio::select! {
-            permit = self.limiter.acquire(key, priority) => permit,
+        let request_class = backend.first_request_class(reason);
+        let request_scheduling = request_scheduler_enabled(&self.limiter, self.backend.as_ref());
+        let no_op_revision = if request_scheduling && backend.may_skip_preview() {
+            self.source.snapshot().and_then(|snapshot| {
+                backend.preview_is_noop(&snapshot.preview).then_some(snapshot.revision)
+            })
+        } else {
+            None
+        };
+        if let Some(revision) = no_op_revision {
+            self.last_delivered = self.last_delivered.max(revision);
+            self.source.mark_delivered(revision);
+            self.complete_flushes();
+            return PreviewRunResult::Continue;
+        }
+        let permit = tokio::select! {
+            permit = self.limiter.acquire(key, priority, request_class) => match permit {
+                Ok(permit) => permit,
+                Err(error) => {
+                    self.retry_not_before = Some(Instant::now() + self.retry_delay);
+                    self.fail_flushes(error);
+                    return PreviewRunResult::Continue;
+                }
+            },
             command = self.command_rx.recv() => {
                 return PreviewRunResult::Command(command);
             }
         };
 
         if !self.source.is_running() {
+            complete_permit(&self.limiter, permit, DrafterPermitCompletion::NoRequest).await;
             return PreviewRunResult::Continue;
         }
 
         // The state is intentionally read only now. Updates that arrived while
         // waiting for the shared limiter therefore replace the stale payload.
         let Some(snapshot) = self.source.snapshot() else {
+            complete_permit(&self.limiter, permit, DrafterPermitCompletion::NoRequest).await;
             self.last_delivered = current_revision;
             self.source.mark_delivered(current_revision);
             self.next_watchdog = None;
             self.complete_flushes();
             return PreviewRunResult::Continue;
         };
+        if request_scheduling
+            && self.backend.as_ref().is_some_and(|backend| {
+                backend.may_skip_preview() && backend.preview_is_noop(&snapshot.preview)
+            })
+        {
+            complete_permit(&self.limiter, permit, DrafterPermitCompletion::NoRequest).await;
+            self.last_delivered = self.last_delivered.max(snapshot.revision);
+            self.source.mark_delivered(snapshot.revision);
+            self.complete_flushes();
+            return PreviewRunResult::Continue;
+        }
+        let (mut permit, request_context) = if request_scheduling {
+            split_request_context(&self.limiter, permit, key, priority, self.config.request_timeout)
+        } else {
+            (Some(permit), None)
+        };
+        if request_scheduling {
+            self.backend
+                .as_mut()
+                .expect("backend exists after preview snapshot")
+                .set_request_context(request_context);
+        }
+
         self.last_attempt = Some(Instant::now());
         self.retry_not_before = None;
         let operation = if refresh_due { DrafterOperation::Refresh } else { reason };
         self.record(DrafterEventKind::PreviewStart, Some(snapshot.revision), Some(operation));
         let result = {
             let backend = self.backend.as_mut().expect("backend exists before preview");
-            tokio::time::timeout(self.config.request_timeout, backend.update(snapshot.preview))
-                .await
+            if request_scheduling {
+                Ok(backend.update(snapshot.preview).await)
+            } else {
+                tokio::time::timeout(self.config.request_timeout, backend.update(snapshot.preview))
+                    .await
+            }
         };
 
         match result {
             Ok(Ok(PreviewAck)) => {
+                complete_optional_permit(
+                    &self.limiter,
+                    &mut permit,
+                    DrafterPermitCompletion::Success,
+                )
+                .await;
                 let skipped_from = DraftRevision(self.last_delivered.get().saturating_add(1));
                 let skipped_to = DraftRevision(snapshot.revision.get().saturating_sub(1));
                 self.last_delivered = self.last_delivered.max(snapshot.revision);
@@ -473,19 +615,60 @@ where
                 self.complete_flushes();
             }
             Ok(Err(error)) => {
-                let disposition = self
+                let is_request_timeout = self
                     .backend
                     .as_ref()
                     .expect("backend exists after preview")
-                    .classify_error(operation, &error);
-                self.record(
-                    DrafterEventKind::PreviewError,
-                    Some(snapshot.revision),
-                    Some(operation),
-                );
-                self.handle_preview_error(disposition.class, operation);
+                    .is_request_timeout(&error);
+                if is_request_timeout {
+                    complete_optional_permit(
+                        &self.limiter,
+                        &mut permit,
+                        DrafterPermitCompletion::Failed,
+                    )
+                    .await;
+                    let retry_safe = !matches!(
+                        self.capabilities.mode,
+                        super::DrafterMode::EditInPlace
+                            | super::DrafterMode::StatusEditThenSendFinal
+                    ) || self.last_delivered > DraftRevision::default();
+                    self.record(
+                        DrafterEventKind::PreviewTimeout,
+                        Some(snapshot.revision),
+                        Some(operation),
+                    );
+                    self.handle_preview_error(
+                        DrafterErrorClass::Transient { retry_safe },
+                        operation,
+                    );
+                } else {
+                    let disposition = self
+                        .backend
+                        .as_ref()
+                        .expect("backend exists after preview")
+                        .classify_error(operation, &error);
+                    let completion = match disposition.class {
+                        DrafterErrorClass::RetryAfter { delay, scope } => {
+                            DrafterPermitCompletion::RetryAfter { scope, duration: delay }
+                        }
+                        _ => DrafterPermitCompletion::Failed,
+                    };
+                    complete_optional_permit(&self.limiter, &mut permit, completion).await;
+                    self.record(
+                        DrafterEventKind::PreviewError,
+                        Some(snapshot.revision),
+                        Some(operation),
+                    );
+                    self.handle_preview_error(disposition.class, operation);
+                }
             }
             Err(_) => {
+                complete_optional_permit(
+                    &self.limiter,
+                    &mut permit,
+                    DrafterPermitCompletion::Failed,
+                )
+                .await;
                 let retry_safe = !matches!(
                     self.capabilities.mode,
                     super::DrafterMode::EditInPlace | super::DrafterMode::StatusEditThenSendFinal
@@ -504,9 +687,8 @@ where
     fn handle_preview_error(&mut self, class: DrafterErrorClass, operation: DrafterOperation) {
         self.consecutive_preview_failures = self.consecutive_preview_failures.saturating_add(1);
         match class {
-            DrafterErrorClass::RetryAfter { delay, scope } => {
+            DrafterErrorClass::RetryAfter { delay, scope: _scope } => {
                 self.record(DrafterEventKind::RetryAfter, None, Some(operation));
-                self.limiter.penalize(scope, delay);
                 self.retry_not_before = Some(Instant::now() + delay);
             }
             DrafterErrorClass::Transient { retry_safe: true }
@@ -528,6 +710,12 @@ where
                 self.next_watchdog = None;
                 self.complete_flushes();
             }
+        }
+    }
+
+    fn fail_flushes(&mut self, error: DrafterAcquireError) {
+        for waiter in self.flush_waiters.drain(..) {
+            let _ = waiter.reply.send(Err(DraftFlushError::RateLimiter(error)));
         }
     }
 
@@ -603,18 +791,27 @@ where
                 let operation_deadline = Instant::now() + self.config.terminal_timeout;
                 let mut retry_not_before = None;
                 let mut retry_count = 0;
+                let request_class = self
+                    .backend
+                    .as_ref()
+                    .expect("backend exists for commit")
+                    .first_request_class(DrafterOperation::SegmentCommit);
                 let result = loop {
-                    match wait_for_terminal_permit(
+                    let permit = match wait_for_terminal_permit(
                         &self.limiter,
                         key,
                         DrafterPriority::SegmentCommit,
+                        request_class,
                         &mut reply,
                         operation_deadline,
                         retry_not_before,
                     )
                     .await
                     {
-                        TerminalWait::Permit(_permit) => {}
+                        TerminalWait::Permit(permit) => permit,
+                        TerminalWait::AcquireError(error) => {
+                            break TerminalOutcome::RateLimiter(error);
+                        }
                         TerminalWait::Deadline => {
                             self.record(
                                 DrafterEventKind::OperationDeadlineExceeded,
@@ -633,13 +830,32 @@ where
                             );
                             return false;
                         }
+                    };
+                    let request_scheduling =
+                        request_scheduler_enabled(&self.limiter, self.backend.as_ref());
+                    let (mut permit, request_context) = if request_scheduling {
+                        split_request_context(
+                            &self.limiter,
+                            permit,
+                            key,
+                            DrafterPriority::SegmentCommit,
+                            self.config.request_timeout,
+                        )
+                    } else {
+                        (Some(permit), None)
+                    };
+                    if request_scheduling {
+                        self.backend
+                            .as_mut()
+                            .expect("backend exists for commit permit")
+                            .set_request_context(request_context);
                     }
 
                     let attempt = {
                         let backend = self.backend.as_mut().expect("backend exists for commit");
                         await_terminal_call(
                             backend.commit_segment(&final_payload),
-                            self.config.request_timeout,
+                            (!request_scheduling).then_some(self.config.request_timeout),
                             operation_deadline,
                             &mut reply,
                         )
@@ -647,16 +863,53 @@ where
                     };
                     match attempt {
                         TerminalCall::Completed(Ok(output)) => {
-                            break TerminalOutcome::Success(output)
+                            complete_optional_permit(
+                                &self.limiter,
+                                &mut permit,
+                                DrafterPermitCompletion::Success,
+                            )
+                            .await;
+                            self.run_success_cleanup(key).await;
+                            break TerminalOutcome::Success(output);
                         }
                         TerminalCall::Completed(Err(error)) => {
+                            if self
+                                .backend
+                                .as_ref()
+                                .expect("backend exists after commit")
+                                .is_request_timeout(&error)
+                            {
+                                complete_optional_permit(
+                                    &self.limiter,
+                                    &mut permit,
+                                    DrafterPermitCompletion::Failed,
+                                )
+                                .await;
+                                failure_disposition = Some(DrafterErrorDisposition {
+                                    class: DrafterErrorClass::Ambiguous,
+                                    delivery: DeliveryCertainty::Unknown,
+                                });
+                                self.record(
+                                    DrafterEventKind::BackendTimeout,
+                                    None,
+                                    Some(DrafterOperation::SegmentCommit),
+                                );
+                                break TerminalOutcome::Synthetic(TerminalFailure::RequestTimeout);
+                            }
                             let disposition = self
                                 .backend
                                 .as_ref()
                                 .expect("backend exists after commit")
                                 .classify_error(DrafterOperation::SegmentCommit, &error);
+                            let completion = match disposition.class {
+                                DrafterErrorClass::RetryAfter { delay, scope } => {
+                                    DrafterPermitCompletion::RetryAfter { scope, duration: delay }
+                                }
+                                _ => DrafterPermitCompletion::Failed,
+                            };
+                            complete_optional_permit(&self.limiter, &mut permit, completion).await;
                             failure_disposition = Some(disposition);
-                            if let DrafterErrorClass::RetryAfter { delay, scope } =
+                            if let DrafterErrorClass::RetryAfter { delay, scope: _scope } =
                                 disposition.class
                             {
                                 self.record(
@@ -664,7 +917,6 @@ where
                                     None,
                                     Some(DrafterOperation::SegmentCommit),
                                 );
-                                self.limiter.penalize(scope, delay);
                                 if retry_count >= self.config.terminal_retry_budget {
                                     self.record(
                                         DrafterEventKind::RetryExhausted,
@@ -682,6 +934,12 @@ where
                             break TerminalOutcome::Backend(error);
                         }
                         TerminalCall::RequestTimeout => {
+                            complete_optional_permit(
+                                &self.limiter,
+                                &mut permit,
+                                DrafterPermitCompletion::Failed,
+                            )
+                            .await;
                             let disposition = DrafterErrorDisposition {
                                 class: DrafterErrorClass::Ambiguous,
                                 delivery: DeliveryCertainty::Unknown,
@@ -695,6 +953,12 @@ where
                             break TerminalOutcome::Synthetic(TerminalFailure::RequestTimeout);
                         }
                         TerminalCall::Deadline => {
+                            complete_optional_permit(
+                                &self.limiter,
+                                &mut permit,
+                                DrafterPermitCompletion::Failed,
+                            )
+                            .await;
                             failure_disposition = Some(DrafterErrorDisposition {
                                 class: DrafterErrorClass::Ambiguous,
                                 delivery: DeliveryCertainty::Unknown,
@@ -725,23 +989,67 @@ where
                     Some(DeliveryCertainty::NotAttempted | DeliveryCertainty::Rejected)
                 ) && !payload_invalid;
                 let (failed_delivery_cleanup, cleanup_timed_out) = if should_cleanup {
-                    let backend = self.backend.as_mut().expect("backend exists for cleanup");
-                    let cleanup_deadline = Instant::now() + self.config.request_timeout;
-                    match tokio::time::timeout_at(
-                        cleanup_deadline,
-                        tokio::time::timeout(self.config.request_timeout, backend.abort()),
-                    )
-                    .await
-                    {
-                        Ok(Ok(Ok(()))) => (None, false),
-                        Ok(Ok(Err(error))) => (
-                            Some((
-                                backend.classify_error(DrafterOperation::Cleanup, &error),
-                                backend.preview_message_id(),
-                            )),
-                            false,
-                        ),
-                        Ok(Err(_)) | Err(_) => (None, true),
+                    let request_scheduling =
+                        request_scheduler_enabled(&self.limiter, self.backend.as_ref())
+                            && self
+                                .backend
+                                .as_ref()
+                                .is_some_and(DrafterBackend::abort_request_possible);
+                    if request_scheduling {
+                        let cleanup_deadline = Instant::now() + self.config.request_timeout;
+                        match tokio::time::timeout_at(
+                            cleanup_deadline,
+                            acquire_request_context(
+                                &self.limiter,
+                                key,
+                                DrafterPriority::ChangedPreview,
+                                self.cleanup_request_class(),
+                                self.config.request_timeout,
+                            ),
+                        )
+                        .await
+                        {
+                            Ok(Ok(context)) => {
+                                let backend =
+                                    self.backend.as_mut().expect("backend exists for cleanup");
+                                backend.set_request_context(Some(context));
+                                match tokio::time::timeout_at(cleanup_deadline, backend.abort())
+                                    .await
+                                {
+                                    Ok(Ok(())) => (None, false),
+                                    Ok(Err(error)) => (
+                                        Some((
+                                            backend
+                                                .classify_error(DrafterOperation::Cleanup, &error),
+                                            backend.preview_message_id(),
+                                        )),
+                                        false,
+                                    ),
+                                    Err(_) => (None, true),
+                                }
+                            }
+                            Ok(Err(_)) | Err(_) => (None, true),
+                        }
+                    } else {
+                        let backend = self.backend.as_mut().expect("backend exists for cleanup");
+                        backend.set_request_context(None);
+                        let cleanup_deadline = Instant::now() + self.config.request_timeout;
+                        match tokio::time::timeout_at(
+                            cleanup_deadline,
+                            tokio::time::timeout(self.config.request_timeout, backend.abort()),
+                        )
+                        .await
+                        {
+                            Ok(Ok(Ok(()))) => (None, false),
+                            Ok(Ok(Err(error))) => (
+                                Some((
+                                    backend.classify_error(DrafterOperation::Cleanup, &error),
+                                    backend.preview_message_id(),
+                                )),
+                                false,
+                            ),
+                            Ok(Err(_)) | Err(_) => (None, true),
+                        }
                     }
                 } else {
                     (None, false)
@@ -778,6 +1086,16 @@ where
                         self.source.reopen_segment();
                         let _ = reply.send(Ok(output));
                         true
+                    }
+                    TerminalOutcome::RateLimiter(error) => {
+                        self.record(
+                            DrafterEventKind::SegmentCommitError,
+                            None,
+                            Some(DrafterOperation::SegmentCommit),
+                        );
+                        self.source.close();
+                        let _ = reply.send(Err(DraftCommitError::RateLimiter(error)));
+                        false
                     }
                     TerminalOutcome::Backend(error) => {
                         self.record(
@@ -836,18 +1154,27 @@ where
                 let operation_deadline = Instant::now() + self.config.terminal_timeout;
                 let mut retry_not_before = None;
                 let mut retry_count = 0;
+                let request_class = self
+                    .backend
+                    .as_ref()
+                    .expect("backend exists for finish")
+                    .first_request_class(DrafterOperation::Final);
                 let result = loop {
-                    match wait_for_terminal_permit(
+                    let permit = match wait_for_terminal_permit(
                         &self.limiter,
                         key,
                         DrafterPriority::Final,
+                        request_class,
                         &mut reply,
                         operation_deadline,
                         retry_not_before,
                     )
                     .await
                     {
-                        TerminalWait::Permit(_permit) => {}
+                        TerminalWait::Permit(permit) => permit,
+                        TerminalWait::AcquireError(error) => {
+                            break TerminalOutcome::RateLimiter(error);
+                        }
                         TerminalWait::Deadline => {
                             self.record(
                                 DrafterEventKind::OperationDeadlineExceeded,
@@ -866,13 +1193,32 @@ where
                             );
                             return false;
                         }
+                    };
+                    let request_scheduling =
+                        request_scheduler_enabled(&self.limiter, self.backend.as_ref());
+                    let (mut permit, request_context) = if request_scheduling {
+                        split_request_context(
+                            &self.limiter,
+                            permit,
+                            key,
+                            DrafterPriority::Final,
+                            self.config.request_timeout,
+                        )
+                    } else {
+                        (Some(permit), None)
+                    };
+                    if request_scheduling {
+                        self.backend
+                            .as_mut()
+                            .expect("backend exists for finish permit")
+                            .set_request_context(request_context);
                     }
 
                     let attempt = {
                         let backend = self.backend.as_mut().expect("backend exists for finish");
                         await_terminal_call(
                             backend.finish(&final_payload),
-                            self.config.request_timeout,
+                            (!request_scheduling).then_some(self.config.request_timeout),
                             operation_deadline,
                             &mut reply,
                         )
@@ -880,16 +1226,53 @@ where
                     };
                     match attempt {
                         TerminalCall::Completed(Ok(output)) => {
-                            break TerminalOutcome::Success(output)
+                            complete_optional_permit(
+                                &self.limiter,
+                                &mut permit,
+                                DrafterPermitCompletion::Success,
+                            )
+                            .await;
+                            self.run_success_cleanup(key).await;
+                            break TerminalOutcome::Success(output);
                         }
                         TerminalCall::Completed(Err(error)) => {
+                            if self
+                                .backend
+                                .as_ref()
+                                .expect("backend exists after finish")
+                                .is_request_timeout(&error)
+                            {
+                                complete_optional_permit(
+                                    &self.limiter,
+                                    &mut permit,
+                                    DrafterPermitCompletion::Failed,
+                                )
+                                .await;
+                                failure_disposition = Some(DrafterErrorDisposition {
+                                    class: DrafterErrorClass::Ambiguous,
+                                    delivery: DeliveryCertainty::Unknown,
+                                });
+                                self.record(
+                                    DrafterEventKind::BackendTimeout,
+                                    None,
+                                    Some(DrafterOperation::Final),
+                                );
+                                break TerminalOutcome::Synthetic(TerminalFailure::RequestTimeout);
+                            }
                             let disposition = self
                                 .backend
                                 .as_ref()
                                 .expect("backend exists after finish")
                                 .classify_error(DrafterOperation::Final, &error);
+                            let completion = match disposition.class {
+                                DrafterErrorClass::RetryAfter { delay, scope } => {
+                                    DrafterPermitCompletion::RetryAfter { scope, duration: delay }
+                                }
+                                _ => DrafterPermitCompletion::Failed,
+                            };
+                            complete_optional_permit(&self.limiter, &mut permit, completion).await;
                             failure_disposition = Some(disposition);
-                            if let DrafterErrorClass::RetryAfter { delay, scope } =
+                            if let DrafterErrorClass::RetryAfter { delay, scope: _scope } =
                                 disposition.class
                             {
                                 self.record(
@@ -897,7 +1280,6 @@ where
                                     None,
                                     Some(DrafterOperation::Final),
                                 );
-                                self.limiter.penalize(scope, delay);
                                 if retry_count >= self.config.terminal_retry_budget {
                                     self.record(
                                         DrafterEventKind::RetryExhausted,
@@ -913,6 +1295,12 @@ where
                             break TerminalOutcome::Backend(error);
                         }
                         TerminalCall::RequestTimeout => {
+                            complete_optional_permit(
+                                &self.limiter,
+                                &mut permit,
+                                DrafterPermitCompletion::Failed,
+                            )
+                            .await;
                             failure_disposition = Some(DrafterErrorDisposition {
                                 class: DrafterErrorClass::Ambiguous,
                                 delivery: DeliveryCertainty::Unknown,
@@ -925,6 +1313,12 @@ where
                             break TerminalOutcome::Synthetic(TerminalFailure::RequestTimeout);
                         }
                         TerminalCall::Deadline => {
+                            complete_optional_permit(
+                                &self.limiter,
+                                &mut permit,
+                                DrafterPermitCompletion::Failed,
+                            )
+                            .await;
                             failure_disposition = Some(DrafterErrorDisposition {
                                 class: DrafterErrorClass::Ambiguous,
                                 delivery: DeliveryCertainty::Unknown,
@@ -954,23 +1348,67 @@ where
                     cleanup_delivery,
                     Some(DeliveryCertainty::NotAttempted | DeliveryCertainty::Rejected)
                 ) {
-                    let backend = self.backend.as_mut().expect("backend exists for cleanup");
-                    let cleanup_deadline = Instant::now() + self.config.request_timeout;
-                    match tokio::time::timeout_at(
-                        cleanup_deadline,
-                        tokio::time::timeout(self.config.request_timeout, backend.abort()),
-                    )
-                    .await
-                    {
-                        Ok(Ok(Ok(()))) => (None, false),
-                        Ok(Ok(Err(error))) => (
-                            Some((
-                                backend.classify_error(DrafterOperation::Cleanup, &error),
-                                backend.preview_message_id(),
-                            )),
-                            false,
-                        ),
-                        Ok(Err(_)) | Err(_) => (None, true),
+                    let request_scheduling =
+                        request_scheduler_enabled(&self.limiter, self.backend.as_ref())
+                            && self
+                                .backend
+                                .as_ref()
+                                .is_some_and(DrafterBackend::abort_request_possible);
+                    if request_scheduling {
+                        let cleanup_deadline = Instant::now() + self.config.request_timeout;
+                        match tokio::time::timeout_at(
+                            cleanup_deadline,
+                            acquire_request_context(
+                                &self.limiter,
+                                key,
+                                DrafterPriority::ChangedPreview,
+                                self.cleanup_request_class(),
+                                self.config.request_timeout,
+                            ),
+                        )
+                        .await
+                        {
+                            Ok(Ok(context)) => {
+                                let backend =
+                                    self.backend.as_mut().expect("backend exists for cleanup");
+                                backend.set_request_context(Some(context));
+                                match tokio::time::timeout_at(cleanup_deadline, backend.abort())
+                                    .await
+                                {
+                                    Ok(Ok(())) => (None, false),
+                                    Ok(Err(error)) => (
+                                        Some((
+                                            backend
+                                                .classify_error(DrafterOperation::Cleanup, &error),
+                                            backend.preview_message_id(),
+                                        )),
+                                        false,
+                                    ),
+                                    Err(_) => (None, true),
+                                }
+                            }
+                            Ok(Err(_)) | Err(_) => (None, true),
+                        }
+                    } else {
+                        let backend = self.backend.as_mut().expect("backend exists for cleanup");
+                        backend.set_request_context(None);
+                        let cleanup_deadline = Instant::now() + self.config.request_timeout;
+                        match tokio::time::timeout_at(
+                            cleanup_deadline,
+                            tokio::time::timeout(self.config.request_timeout, backend.abort()),
+                        )
+                        .await
+                        {
+                            Ok(Ok(Ok(()))) => (None, false),
+                            Ok(Ok(Err(error))) => (
+                                Some((
+                                    backend.classify_error(DrafterOperation::Cleanup, &error),
+                                    backend.preview_message_id(),
+                                )),
+                                false,
+                            ),
+                            Ok(Err(_)) | Err(_) => (None, true),
+                        }
                     }
                 } else {
                     (None, false)
@@ -1005,6 +1443,9 @@ where
                 self.backend.take();
                 let result = match result {
                     TerminalOutcome::Success(output) => Ok(output),
+                    TerminalOutcome::RateLimiter(error) => {
+                        Err(DraftFinishError::RateLimiter(error))
+                    }
                     TerminalOutcome::Backend(source) => {
                         let disposition =
                             failure_disposition.expect("backend final errors have a disposition");
@@ -1036,13 +1477,57 @@ where
                     let _ = reply.send(Err(DraftAbortError::WorkerStopped));
                     return false;
                 }
-                let timed_result = {
+                let request_scheduling =
+                    request_scheduler_enabled(&self.limiter, self.backend.as_ref())
+                        && self
+                            .backend
+                            .as_ref()
+                            .is_some_and(DrafterBackend::abort_request_possible);
+                let timed_result = if request_scheduling {
+                    let key =
+                        self.backend.as_ref().expect("backend exists for abort").rate_limit_key();
+                    let cleanup_deadline = Instant::now() + self.config.request_timeout;
+                    match tokio::time::timeout_at(
+                        cleanup_deadline,
+                        acquire_request_context(
+                            &self.limiter,
+                            key,
+                            DrafterPriority::ChangedPreview,
+                            self.cleanup_request_class(),
+                            self.config.request_timeout,
+                        ),
+                    )
+                    .await
+                    {
+                        Ok(Ok(context)) => {
+                            let backend = self.backend.as_mut().expect("backend exists for abort");
+                            backend.set_request_context(Some(context));
+                            Some(tokio::time::timeout_at(cleanup_deadline, backend.abort()).await)
+                        }
+                        Ok(Err(error)) => {
+                            let _ = reply.send(Err(DraftAbortError::RateLimiter(error)));
+                            self.backend.take();
+                            return false;
+                        }
+                        Err(_) => {
+                            self.record(
+                                DrafterEventKind::BackendTimeout,
+                                None,
+                                Some(DrafterOperation::Cleanup),
+                            );
+                            let _ = reply.send(Err(DraftAbortError::RequestTimeout));
+                            self.backend.take();
+                            return false;
+                        }
+                    }
+                } else {
                     let backend = self.backend.as_mut().expect("backend exists for abort");
-                    tokio::time::timeout(self.config.request_timeout, backend.abort()).await
+                    backend.set_request_context(None);
+                    Some(tokio::time::timeout(self.config.request_timeout, backend.abort()).await)
                 };
                 let result = match timed_result {
-                    Ok(result) => result,
-                    Err(_) => {
+                    Some(Ok(result)) => result,
+                    Some(Err(_)) | None => {
                         self.record(
                             DrafterEventKind::BackendTimeout,
                             None,
@@ -1069,7 +1554,9 @@ where
                         None,
                         Some(DrafterOperation::Cleanup),
                     );
-                    self.limiter.penalize(scope, delay);
+                    if !self.limiter.completion_handles_retry_after() {
+                        self.limiter.penalize(scope, delay);
+                    }
                 }
                 if result.is_err() {
                     self.record(
@@ -1088,6 +1575,103 @@ where
                 false
             }
         }
+    }
+
+    fn cleanup_request_class(&self) -> DrafterRequestClass {
+        self.backend
+            .as_ref()
+            .expect("backend exists while acquiring cleanup")
+            .first_request_class(DrafterOperation::Cleanup)
+    }
+
+    async fn run_success_cleanup(&mut self, key: DrafterRateLimitKey) {
+        let request_scheduling = request_scheduler_enabled(&self.limiter, self.backend.as_ref());
+        let cleanup_possible =
+            self.backend.as_mut().is_some_and(DrafterBackend::prepare_cleanup_after_delivery);
+        if !cleanup_possible {
+            return;
+        }
+        let cleanup_request_class = self.cleanup_request_class();
+
+        let cleanup_deadline = Instant::now() + self.config.request_timeout;
+        if request_scheduling {
+            match tokio::time::timeout_at(
+                cleanup_deadline,
+                acquire_request_context(
+                    &self.limiter,
+                    key,
+                    DrafterPriority::ChangedPreview,
+                    cleanup_request_class,
+                    self.config.request_timeout,
+                ),
+            )
+            .await
+            {
+                Ok(Ok(context)) => {
+                    self.backend
+                        .as_mut()
+                        .expect("backend exists for successful cleanup")
+                        .set_request_context(Some(context));
+                    let result = {
+                        let backend =
+                            self.backend.as_mut().expect("backend exists for successful cleanup");
+                        tokio::time::timeout_at(cleanup_deadline, backend.cleanup_after_delivery())
+                            .await
+                    };
+                    self.backend
+                        .as_mut()
+                        .expect("backend exists after successful cleanup")
+                        .set_request_context(None);
+                    self.observe_success_cleanup_result(result);
+                }
+                Ok(Err(_error)) => {
+                    self.record(
+                        DrafterEventKind::CleanupError,
+                        None,
+                        Some(DrafterOperation::Cleanup),
+                    );
+                }
+                Err(_) => {
+                    self.record_cleanup_timeout();
+                }
+            }
+        } else {
+            self.backend
+                .as_mut()
+                .expect("backend exists for successful cleanup")
+                .set_request_context(None);
+            let result = {
+                let backend = self.backend.as_mut().expect("backend exists for cleanup");
+                tokio::time::timeout(self.config.request_timeout, backend.cleanup_after_delivery())
+                    .await
+            };
+            self.observe_success_cleanup_result(result);
+        }
+    }
+
+    fn observe_success_cleanup_result(
+        &mut self,
+        result: Result<Result<(), B::Error>, tokio::time::error::Elapsed>,
+    ) {
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                let (disposition, preview_message_id) = {
+                    let backend = self.backend.as_ref().expect("backend exists after cleanup");
+                    (
+                        backend.classify_error(DrafterOperation::Cleanup, &error),
+                        backend.preview_message_id(),
+                    )
+                };
+                self.observe_cleanup_disposition(disposition, preview_message_id);
+            }
+            Err(_) => self.record_cleanup_timeout(),
+        }
+    }
+
+    fn record_cleanup_timeout(&self) {
+        self.record(DrafterEventKind::BackendTimeout, None, Some(DrafterOperation::Cleanup));
+        self.record(DrafterEventKind::CleanupError, None, Some(DrafterOperation::Cleanup));
     }
 
     fn reset_segment_state(&mut self) {
@@ -1121,7 +1705,9 @@ where
                 Some(DrafterOperation::Cleanup),
                 preview_message_id,
             );
-            self.limiter.penalize(scope, delay);
+            if !self.limiter.completion_handles_retry_after() {
+                self.limiter.penalize(scope, delay);
+            }
         }
         self.record_with_preview_message_id(
             DrafterEventKind::CleanupError,
@@ -1393,13 +1979,19 @@ mod tests {
     use std::{
         convert::Infallible,
         fmt,
-        sync::{Arc, Mutex},
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc, Mutex,
+        },
     };
 
     use super::*;
     use crate::drafter::{
-        DraftAccumulator, DrafterMode, DrafterRateLimitKey, DrafterRateLimitScope,
-        InProcessRateLimiter,
+        DraftAccumulator, DrafterMode, DrafterOutboundLimiter, DrafterRateLimitKey,
+        DrafterRateLimitScope, DrafterRequestError, InProcessRateLimiter,
+    };
+    use teloxide_core::outbound::{
+        AgingPolicy, OutboundLimits, OutboundQueue, OutboundSettings, WindowLimit,
     };
 
     #[derive(Clone, Default)]
@@ -1410,8 +2002,9 @@ mod tests {
             &self,
             _key: DrafterRateLimitKey,
             _priority: DrafterPriority,
-        ) -> DrafterPermit {
-            DrafterPermit::new()
+            _request_class: DrafterRequestClass,
+        ) -> Result<DrafterPermit, DrafterAcquireError> {
+            Ok(DrafterPermit::new())
         }
 
         fn penalize(&self, _scope: DrafterRateLimitScope, _retry_after: Duration) {}
@@ -1427,8 +2020,9 @@ mod tests {
             &self,
             _key: DrafterRateLimitKey,
             _priority: DrafterPriority,
-        ) -> DrafterPermit {
-            DrafterPermit::new()
+            _request_class: DrafterRequestClass,
+        ) -> Result<DrafterPermit, DrafterAcquireError> {
+            Ok(DrafterPermit::new())
         }
 
         fn penalize(&self, scope: DrafterRateLimitScope, retry_after: Duration) {
@@ -1456,6 +2050,392 @@ mod tests {
         fn default() -> Self {
             Self { previews: Arc::new(Mutex::new(Vec::new())), expires_without_refresh: false }
         }
+    }
+
+    struct NoneOnceAccumulator {
+        snapshot_calls: Arc<AtomicUsize>,
+    }
+
+    impl DraftAccumulator for NoneOnceAccumulator {
+        type Update = String;
+        type Preview = String;
+
+        fn apply(&mut self, _update: Self::Update) {}
+
+        fn snapshot(&self) -> Option<Self::Preview> {
+            if self.snapshot_calls.fetch_add(1, Ordering::Relaxed) == 0 {
+                None
+            } else {
+                Some("preview".to_owned())
+            }
+        }
+
+        fn reset_segment(&mut self) {}
+    }
+
+    struct ContextBackend {
+        context: Option<DrafterRequestContext>,
+        contexts_installed: Arc<AtomicUsize>,
+        requests_started: Arc<AtomicUsize>,
+    }
+
+    impl DrafterBackend for ContextBackend {
+        type Preview = String;
+        type Final = String;
+        type SegmentOutput = String;
+        type Output = String;
+        type Error = DrafterRequestError;
+
+        fn capabilities(&self) -> DrafterCapabilities {
+            DrafterCapabilities {
+                mode: DrafterMode::EditInPlace,
+                expires_without_refresh: false,
+                supports_draft_thinking: false,
+                supports_rich_preview: false,
+            }
+        }
+
+        fn supports_request_scheduler(&self) -> bool {
+            true
+        }
+
+        fn is_request_timeout(&self, error: &Self::Error) -> bool {
+            matches!(error, DrafterRequestError::Timeout)
+        }
+
+        fn set_request_context(&mut self, context: Option<DrafterRequestContext>) {
+            if context.is_some() {
+                self.contexts_installed.fetch_add(1, Ordering::Relaxed);
+            }
+            self.context = context;
+        }
+
+        async fn update(&mut self, _preview: String) -> Result<PreviewAck, Self::Error> {
+            let mut context = self.context.take().expect("scheduler context");
+            let requests_started = Arc::clone(&self.requests_started);
+            context
+                .execute(DrafterRequestClass::Send, move || async move {
+                    requests_started.fetch_add(1, Ordering::Relaxed);
+                    Ok(())
+                })
+                .await
+                .map(|_| PreviewAck)
+        }
+
+        async fn commit_segment(&mut self, final_payload: &String) -> Result<String, Self::Error> {
+            Ok(final_payload.clone())
+        }
+
+        async fn finish(&mut self, final_payload: &String) -> Result<String, Self::Error> {
+            Ok(final_payload.clone())
+        }
+
+        async fn abort(&mut self) -> Result<(), Self::Error> {
+            if let Some(context) = self.context.take() {
+                context.cancel_unused().await;
+            }
+            Ok(())
+        }
+
+        fn classify_error(
+            &self,
+            _operation: DrafterOperation,
+            _error: &Self::Error,
+        ) -> DrafterErrorDisposition {
+            DrafterErrorDisposition {
+                class: DrafterErrorClass::Permanent,
+                delivery: DeliveryCertainty::NotAttempted,
+            }
+        }
+    }
+
+    struct CleanupContextBackend {
+        context: Option<DrafterRequestContext>,
+        primary_requests: Arc<AtomicUsize>,
+        cleanup_requests: Arc<AtomicUsize>,
+    }
+
+    impl DrafterBackend for CleanupContextBackend {
+        type Preview = String;
+        type Final = String;
+        type SegmentOutput = String;
+        type Output = String;
+        type Error = DrafterRequestError;
+
+        fn capabilities(&self) -> DrafterCapabilities {
+            DrafterCapabilities {
+                mode: DrafterMode::EditInPlace,
+                expires_without_refresh: false,
+                supports_draft_thinking: false,
+                supports_rich_preview: false,
+            }
+        }
+
+        fn supports_request_scheduler(&self) -> bool {
+            true
+        }
+
+        fn cleanup_after_delivery_possible(&self) -> bool {
+            true
+        }
+
+        fn is_request_timeout(&self, error: &Self::Error) -> bool {
+            matches!(error, DrafterRequestError::Timeout)
+        }
+
+        fn set_request_context(&mut self, context: Option<DrafterRequestContext>) {
+            self.context = context;
+        }
+
+        async fn update(&mut self, _preview: String) -> Result<PreviewAck, Self::Error> {
+            if let Some(context) = self.context.take() {
+                context.cancel_unused().await;
+            }
+            Ok(PreviewAck)
+        }
+
+        async fn commit_segment(&mut self, final_payload: &String) -> Result<String, Self::Error> {
+            Ok(final_payload.clone())
+        }
+
+        async fn finish(&mut self, final_payload: &String) -> Result<String, Self::Error> {
+            let mut context = self.context.take().expect("primary request context");
+            let primary_requests = Arc::clone(&self.primary_requests);
+            context
+                .execute(DrafterRequestClass::Send, move || async move {
+                    primary_requests.fetch_add(1, Ordering::Relaxed);
+                    Ok(())
+                })
+                .await
+                .map(|_| final_payload.clone())
+        }
+
+        async fn cleanup_after_delivery(&mut self) -> Result<(), Self::Error> {
+            let mut context = self.context.take().expect("cleanup request context");
+            let cleanup_requests = Arc::clone(&self.cleanup_requests);
+            context
+                .execute(DrafterRequestClass::Mutation, move || async move {
+                    cleanup_requests.fetch_add(1, Ordering::Relaxed);
+                    Ok(())
+                })
+                .await
+                .map(|_| ())
+        }
+
+        async fn abort(&mut self) -> Result<(), Self::Error> {
+            if let Some(context) = self.context.take() {
+                context.cancel_unused().await;
+            }
+            Ok(())
+        }
+
+        fn classify_error(
+            &self,
+            _operation: DrafterOperation,
+            _error: &Self::Error,
+        ) -> DrafterErrorDisposition {
+            DrafterErrorDisposition {
+                class: DrafterErrorClass::Permanent,
+                delivery: DeliveryCertainty::NotAttempted,
+            }
+        }
+    }
+
+    struct PostGrantNoopBackend {
+        context: Option<DrafterRequestContext>,
+        noop_checks: Arc<AtomicUsize>,
+        requests_started: Arc<AtomicUsize>,
+    }
+
+    impl DrafterBackend for PostGrantNoopBackend {
+        type Preview = String;
+        type Final = String;
+        type SegmentOutput = String;
+        type Output = String;
+        type Error = DrafterRequestError;
+
+        fn capabilities(&self) -> DrafterCapabilities {
+            DrafterCapabilities {
+                mode: DrafterMode::EditInPlace,
+                expires_without_refresh: false,
+                supports_draft_thinking: false,
+                supports_rich_preview: false,
+            }
+        }
+
+        fn supports_request_scheduler(&self) -> bool {
+            true
+        }
+
+        fn may_skip_preview(&self) -> bool {
+            true
+        }
+
+        fn preview_is_noop(&self, _preview: &String) -> bool {
+            self.noop_checks.fetch_add(1, Ordering::Relaxed) > 0
+        }
+
+        fn set_request_context(&mut self, context: Option<DrafterRequestContext>) {
+            self.context = context;
+        }
+
+        async fn update(&mut self, _preview: String) -> Result<PreviewAck, Self::Error> {
+            self.requests_started.fetch_add(1, Ordering::Relaxed);
+            if let Some(context) = self.context.take() {
+                context.cancel_unused().await;
+            }
+            Ok(PreviewAck)
+        }
+
+        async fn commit_segment(&mut self, final_payload: &String) -> Result<String, Self::Error> {
+            Ok(final_payload.clone())
+        }
+
+        async fn finish(&mut self, final_payload: &String) -> Result<String, Self::Error> {
+            Ok(final_payload.clone())
+        }
+
+        async fn abort(&mut self) -> Result<(), Self::Error> {
+            if let Some(context) = self.context.take() {
+                context.cancel_unused().await;
+            }
+            Ok(())
+        }
+
+        fn classify_error(
+            &self,
+            _operation: DrafterOperation,
+            _error: &Self::Error,
+        ) -> DrafterErrorDisposition {
+            DrafterErrorDisposition {
+                class: DrafterErrorClass::Permanent,
+                delivery: DeliveryCertainty::NotAttempted,
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn post_grant_preview_noop_refunds_scheduler_budget() {
+        let queue = OutboundQueue::new_spawn(OutboundSettings {
+            limits: OutboundLimits {
+                global: vec![WindowLimit::new(2, Duration::from_secs(60))],
+                chat: Vec::new(),
+            },
+            queue_capacity: 16,
+            aging: AgingPolicy { quantum: Duration::from_secs(1), max_boost: u8::MAX },
+        })
+        .unwrap();
+        let limiter = DrafterOutboundLimiter::new(queue);
+        let blocker = limiter
+            .acquire(
+                DrafterRateLimitKey { chat_id: teloxide_core::types::ChatId(1) },
+                DrafterPriority::ChangedPreview,
+                DrafterRequestClass::Send,
+            )
+            .await
+            .unwrap();
+        let noop_checks = Arc::new(AtomicUsize::new(0));
+        let requests_started = Arc::new(AtomicUsize::new(0));
+        let backend = PostGrantNoopBackend {
+            context: None,
+            noop_checks: Arc::clone(&noop_checks),
+            requests_started: Arc::clone(&requests_started),
+        };
+        let (drafter, sink) = Drafter::snapshots(
+            backend,
+            limiter.clone(),
+            DraftConfig {
+                coalesce_window: Duration::from_millis(1),
+                min_update_interval: Duration::from_millis(1),
+                ..DraftConfig::default()
+            },
+        )
+        .unwrap();
+
+        sink.update("preview".to_owned()).unwrap();
+        tokio::time::advance(Duration::from_millis(2)).await;
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+            if noop_checks.load(Ordering::Relaxed) >= 1 {
+                break;
+            }
+        }
+        assert_eq!(noop_checks.load(Ordering::Relaxed), 1);
+        assert_eq!(requests_started.load(Ordering::Relaxed), 0);
+
+        blocker.complete(DrafterPermitCompletion::Success).await;
+        drafter.flush().await.unwrap();
+        assert_eq!(noop_checks.load(Ordering::Relaxed), 2);
+        assert_eq!(requests_started.load(Ordering::Relaxed), 0);
+
+        let next = limiter
+            .acquire(
+                DrafterRateLimitKey { chat_id: teloxide_core::types::ChatId(1) },
+                DrafterPriority::Final,
+                DrafterRequestClass::Send,
+            )
+            .await
+            .unwrap();
+        next.complete(DrafterPermitCompletion::Success).await;
+        let _ = drafter.abort().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn successful_final_is_not_changed_by_cleanup_admission_deadline() {
+        let primary_requests = Arc::new(AtomicUsize::new(0));
+        let cleanup_requests = Arc::new(AtomicUsize::new(0));
+        let queue = OutboundQueue::new_spawn(OutboundSettings {
+            limits: OutboundLimits {
+                global: vec![teloxide_core::outbound::WindowLimit::new(1, Duration::from_secs(60))],
+                chat: Vec::new(),
+            },
+            queue_capacity: 16,
+            aging: AgingPolicy { quantum: Duration::from_secs(1), max_boost: u8::MAX },
+        })
+        .unwrap();
+        let backend = CleanupContextBackend {
+            context: None,
+            primary_requests: Arc::clone(&primary_requests),
+            cleanup_requests: Arc::clone(&cleanup_requests),
+        };
+        let (drafter, _sink) = Drafter::snapshots(
+            backend,
+            DrafterOutboundLimiter::new(queue),
+            DraftConfig {
+                request_timeout: Duration::from_millis(20),
+                terminal_timeout: Duration::from_millis(10),
+                ..DraftConfig::default()
+            },
+        )
+        .unwrap();
+
+        let finish = tokio::spawn(async move { drafter.finish("final".to_owned()).await });
+        for _ in 0..5 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(primary_requests.load(Ordering::Relaxed), 1);
+        tokio::time::advance(Duration::from_millis(21)).await;
+        let result = tokio::time::timeout(Duration::from_secs(1), finish)
+            .await
+            .expect("cleanup admission must be bounded")
+            .unwrap();
+
+        assert_eq!(result.unwrap(), "final");
+        assert_eq!(cleanup_requests.load(Ordering::Relaxed), 0);
+    }
+
+    fn queue_backed_drafter_limiter_with_global_window() -> DrafterOutboundLimiter {
+        DrafterOutboundLimiter::new(
+            OutboundQueue::new_spawn(OutboundSettings {
+                limits: OutboundLimits {
+                    global: vec![WindowLimit::new(1, Duration::from_secs(60))],
+                    chat: Vec::new(),
+                },
+                queue_capacity: 16,
+                aging: AgingPolicy { quantum: Duration::from_secs(1), max_boost: u8::MAX },
+            })
+            .unwrap(),
+        )
     }
 
     impl DrafterBackend for FakeBackend {
@@ -1805,13 +2785,14 @@ mod tests {
             &self,
             _key: DrafterRateLimitKey,
             priority: DrafterPriority,
-        ) -> DrafterPermit {
+            _request_class: DrafterRequestClass,
+        ) -> Result<DrafterPermit, DrafterAcquireError> {
             if matches!(priority, DrafterPriority::RefreshPreview | DrafterPriority::ChangedPreview)
             {
                 self.preview_started.notify_one();
                 std::future::pending::<()>().await;
             }
-            DrafterPermit::new()
+            Ok(DrafterPermit::new())
         }
 
         fn penalize(&self, _scope: DrafterRateLimitScope, _retry_after: Duration) {}
@@ -1828,13 +2809,14 @@ mod tests {
             &self,
             _key: DrafterRateLimitKey,
             priority: DrafterPriority,
-        ) -> DrafterPermit {
+            _request_class: DrafterRequestClass,
+        ) -> Result<DrafterPermit, DrafterAcquireError> {
             if matches!(priority, DrafterPriority::RefreshPreview | DrafterPriority::ChangedPreview)
             {
                 self.permit_started.notify_one();
                 self.release_permit.notified().await;
             }
-            DrafterPermit::new()
+            Ok(DrafterPermit::new())
         }
 
         fn penalize(&self, _scope: DrafterRateLimitScope, _retry_after: Duration) {}
@@ -1980,6 +2962,44 @@ mod tests {
         fn reset_segment(&mut self) {
             self.0.clear();
         }
+    }
+
+    #[tokio::test]
+    async fn empty_accumulator_snapshot_does_not_hold_scheduler_lane() {
+        let snapshot_calls = Arc::new(AtomicUsize::new(0));
+        let contexts_installed = Arc::new(AtomicUsize::new(0));
+        let requests_started = Arc::new(AtomicUsize::new(0));
+        let backend = ContextBackend {
+            context: None,
+            contexts_installed: Arc::clone(&contexts_installed),
+            requests_started: Arc::clone(&requests_started),
+        };
+        let (drafter, sink) = Drafter::accumulating(
+            NoneOnceAccumulator { snapshot_calls: Arc::clone(&snapshot_calls) },
+            backend,
+            queue_backed_drafter_limiter_with_global_window(),
+            DraftConfig {
+                coalesce_window: Duration::from_millis(1),
+                min_update_interval: Duration::from_millis(1),
+                request_timeout: Duration::from_secs(1),
+                retry_initial: Duration::from_millis(1),
+                retry_max: Duration::from_millis(10),
+                terminal_timeout: Duration::from_secs(1),
+                ..DraftConfig::default()
+            },
+        )
+        .unwrap();
+
+        sink.push("update".to_owned()).unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(snapshot_calls.load(Ordering::Relaxed) >= 1);
+        sink.push("update2".to_owned()).unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        assert!(snapshot_calls.load(Ordering::Relaxed) >= 2);
+        assert_eq!(contexts_installed.load(Ordering::Relaxed), 1);
+        assert_eq!(requests_started.load(Ordering::Relaxed), 1);
+        let _ = drafter.abort().await;
     }
 
     #[tokio::test(start_paused = true)]

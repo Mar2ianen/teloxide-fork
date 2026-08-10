@@ -128,6 +128,7 @@ pub mod types;
 mod bot;
 
 // implementation details
+pub mod outbound;
 mod serde_multipart;
 mod util;
 

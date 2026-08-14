@@ -113,6 +113,19 @@ impl OutboundChatKey {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct OutboundLaneKey(pub(crate) u64);
 
+/// Controls when a request releases its ordering lane.
+///
+/// [`OutboundLaneMode::Serial`] keeps the lane occupied until the request
+/// completes. [`OutboundLaneMode::OrderedStart`] releases the lane when the
+/// caller explicitly confirms that the request has started, allowing later
+/// requests to start in enqueue order while earlier requests are still
+/// running.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutboundLaneMode {
+    Serial,
+    OrderedStart,
+}
+
 /// Draft request class (message send, preview, chat action, ...). Part of
 /// the request metadata so that latest-wins slots can never be spoofed with
 /// different semantics.

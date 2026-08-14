@@ -21,7 +21,8 @@ pub use actor::{
 pub use adaptor::{class, Outbound, OutboundRequestError, ScheduledRequest};
 pub use types::{
     AgingPolicy, OutboundAcquireError, OutboundChatKey, OutboundClass, OutboundCompletion,
-    OutboundCorrelationId, OutboundHint, OutboundLimits, OutboundMetadata, OutboundOverrides,
-    OutboundPayload, OutboundPriority, OutboundQueueError, OutboundScope, OutboundSetLimitsError,
-    OutboundSettings, OutboundSnapshot, SchedulerConfigError, WindowChatKind, WindowLimit,
+    OutboundCorrelationId, OutboundHint, OutboundLaneMode, OutboundLimits, OutboundMetadata,
+    OutboundOverrides, OutboundPayload, OutboundPriority, OutboundQueueError, OutboundScope,
+    OutboundSetLimitsError, OutboundSettings, OutboundSnapshot, SchedulerConfigError,
+    WindowChatKind, WindowLimit,
 };

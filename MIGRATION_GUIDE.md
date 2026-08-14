@@ -3,6 +3,29 @@ Note that the list of required changes is not fully exhaustive and it may lack s
 
 ## unreleased
 
+## 0.18 -> 0.19
+
+This fork updates the workspace crates together:
+
+- `teloxide`: `0.18.x` -> `0.19.x`
+- `teloxide-core`: `0.14.x` -> `0.15.x`
+- `teloxide-macros`: `0.11.x` -> `0.11.1`
+
+Update direct dependencies together rather than mixing crate generations:
+
+```toml
+teloxide = { version = "0.19.0", features = ["macros"] }
+# Only if used directly:
+teloxide-core = "0.15.0"
+teloxide-macros = "0.11.1"
+```
+
+### Outbound scheduler
+
+The new scheduler is opt-in. Existing `Bot` request behavior is unchanged; wrap a bot with `Bot::outbound(queue)` only when the application wants bounded admission, rate windows or ordering lanes. The scheduler does not retry ordinary requests automatically. A completed request reports `Success`, `Failed` or an explicit `RetryAfter` penalty; retry policy remains with the caller.
+
+`OrderedStart` releases an ordering lane after `OutboundPermit::start()`, while `Serial` keeps it until completion. The durable outbox is at-least-once: applications must use idempotency keys when a remote operation can be replayed after an ambiguous transport result.
+
 ### teloxide-core
 
 Bot API 10.0 support adds new public fields to several structs, including

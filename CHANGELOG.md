@@ -4,11 +4,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## unreleased
+
+## 0.19.0 - 2026-08-14
+
+### Added
+
+- Deterministic outbound scheduling through `OutboundQueue` and the `Outbound` requester adaptor, with global, per-chat and class-aware rolling windows, priority aging, bounded admission and explicit completion-aware permits.
+- Explicit `Serial` and `OrderedStart` ordering lanes, latest-wins replacement, correlation-aware lifecycle observers and scheduler snapshots.
+- Application-defined durable outbox runtime with bounded batches, fenced leases, heartbeat renewal, delivery-attempt accounting, bounded retries and graceful shutdown.
+
+### Changed
+
+- The public `Throttle` adaptor is backed by the outbound scheduler while preserving the historical throttled-method compatibility contract.
+- The fork release line advances to `teloxide` 0.19 and `teloxide-core` 0.15; the minimum supported Rust version is 1.85.
+
+### Fixed
+
+- Completion, lease-fencing and observer lifecycle races found during the scheduler review, including slow in-flight store mutations and panic-isolated observer callbacks.
+
 ## 0.18.0 - 2026-08-05
 
 ### Added
 
-- `MessageToEditHasNoText` variant to `ApiError` ([#1426](https://github.com/teloxide/teloxide/issues/1426))
 - Optional `drafter` feature for asynchronous latest-wins preview/final delivery, shared rate limiting, segment lifecycle, cleanup policies and delivery certainty
 - Optional `rich-text` feature with one semantic Rich Text pipeline and explicit HTML, Developer Markdown, LLM Markdown and Standard Markdown frontends
 - Shared Rich Text bindings and render context for localized time, trusted link aliases and bound custom emoji, with common Telegram/fallback rendering

@@ -24,9 +24,9 @@ pub use adaptor::{class, Outbound, OutboundRequestError, ScheduledRequest};
 pub use observability::{NoopOutboundObserver, OutboundEvent, OutboundEventKind, OutboundObserver};
 pub use outbox::{
     ClaimedOutboxRequest, InMemoryOutboxError, InMemoryOutboxStore, NewOutboxRequest,
-    OutboundOutbox, OutboxEnqueueResult, OutboxExecutionError, OutboxExecutor, OutboxFailure,
-    OutboxFailureKind, OutboxId, OutboxLease, OutboxRetry, OutboxSnapshot, OutboxStatus,
-    OutboxStore, OutboxWorkerError, OutboxWorkerId, OutboxWorkerSettings,
+    OutboundOutbox, OutboxAttemptStart, OutboxEnqueueResult, OutboxExecutionError, OutboxExecutor,
+    OutboxFailure, OutboxFailureKind, OutboxId, OutboxLease, OutboxRetry, OutboxSnapshot,
+    OutboxStatus, OutboxStore, OutboxWorkerError, OutboxWorkerId, OutboxWorkerSettings,
 };
 pub use types::{
     AgingPolicy, OutboundAcquireError, OutboundChatKey, OutboundClass, OutboundClassLimits,

@@ -1,4 +1,4 @@
-# Outbound scheduler — design note (Commits 1–10)
+# Outbound scheduler — design note (Commits 1–15)
 
 Deterministic outbound scheduling model in `crates/teloxide-core/src/outbound/`.
 
@@ -60,6 +60,42 @@ Deterministic outbound scheduling model in `crates/teloxide-core/src/outbound/`.
 - **Commit 14**: the application-defined durable outbox runtime stores opaque
   versioned payloads plus frozen `OutboundMetadata`, claims records with
   fenced leases, and executes bounded batches through the shared scheduler.
+- **Commit 15**: durable outbox execution renews leases through scheduler
+  admission, delivery-attempt start, executor execution and durable
+  finalization. Claim retries and scheduler backpressure no longer consume
+  delivery attempts; batch failures are drained, shutdown is graceful, and
+  observer callbacks run behind a bounded non-blocking consumer channel.
+
+## Durable outbox lifecycle
+
+`OutboundOutbox` is at-least-once by design. A remote side effect may be
+replayed after a process crash or an ambiguous transport result, so callers
+should pass the durable idempotency key to providers that support idempotent
+operations.
+
+A claimed record is fenced by `(worker, token, until)`. The worker keeps a
+heartbeat from the initial scheduler acquire through `begin_attempt`, the
+executor future, permit completion and the final store mutation. Every store
+mutation uses the heartbeat's latest lease. A lease can therefore outlive a
+slow rate-limit wait or a slow provider call without allowing a second worker
+to reclaim the record while the first worker is still active.
+
+`claim_count` measures lease claims for operational diagnostics. `attempt`
+measures only delivery attempts that reached `begin_attempt` immediately
+before the executor invocation. Queue-full/closed/superseded scheduler
+outcomes are rescheduled without consuming `max_attempts`; an expired lease
+before `begin_attempt` likewise leaves the delivery-attempt counter unchanged.
+
+`run_once` claims a bounded batch and drains every already-claimed future even
+when one store transition fails. It returns the first error after siblings
+finish, so a single database error cannot cancel other side effects. `run_until`
+stops claiming after shutdown is signalled and lets the active batch complete,
+including its lease-protected final store transitions.
+
+Observers are optional diagnostics only. The queue actor uses a bounded
+`SyncSender::try_send`, dropping the newest event when the channel is full.
+A dedicated consumer thread invokes callbacks and catches callback panics, so
+slow or faulty telemetry cannot block admission, completion, or shutdown.
 
 ## Scope
 

@@ -223,6 +223,17 @@ impl Bot {
 }
 
 impl Bot {
+    /// Wraps this bot in the outbound scheduler adaptor.
+    ///
+    /// The returned requester classifies each final payload at send time and
+    /// acquires permits from the supplied shared queue before executing it.
+    pub fn outbound(
+        self,
+        queue: crate::outbound::OutboundQueue,
+    ) -> crate::outbound::Outbound<Self> {
+        crate::outbound::Outbound::new(self, queue)
+    }
+
     pub(crate) fn execute_json<P>(
         &self,
         payload: &P,

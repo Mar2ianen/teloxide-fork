@@ -135,6 +135,7 @@ pub struct ScheduledRequest<Req: HasPayload> {
     queue: OutboundQueue,
     lane: Option<OutboundLane>,
     overrides: OutboundOverrides,
+    correlation_id: Option<crate::outbound::OutboundCorrelationId>,
 }
 
 impl<Req: HasPayload> Clone for ScheduledRequest<Req>
@@ -147,18 +148,26 @@ where
             queue: self.queue.clone(),
             lane: self.lane.clone(),
             overrides: self.overrides,
+            correlation_id: self.correlation_id,
         }
     }
 }
 
 impl<Req: HasPayload> ScheduledRequest<Req> {
     pub fn new(request: Req, queue: OutboundQueue) -> Self {
-        Self { request, queue, lane: None, overrides: OutboundOverrides::default() }
+        Self {
+            request,
+            queue,
+            lane: None,
+            overrides: OutboundOverrides::default(),
+            correlation_id: None,
+        }
     }
 
     /// Attaches an ordering lane. Requests are served strictly in enqueue
-    /// order; the lane's [`OutboundLaneMode`] decides whether the next
-    /// request waits for completion or only for [`OutboundPermit::start`].
+    /// order; the lane's [`crate::outbound::OutboundLaneMode`] decides whether
+    /// the next request waits for completion or only for
+    /// [`crate::outbound::OutboundPermit::start`].
     pub fn on_lane(mut self, lane: &OutboundLane) -> Self {
         self.lane = Some(lane.clone());
         self
@@ -189,6 +198,15 @@ impl<Req: HasPayload> ScheduledRequest<Req> {
     /// Replaces the whole override set (see [`OutboundOverrides`]).
     pub fn with_outbound_overrides(mut self, overrides: OutboundOverrides) -> Self {
         self.overrides = overrides;
+        self
+    }
+
+    /// Associates this request with a stable observer correlation id.
+    pub fn with_correlation_id(
+        mut self,
+        correlation_id: crate::outbound::OutboundCorrelationId,
+    ) -> Self {
+        self.correlation_id = Some(correlation_id);
         self
     }
 
@@ -272,6 +290,7 @@ where
             queue: self.queue.clone(),
             lane: self.lane.clone(),
             metadata,
+            correlation_id: self.correlation_id,
         })
     }
 }
@@ -297,15 +316,17 @@ req_future! {
             // publicly mutable until send (teloxide's `send_ref` flow
             // changes `chat_id` before sending), so admission, lanes and
             // `RetryAfter` penalties always follow what is actually sent.
-            let ScheduledRequest { request, queue, lane, overrides } = it;
+            let ScheduledRequest { request, queue, lane, overrides, correlation_id } = it;
             let hint = request.payload_ref().outbound_hint();
             let metadata = effective_metadata(hint, overrides);
             // The classifier below runs after the acquire consumed the
             // metadata, so the policy copy is kept separately.
             let policy_metadata = metadata.clone();
-            let acquire = match &lane {
-                Some(lane) => lane.acquire(metadata),
-                None => queue.handle().acquire(metadata),
+            let acquire = match (&lane, correlation_id) {
+                (Some(lane), Some(correlation_id)) => lane.acquire_with_correlation(metadata, correlation_id),
+                (Some(lane), None) => lane.acquire(metadata),
+                (None, Some(correlation_id)) => queue.handle().acquire_with_correlation(metadata, correlation_id),
+                (None, None) => queue.handle().acquire(metadata),
             };
             let mut permit = match acquire.await {
                 Ok(permit) => permit,
@@ -358,15 +379,18 @@ struct SendRefPlan<U: Request> {
     queue: OutboundQueue,
     lane: Option<OutboundLane>,
     metadata: OutboundMetadata,
+    correlation_id: Option<crate::outbound::OutboundCorrelationId>,
 }
 
 req_future! {
     def: |it: SendRefPlan<U>| {
         async move {
             let policy_metadata = it.metadata.clone();
-            let acquire = match &it.lane {
-                Some(lane) => lane.acquire(it.metadata),
-                None => it.queue.handle().acquire(it.metadata),
+            let acquire = match (&it.lane, it.correlation_id) {
+                (Some(lane), Some(correlation_id)) => lane.acquire_with_correlation(it.metadata, correlation_id),
+                (Some(lane), None) => lane.acquire(it.metadata),
+                (None, Some(correlation_id)) => it.queue.handle().acquire_with_correlation(it.metadata, correlation_id),
+                (None, None) => it.queue.handle().acquire(it.metadata),
             };
             let mut permit = match acquire.await {
                 Ok(permit) => permit,

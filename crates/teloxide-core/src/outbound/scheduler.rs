@@ -42,9 +42,10 @@ const BLOCKED_FOREVER_DELAY: Duration = Duration::from_secs(365 * 24 * 3600);
 
 use super::types::{
     AgingPolicy, EnqueueError, EnqueueOutcome, Grant, JobId, OutboundChatKey, OutboundClass,
-    OutboundCompletion, OutboundEnqueueMode, OutboundLaneKey, OutboundLaneMode, OutboundLimits,
-    OutboundMeta, OutboundPriority, OutboundScope, OutboundSnapshot, SchedulerConfigError,
-    SchedulerWakeup, WindowChatKind, WindowLimit,
+    OutboundClassLimits, OutboundClassWindowLimit, OutboundCompletion, OutboundCorrelationId,
+    OutboundEnqueueMode, OutboundLaneKey, OutboundLaneMode, OutboundLimits, OutboundMeta,
+    OutboundPriority, OutboundScope, OutboundSnapshot, SchedulerConfigError, SchedulerWakeup,
+    WindowChatKind, WindowLimit,
 };
 
 /// A granted job whose permit is still in flight. Its lane may already be
@@ -53,12 +54,23 @@ use super::types::{
 struct InFlight {
     lane: Option<OutboundLaneKey>,
     scope: OutboundScope,
+    class: super::types::OutboundClass,
     weight: u32,
 }
 
 /// A live job that has not been granted yet.
+pub(crate) struct EnqueueOptions {
+    pub(crate) lane_mode: OutboundLaneMode,
+    pub(crate) mode: OutboundEnqueueMode,
+    pub(crate) queue_capacity: usize,
+    pub(crate) not_before: Option<Instant>,
+    pub(crate) now: Instant,
+    pub(crate) correlation_id: Option<OutboundCorrelationId>,
+}
+
 struct Job {
     meta: OutboundMeta,
+    correlation_id: Option<OutboundCorrelationId>,
     sequence: u64,
     /// The moment the job became ready; aging is measured from this instant.
     ready_at: Instant,
@@ -277,6 +289,17 @@ impl WindowSet {
         }
     }
 
+    fn new_class(limits: &[OutboundClassWindowLimit], class: super::types::OutboundClass) -> Self {
+        Self {
+            windows: limits
+                .iter()
+                .filter(|limit| limit.class == class)
+                .map(|limit| WindowLimit::new(limit.capacity, limit.window))
+                .map(RollingWindow::new)
+                .collect(),
+        }
+    }
+
     fn can_consume(&mut self, now: Instant, weight: u32) -> bool {
         self.windows.iter_mut().all(|window| window.can_consume(now, weight))
     }
@@ -297,6 +320,21 @@ impl WindowSet {
 
     fn is_idle(&mut self, now: Instant) -> bool {
         self.windows.iter_mut().all(|window| window.is_idle(now))
+    }
+
+    /// Returns the longest-window ledger after pruning events that have
+    /// expired under the current limits.
+    fn collect_events(&mut self, now: Instant) -> Vec<WindowEvent> {
+        for window in &mut self.windows {
+            window.prune(now);
+        }
+        self.windows
+            .iter()
+            .max_by_key(|window| window.window)
+            .map(|window| {
+                window.history.iter().map(|(at, weight, job)| (*at, *weight, *job)).collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Carries a debited event over to every window of the set that still
@@ -367,6 +405,20 @@ impl PartialOrd for CandidateKey {
     }
 }
 
+fn class_window_sets(
+    limits: &[OutboundClassWindowLimit],
+) -> HashMap<super::types::OutboundClass, WindowSet> {
+    let mut grouped: HashMap<super::types::OutboundClass, Vec<OutboundClassWindowLimit>> =
+        HashMap::new();
+    for limit in limits {
+        grouped.entry(limit.class).or_default().push(*limit);
+    }
+    grouped
+        .into_iter()
+        .map(|(class, limits)| (class, WindowSet::new_class(&limits, class)))
+        .collect()
+}
+
 /// A candidate that failed admission: it sleeps until `until` and is then
 /// re-inserted into the candidate heap. The reference is re-validated on
 /// promotion, so a lane entry whose head changed wakes the current head.
@@ -418,7 +470,9 @@ struct AgingEvent {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum WindowRef {
     Global,
+    ClassGlobal(OutboundClass),
     Chat(OutboundChatKey),
+    ClassChat(OutboundChatKey, OutboundClass),
 }
 
 /// A window held back for a blocked top-aged candidate. `until` is the
@@ -488,6 +542,9 @@ pub(crate) struct SchedulerState {
     coalesce: HashMap<InternalCoalesceKey, JobId>,
     global_windows: WindowSet,
     chat_window_sets: HashMap<OutboundChatKey, WindowSet>,
+    class_global_windows: HashMap<super::types::OutboundClass, WindowSet>,
+    class_chat_window_sets: HashMap<(OutboundChatKey, super::types::OutboundClass), WindowSet>,
+    class_limits: OutboundClassLimits,
     penalties: HashMap<PenaltyKey, Instant>,
     in_flight: HashMap<JobId, InFlight>,
     /// Candidate-heap entries whose job/lane is gone; compacted when they
@@ -506,8 +563,17 @@ pub(crate) struct SchedulerState {
 }
 
 impl SchedulerState {
+    #[cfg(test)]
     pub(crate) fn new(
         limits: OutboundLimits,
+        aging: AgingPolicy,
+    ) -> Result<Self, SchedulerConfigError> {
+        Self::new_with_class_limits(limits, OutboundClassLimits::default(), aging)
+    }
+
+    pub(crate) fn new_with_class_limits(
+        limits: OutboundLimits,
+        class_limits: OutboundClassLimits,
         aging: AgingPolicy,
     ) -> Result<Self, SchedulerConfigError> {
         for window in limits.global.iter().chain(limits.chat.iter()) {
@@ -520,6 +586,11 @@ impl SchedulerState {
         // out for one kind, so it is a configuration error.
         if limits.global.iter().any(|w| w.kind != WindowChatKind::Any) {
             return Err(SchedulerConfigError::KindSpecificGlobalWindow);
+        }
+        for window in class_limits.global.iter().chain(class_limits.chat.iter()) {
+            if window.window.is_zero() {
+                return Err(SchedulerConfigError::ZeroWindowDuration);
+            }
         }
         if aging.quantum.is_zero() {
             return Err(SchedulerConfigError::ZeroAgingQuantum);
@@ -537,6 +608,7 @@ impl SchedulerState {
         let global_limits = limits.global;
         let chat_limits = limits.chat;
         let global_windows = WindowSet::new(&global_limits, WindowChatKind::Any);
+        let class_global_windows = class_window_sets(&class_limits.global);
         Ok(Self {
             jobs: HashMap::new(),
             candidates: BinaryHeap::new(),
@@ -548,6 +620,9 @@ impl SchedulerState {
             coalesce: HashMap::new(),
             global_windows,
             chat_window_sets: HashMap::new(),
+            class_global_windows,
+            class_chat_window_sets: HashMap::new(),
+            class_limits,
             penalties: HashMap::new(),
             in_flight: HashMap::new(),
             stale_candidates: 0,
@@ -567,6 +642,7 @@ impl SchedulerState {
     /// invalidated, and the superseded id is reported in the outcome. A
     /// weight change on an existing slot is rejected, as is a weight that
     /// never fits an applicable window.
+    #[cfg(test)]
     pub(crate) fn enqueue(
         &mut self,
         meta: OutboundMeta,
@@ -575,16 +651,20 @@ impl SchedulerState {
         not_before: Option<Instant>,
         now: Instant,
     ) -> Result<EnqueueOutcome, EnqueueError> {
-        self.enqueue_with_lane_mode(
+        self.enqueue_with_lane_mode_and_correlation(
             meta,
-            OutboundLaneMode::Serial,
-            mode,
-            queue_capacity,
-            not_before,
-            now,
+            EnqueueOptions {
+                lane_mode: OutboundLaneMode::Serial,
+                mode,
+                queue_capacity,
+                not_before,
+                now,
+                correlation_id: None,
+            },
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn enqueue_with_lane_mode(
         &mut self,
         meta: OutboundMeta,
@@ -594,6 +674,48 @@ impl SchedulerState {
         not_before: Option<Instant>,
         now: Instant,
     ) -> Result<EnqueueOutcome, EnqueueError> {
+        self.enqueue_with_lane_mode_and_correlation(
+            meta,
+            EnqueueOptions {
+                lane_mode,
+                mode,
+                queue_capacity,
+                not_before,
+                now,
+                correlation_id: None,
+            },
+        )
+    }
+
+    pub(crate) fn enqueue_with_correlation(
+        &mut self,
+        meta: OutboundMeta,
+        mode: OutboundEnqueueMode,
+        queue_capacity: usize,
+        not_before: Option<Instant>,
+        now: Instant,
+        correlation_id: Option<OutboundCorrelationId>,
+    ) -> Result<EnqueueOutcome, EnqueueError> {
+        self.enqueue_with_lane_mode_and_correlation(
+            meta,
+            EnqueueOptions {
+                lane_mode: OutboundLaneMode::Serial,
+                mode,
+                queue_capacity,
+                not_before,
+                now,
+                correlation_id,
+            },
+        )
+    }
+
+    pub(crate) fn enqueue_with_lane_mode_and_correlation(
+        &mut self,
+        meta: OutboundMeta,
+        options: EnqueueOptions,
+    ) -> Result<EnqueueOutcome, EnqueueError> {
+        let EnqueueOptions { lane_mode, mode, queue_capacity, not_before, now, correlation_id } =
+            options;
         // A job that exceeds a positive-capacity applicable window could
         // never be granted; reject it at enqueue time instead of parking it
         // forever. A zero-capacity window is an explicit pause.
@@ -603,6 +725,19 @@ impl SchedulerState {
         {
             return Err(EnqueueError::WeightExceedsWindow {
                 scope: meta.scope,
+                weight: meta.weight,
+                capacity: window.capacity,
+            });
+        }
+        if let Some(window) = self
+            .class_limits
+            .global
+            .iter()
+            .filter(|window| window.class == meta.class && window.capacity != 0)
+            .find(|window| weight > window.capacity)
+        {
+            return Err(EnqueueError::WeightExceedsWindow {
+                scope: meta.scope.clone(),
                 weight: meta.weight,
                 capacity: window.capacity,
             });
@@ -617,6 +752,21 @@ impl SchedulerState {
             {
                 return Err(EnqueueError::WeightExceedsWindow {
                     scope: meta.scope,
+                    weight: meta.weight,
+                    capacity: window.capacity,
+                });
+            }
+        }
+        if let OutboundScope::Chat(_) = &meta.scope {
+            if let Some(window) = self
+                .class_limits
+                .chat
+                .iter()
+                .filter(|window| window.class == meta.class && window.capacity != 0)
+                .find(|window| weight > window.capacity)
+            {
+                return Err(EnqueueError::WeightExceedsWindow {
+                    scope: meta.scope.clone(),
                     weight: meta.weight,
                     capacity: window.capacity,
                 });
@@ -687,6 +837,7 @@ impl SchedulerState {
             job,
             Job {
                 meta,
+                correlation_id,
                 sequence,
                 ready_at,
                 not_before,
@@ -1422,15 +1573,28 @@ impl SchedulerState {
         }
     }
 
+    /// Returns every ordinary and class-specific window applicable to a
+    /// candidate. Keeping this list in one place prevents class windows from
+    /// being accidentally skipped by reservations or re-arming.
+    fn applicable_windows(&self, candidate: &Candidate) -> Vec<WindowRef> {
+        let Some(job) = self.jobs.get(&candidate.job) else { return vec![WindowRef::Global] };
+        let class = job.meta.class;
+        match &candidate.scope {
+            OutboundScope::Global => vec![WindowRef::Global, WindowRef::ClassGlobal(class)],
+            OutboundScope::Chat(chat) => vec![
+                WindowRef::Global,
+                WindowRef::ClassGlobal(class),
+                WindowRef::Chat(chat.clone()),
+                WindowRef::ClassChat(chat.clone(), class),
+            ],
+        }
+    }
+
     /// After a grant consumed a window, extends the window's hold (if any)
     /// to the moment the next parked candidate fits, so the parked queue
     /// paces itself through the window instead of being re-pushed.
     fn rearm_reservations(&mut self, candidate: &Candidate, now: Instant) {
-        let windows = match &candidate.scope {
-            OutboundScope::Global => vec![WindowRef::Global],
-            OutboundScope::Chat(chat) => vec![WindowRef::Global, WindowRef::Chat(chat.clone())],
-        };
-        for window in windows {
+        for window in self.applicable_windows(candidate) {
             let until = {
                 let Some(reservation) = self.reservations.get(&window) else { continue };
                 let Some(&head_ref) = reservation.queue.front() else { continue };
@@ -1439,9 +1603,17 @@ impl SchedulerState {
                 };
                 match &window {
                     WindowRef::Global => self.global_windows.earliest_for(now, weight),
+                    WindowRef::ClassGlobal(class) => self
+                        .class_global_windows
+                        .get(class)
+                        .and_then(|set| set.earliest_for(now, weight)),
                     WindowRef::Chat(chat) => self
                         .chat_window_sets
                         .get(chat)
+                        .and_then(|set| set.earliest_for(now, weight)),
+                    WindowRef::ClassChat(chat, class) => self
+                        .class_chat_window_sets
+                        .get(&(chat.clone(), *class))
                         .and_then(|set| set.earliest_for(now, weight)),
                 }
             };
@@ -1570,9 +1742,10 @@ impl SchedulerState {
                     // the blocked heavy candidate.
                     let rearm_candidate = candidate.clone();
                     let job = candidate.job;
+                    let correlation_id = self.jobs.get(&job).and_then(|job| job.correlation_id);
                     self.grant(candidate, now);
                     self.rearm_reservations(&rearm_candidate, now);
-                    grants.push(Grant { job });
+                    grants.push(Grant { job, correlation_id });
                 }
                 Admission::Blocked { until, reserve } => {
                     self.release_previous_reservation_if_changed(&candidate, reserve.as_ref(), now);
@@ -1748,13 +1921,10 @@ impl SchedulerState {
     /// not capture candidates: the `Reserved` verdict was produced by an
     /// active hold, and the candidate joins that hold.
     fn reservation_window(&self, candidate: &Candidate, now: Instant) -> WindowRef {
-        if self.reservation_active(WindowRef::Global, now) {
-            return WindowRef::Global;
-        }
-        match &candidate.scope {
-            OutboundScope::Chat(chat) => WindowRef::Chat(chat.clone()),
-            OutboundScope::Global => WindowRef::Global, // unreachable: see admission
-        }
+        self.applicable_windows(candidate)
+            .into_iter()
+            .find(|window| self.reservation_active(window.clone(), now))
+            .expect("reserved candidate must have an active window")
     }
 
     /// Admission check: penalties, window capacity and reservations. A
@@ -1767,11 +1937,15 @@ impl SchedulerState {
 
     fn admission(&mut self, candidate: &Candidate, now: Instant) -> Admission {
         let weight = candidate.weight.get();
-        if self.reservation_active(WindowRef::Global, now)
-            && !self.reservation_owner_is(candidate, &WindowRef::Global)
-        {
-            return Admission::Reserved;
+        for window in self.applicable_windows(candidate) {
+            if self.reservation_active(window.clone(), now)
+                && !self.reservation_owner_is(candidate, &window)
+            {
+                return Admission::Reserved;
+            }
         }
+        let class =
+            self.jobs.get(&candidate.job).map(|job| job.meta.class).expect("candidate job exists");
         let mut until = now;
         let mut reserve = None;
 
@@ -1785,13 +1959,18 @@ impl SchedulerState {
             until = until.max(window_until);
             reserve = Some(WindowRef::Global);
         }
-        if let OutboundScope::Chat(chat) = &candidate.scope {
-            let chat_window = WindowRef::Chat(chat.clone());
-            if self.reservation_active(chat_window.clone(), now)
-                && !self.reservation_owner_is(candidate, &chat_window)
-            {
-                return Admission::Reserved;
+        if let Some(windows) = self.class_global_windows.get_mut(&class) {
+            if !windows.can_consume(now, weight) {
+                let Some(window_until) = windows.earliest_for(now, weight) else {
+                    return Admission::BlockedForever;
+                };
+                until = until.max(window_until);
+                if reserve.is_none() {
+                    reserve = Some(WindowRef::ClassGlobal(class));
+                }
             }
+        }
+        if let OutboundScope::Chat(chat) = &candidate.scope {
             if self.penalty_active(PenaltyKey::Chat(chat.clone()), now) {
                 until = until.max(self.penalties[&PenaltyKey::Chat(chat.clone())]);
             }
@@ -1806,6 +1985,22 @@ impl SchedulerState {
                 until = until.max(window_until);
                 if reserve.is_none() {
                     reserve = Some(WindowRef::Chat(chat.clone()));
+                }
+            }
+            if self.class_limits.chat.iter().any(|limit| limit.class == class) {
+                let key = (chat.clone(), class);
+                let windows = self
+                    .class_chat_window_sets
+                    .entry(key)
+                    .or_insert_with(|| WindowSet::new_class(&self.class_limits.chat, class));
+                if !windows.can_consume(now, weight) {
+                    let Some(window_until) = windows.earliest_for(now, weight) else {
+                        return Admission::BlockedForever;
+                    };
+                    until = until.max(window_until);
+                    if reserve.is_none() {
+                        reserve = Some(WindowRef::ClassChat(chat.clone(), class));
+                    }
                 }
             }
         }
@@ -1839,15 +2034,31 @@ impl SchedulerState {
             lane_state.in_flight = Some(candidate.job);
         }
         self.global_windows.consume(now, job.meta.weight.get(), candidate.job);
+        if let Some(windows) = self.class_global_windows.get_mut(&job.meta.class) {
+            windows.consume(now, job.meta.weight.get(), candidate.job);
+        }
         if let OutboundScope::Chat(chat) = &job.meta.scope {
             self.chat_window_sets
                 .entry(chat.clone())
                 .or_insert_with(|| WindowSet::new(&self.chat_limits, chat.window_chat_kind()))
                 .consume(now, job.meta.weight.get(), candidate.job);
+            if self.class_limits.chat.iter().any(|limit| limit.class == job.meta.class) {
+                self.class_chat_window_sets
+                    .entry((chat.clone(), job.meta.class))
+                    .or_insert_with(|| {
+                        WindowSet::new_class(&self.class_limits.chat, job.meta.class)
+                    })
+                    .consume(now, job.meta.weight.get(), candidate.job);
+            }
         }
         self.in_flight.insert(
             candidate.job,
-            InFlight { lane: job.meta.lane, scope: job.meta.scope, weight: job.meta.weight.get() },
+            InFlight {
+                lane: job.meta.lane,
+                scope: job.meta.scope,
+                class: job.meta.class,
+                weight: job.meta.weight.get(),
+            },
         );
     }
 
@@ -1923,6 +2134,13 @@ impl SchedulerState {
             if self.global_windows.refund(now, job, in_flight.weight) {
                 refunded_windows.push(WindowRef::Global);
             }
+            if self
+                .class_global_windows
+                .get_mut(&in_flight.class)
+                .is_some_and(|windows| windows.refund(now, job, in_flight.weight))
+            {
+                refunded_windows.push(WindowRef::ClassGlobal(in_flight.class));
+            }
             if let OutboundScope::Chat(chat) = &in_flight.scope {
                 let remove_chat_window =
                     self.chat_window_sets.get_mut(chat).is_some_and(|windows| {
@@ -1934,6 +2152,13 @@ impl SchedulerState {
                     });
                 if remove_chat_window {
                     self.chat_window_sets.remove(chat);
+                }
+                if self
+                    .class_chat_window_sets
+                    .get_mut(&(chat.clone(), in_flight.class))
+                    .is_some_and(|windows| windows.refund(now, job, in_flight.weight))
+                {
+                    refunded_windows.push(WindowRef::ClassChat(chat.clone(), in_flight.class));
                 }
             }
             for window in refunded_windows {
@@ -1958,6 +2183,10 @@ impl SchedulerState {
 
     pub(crate) fn chat_limits(&self) -> &[WindowLimit] {
         &self.chat_limits
+    }
+
+    pub(crate) fn class_limits(&self) -> &OutboundClassLimits {
+        &self.class_limits
     }
 
     /// A point-in-time view of the queue state.
@@ -2137,6 +2366,84 @@ impl SchedulerState {
                 self.push_lane_head_candidate(lane, now);
             }
         }
+    }
+
+    /// Replaces class-specific windows while carrying over their debited
+    /// history and re-arming blocked candidates.
+    pub(crate) fn set_class_limits(
+        &mut self,
+        limits: OutboundClassLimits,
+        now: Instant,
+    ) -> Result<(), SchedulerConfigError> {
+        for window in limits.global.iter().chain(limits.chat.iter()) {
+            if window.window.is_zero() {
+                return Err(SchedulerConfigError::ZeroWindowDuration);
+            }
+        }
+        for job in self.jobs.values() {
+            if let Some(window) = limits
+                .global
+                .iter()
+                .filter(|window| window.class == job.meta.class && window.capacity != 0)
+                .find(|window| job.meta.weight.get() > window.capacity)
+            {
+                return Err(SchedulerConfigError::PendingWeightExceedsWindow {
+                    scope: job.meta.scope.clone(),
+                    weight: job.meta.weight.get(),
+                    capacity: window.capacity,
+                });
+            }
+            if matches!(job.meta.scope, OutboundScope::Chat(_)) {
+                if let Some(window) = limits
+                    .chat
+                    .iter()
+                    .filter(|window| window.class == job.meta.class && window.capacity != 0)
+                    .find(|window| job.meta.weight.get() > window.capacity)
+                {
+                    return Err(SchedulerConfigError::PendingWeightExceedsWindow {
+                        scope: job.meta.scope.clone(),
+                        weight: job.meta.weight.get(),
+                        capacity: window.capacity,
+                    });
+                }
+            }
+        }
+
+        let global_events: Vec<(OutboundClass, Vec<WindowEvent>)> = self
+            .class_global_windows
+            .iter_mut()
+            .map(|(class, set)| (*class, set.collect_events(now)))
+            .collect();
+        let chat_events: Vec<((OutboundChatKey, OutboundClass), Vec<WindowEvent>)> = self
+            .class_chat_window_sets
+            .iter_mut()
+            .map(|(key, set)| (key.clone(), set.collect_events(now)))
+            .collect();
+
+        self.class_limits = limits.clone();
+        self.class_global_windows = class_window_sets(&limits.global);
+        for (class, events) in global_events {
+            if let Some(set) = self.class_global_windows.get_mut(&class) {
+                for (at, weight, job) in events {
+                    set.insert_at(now, at, weight, job);
+                }
+            }
+        }
+        self.class_chat_window_sets.clear();
+        for ((chat, class), events) in chat_events {
+            if events.is_empty() {
+                continue;
+            }
+            let mut set = WindowSet::new_class(&limits.chat, class);
+            for (at, weight, job) in events {
+                set.insert_at(now, at, weight, job);
+            }
+            if set.windows.iter().any(|window| !window.history.is_empty()) {
+                self.class_chat_window_sets.insert((chat, class), set);
+            }
+        }
+        self.rearm_blocked_and_parked(now);
+        Ok(())
     }
 
     pub(crate) fn penalize(&mut self, scope: OutboundScope, until: Instant) {
@@ -2358,6 +2665,121 @@ mod tests {
         )
         .unwrap()
         .job
+    }
+
+    #[test]
+    fn class_limits_reject_pending_weight_that_would_never_fit() {
+        let class = OutboundClass::new(11);
+        let mut scheduler = scheduler(limits(100), aging());
+        let now = base();
+        fifo(
+            &mut scheduler,
+            OutboundMeta {
+                scope: OutboundScope::Global,
+                lane: None,
+                class,
+                priority: OutboundPriority::NORMAL,
+                weight: NonZeroU32::new(2).unwrap(),
+            },
+            now,
+        );
+        let error = scheduler
+            .set_class_limits(
+                OutboundClassLimits {
+                    global: vec![OutboundClassWindowLimit::new(class, 1, Duration::from_secs(60))],
+                    chat: Vec::new(),
+                },
+                now,
+            )
+            .unwrap_err();
+        assert_eq!(
+            error,
+            SchedulerConfigError::PendingWeightExceedsWindow {
+                scope: OutboundScope::Global,
+                weight: 2,
+                capacity: 1,
+            }
+        );
+        assert!(scheduler.class_limits().global.is_empty());
+    }
+
+    #[test]
+    fn class_global_window_only_blocks_matching_class() {
+        let message = OutboundClass::new(1);
+        let other = OutboundClass::new(2);
+        let class_limits = OutboundClassLimits {
+            global: vec![OutboundClassWindowLimit::new(message, 1, Duration::from_secs(60))],
+            chat: Vec::new(),
+        };
+        let mut s =
+            SchedulerState::new_with_class_limits(limits(100), class_limits, aging()).unwrap();
+        let t0 = base();
+        let first = fifo(
+            &mut s,
+            meta_with_class(OutboundScope::Global, None, OutboundPriority::NORMAL, 1),
+            t0,
+        );
+        let blocked = fifo(
+            &mut s,
+            meta_with_class(OutboundScope::Global, None, OutboundPriority::NORMAL, 1),
+            t0,
+        );
+        let unrelated = fifo(
+            &mut s,
+            meta_with_class(OutboundScope::Global, None, OutboundPriority::NORMAL, 2),
+            t0,
+        );
+
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![first, unrelated]);
+        s.complete(first, OutboundCompletion::Success, t0, t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), Vec::<JobId>::new());
+        assert_eq!(jobs(&s.grant_ready(t0 + Duration::from_secs(61))), vec![blocked]);
+        assert_eq!(message, OutboundClass::new(1));
+        assert_ne!(message, other);
+    }
+
+    #[test]
+    fn class_chat_window_is_scoped_by_chat_and_class() {
+        let message = OutboundClass::new(1);
+        let class_limits = OutboundClassLimits {
+            global: Vec::new(),
+            chat: vec![OutboundClassWindowLimit::new(message, 1, Duration::from_secs(60))],
+        };
+        let mut s = SchedulerState::new_with_class_limits(
+            OutboundLimits { global: Vec::new(), chat: Vec::new() },
+            class_limits,
+            aging(),
+        )
+        .unwrap();
+        let t0 = base();
+        let chat_one = OutboundScope::Chat(OutboundChatKey::id(1));
+        let first =
+            fifo(&mut s, meta_with_class(chat_one.clone(), None, OutboundPriority::NORMAL, 1), t0);
+        let blocked =
+            fifo(&mut s, meta_with_class(chat_one, None, OutboundPriority::NORMAL, 1), t0);
+        let other_chat = fifo(
+            &mut s,
+            meta_with_class(
+                OutboundScope::Chat(OutboundChatKey::id(2)),
+                None,
+                OutboundPriority::NORMAL,
+                1,
+            ),
+            t0,
+        );
+        let other_class = fifo(
+            &mut s,
+            meta_with_class(
+                OutboundScope::Chat(OutboundChatKey::id(1)),
+                None,
+                OutboundPriority::NORMAL,
+                2,
+            ),
+            t0,
+        );
+
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![first, other_chat, other_class]);
+        assert_eq!(jobs(&s.grant_ready(t0 + Duration::from_secs(61))), vec![blocked]);
     }
 
     #[test]

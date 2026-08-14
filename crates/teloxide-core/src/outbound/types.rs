@@ -313,6 +313,7 @@ pub enum SchedulerConfigError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Grant {
     pub(crate) job: JobId,
+    pub(crate) correlation_id: Option<OutboundCorrelationId>,
 }
 
 /// How a granted request ended.
@@ -408,6 +409,28 @@ impl WindowLimit {
 pub struct OutboundLimits {
     pub global: Vec<WindowLimit>,
     pub chat: Vec<WindowLimit>,
+}
+
+/// A rate window applying only to one outbound request class.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OutboundClassWindowLimit {
+    pub class: OutboundClass,
+    pub capacity: u32,
+    pub window: Duration,
+}
+
+impl OutboundClassWindowLimit {
+    pub const fn new(class: OutboundClass, capacity: u32, window: Duration) -> Self {
+        Self { class, capacity, window }
+    }
+}
+
+/// Optional class-specific windows layered on top of the ordinary global and
+/// per-chat windows. An empty set preserves the legacy behavior.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OutboundClassLimits {
+    pub global: Vec<OutboundClassWindowLimit>,
+    pub chat: Vec<OutboundClassWindowLimit>,
 }
 
 /// Construction settings of an outbound queue.

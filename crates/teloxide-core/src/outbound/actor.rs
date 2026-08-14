@@ -42,12 +42,14 @@ use futures::FutureExt;
 use tokio::sync::{mpsc, oneshot};
 
 use super::{
-    scheduler::SchedulerState,
+    observability::{OutboundEvent, OutboundEventKind, OutboundObserver},
+    scheduler::{EnqueueOptions, SchedulerState},
     types::{
-        EnqueueError, Grant, JobId, OutboundAcquireError, OutboundCompletion, OutboundEnqueueMode,
-        OutboundLaneKey, OutboundLaneMode, OutboundLimits, OutboundMeta, OutboundMetadata,
-        OutboundQueueError, OutboundScope, OutboundSetLimitsError, OutboundSettings,
-        OutboundSnapshot, SchedulerConfigError, SchedulerWakeup,
+        EnqueueError, Grant, JobId, OutboundAcquireError, OutboundClassLimits, OutboundCompletion,
+        OutboundCorrelationId, OutboundEnqueueMode, OutboundLaneKey, OutboundLaneMode,
+        OutboundLimits, OutboundMeta, OutboundMetadata, OutboundQueueError, OutboundScope,
+        OutboundSetLimitsError, OutboundSettings, OutboundSnapshot, SchedulerConfigError,
+        SchedulerWakeup,
     },
 };
 
@@ -68,13 +70,31 @@ impl OutboundQueue {
     pub fn new(
         settings: OutboundSettings,
     ) -> Result<(Self, impl Future<Output = ()>), SchedulerConfigError> {
-        let (handle, actor) = OutboundQueueHandle::new(settings)?;
+        let (handle, actor) =
+            OutboundQueueHandle::new_with_class_limits(settings, OutboundClassLimits::default())?;
         Ok((Self { handle }, actor.run()))
     }
 
     /// Creates the queue and spawns the actor on the current Tokio runtime.
+    pub fn new_with_class_limits(
+        settings: OutboundSettings,
+        class_limits: OutboundClassLimits,
+    ) -> Result<(Self, impl Future<Output = ()>), SchedulerConfigError> {
+        let (handle, actor) = OutboundQueueHandle::new_with_class_limits(settings, class_limits)?;
+        Ok((Self { handle }, actor.run()))
+    }
+
     pub fn new_spawn(settings: OutboundSettings) -> Result<Self, SchedulerConfigError> {
         let (queue, actor) = Self::new(settings)?;
+        tokio::spawn(actor);
+        Ok(queue)
+    }
+
+    pub fn new_spawn_with_class_limits(
+        settings: OutboundSettings,
+        class_limits: OutboundClassLimits,
+    ) -> Result<Self, SchedulerConfigError> {
+        let (queue, actor) = Self::new_with_class_limits(settings, class_limits)?;
         tokio::spawn(actor);
         Ok(queue)
     }
@@ -85,6 +105,12 @@ impl OutboundQueue {
 
     pub fn into_handle(self) -> OutboundQueueHandle {
         self.handle
+    }
+
+    /// Installs an observer for lifecycle events emitted by this queue.
+    pub fn with_observer(self, observer: Arc<dyn OutboundObserver>) -> Self {
+        self.handle.set_observer(observer);
+        self
     }
 }
 
@@ -109,6 +135,7 @@ enum OutboundCommand {
         lane: Option<OutboundLaneKey>,
         lane_mode: Option<OutboundLaneMode>,
         mode: OutboundEnqueueMode,
+        correlation_id: Option<OutboundCorrelationId>,
         /// Unique cancellation identity of the acquire future. The caller
         /// can cancel a job with `Cancel { token }` BEFORE the actor has
         /// mapped the token to a `JobId` (the enqueue command may still be
@@ -132,9 +159,11 @@ enum OutboundCommand {
     },
     Start {
         job_id: JobId,
+        correlation_id: Option<OutboundCorrelationId>,
     },
     Complete {
         job_id: JobId,
+        correlation_id: Option<OutboundCorrelationId>,
         token_state: Arc<AtomicU8>,
         outcome: OutboundCompletion,
         /// When the caller observed the outcome, on the Tokio clock. The
@@ -157,6 +186,16 @@ enum OutboundCommand {
     SetLimits {
         limits: OutboundLimits,
         response: oneshot::Sender<Result<(), SchedulerConfigError>>,
+    },
+    GetClassLimits {
+        response: oneshot::Sender<OutboundClassLimits>,
+    },
+    SetClassLimits {
+        limits: OutboundClassLimits,
+        response: oneshot::Sender<Result<(), SchedulerConfigError>>,
+    },
+    SetObserver {
+        observer: Option<Arc<dyn OutboundObserver>>,
     },
     GetSnapshot {
         response: oneshot::Sender<OutboundSnapshot>,
@@ -194,13 +233,17 @@ pub struct OutboundQueueHandle {
 }
 
 impl OutboundQueueHandle {
-    fn new(settings: OutboundSettings) -> Result<(Self, OutboundActor), SchedulerConfigError> {
+    fn new_with_class_limits(
+        settings: OutboundSettings,
+        class_limits: OutboundClassLimits,
+    ) -> Result<(Self, OutboundActor), SchedulerConfigError> {
         if settings.queue_capacity == 0 {
             // tokio's bounded channels require a positive buffer; a zero
             // capacity queue could admit nothing anyway.
             return Err(SchedulerConfigError::ZeroQueueCapacity);
         }
-        let scheduler = SchedulerState::new(settings.limits, settings.aging)?;
+        let scheduler =
+            SchedulerState::new_with_class_limits(settings.limits, class_limits, settings.aging)?;
         // The enqueue ingress is bounded by the queue capacity: an acquire
         // that cannot be admitted fails fast with `QueueFull` instead of
         // growing the channel without bound. Lifecycle commands (including
@@ -226,6 +269,7 @@ impl OutboundQueueHandle {
             // deliberately not an enqueue sender: dropping every external
             // handle closes the ingress and ends the actor task.
             lifecycle_tx: lifecycle,
+            observer: None,
             queue_capacity: settings.queue_capacity,
             base: Instant::now(),
             started_at: tokio::time::Instant::now(),
@@ -240,7 +284,17 @@ impl OutboundQueueHandle {
     /// the queue is full or closed, or the job was superseded. Dropping the
     /// future before it resolves cancels the pending job.
     pub fn acquire(&self, metadata: OutboundMetadata) -> OutboundAcquire {
-        self.acquire_inner(metadata, None, None, OutboundEnqueueMode::Fifo)
+        self.acquire_inner(metadata, None, None, OutboundEnqueueMode::Fifo, None)
+    }
+
+    /// Acquires an independent request and associates it with an observer
+    /// correlation id.
+    pub fn acquire_with_correlation(
+        &self,
+        metadata: OutboundMetadata,
+        correlation_id: OutboundCorrelationId,
+    ) -> OutboundAcquire {
+        self.acquire_inner(metadata, None, None, OutboundEnqueueMode::Fifo, Some(correlation_id))
     }
 
     /// Starts a TWO-PHASE acquire for an independent request (no ordering
@@ -257,7 +311,7 @@ impl OutboundQueueHandle {
     /// when a second caller appears.
     #[cfg(any(feature = "throttle", test))]
     pub(crate) fn enqueue(&self, metadata: OutboundMetadata) -> OutboundEnqueue {
-        self.enqueue_inner(metadata, None, None, OutboundEnqueueMode::Fifo)
+        self.enqueue_inner(metadata, None, None, OutboundEnqueueMode::Fifo, None)
     }
 
     /// Acquires a permit for a latest-wins slot: while the job is still
@@ -270,7 +324,13 @@ impl OutboundQueueHandle {
         metadata: OutboundMetadata,
         user_key: u64,
     ) -> OutboundAcquire {
-        self.acquire_inner(metadata, None, None, OutboundEnqueueMode::ReplacePending { user_key })
+        self.acquire_inner(
+            metadata,
+            None,
+            None,
+            OutboundEnqueueMode::ReplacePending { user_key },
+            None,
+        )
     }
 
     /// Creates a strictly FIFO ordering lane. At most one request of the
@@ -300,9 +360,16 @@ impl OutboundQueueHandle {
         lane: Option<OutboundLaneKey>,
         lane_mode: Option<OutboundLaneMode>,
         mode: OutboundEnqueueMode,
+        correlation_id: Option<OutboundCorrelationId>,
     ) -> OutboundAcquire {
         OutboundAcquire {
-            inner: AcquireInner::Enqueuing(self.enqueue_inner(metadata, lane, lane_mode, mode)),
+            inner: AcquireInner::Enqueuing(self.enqueue_inner(
+                metadata,
+                lane,
+                lane_mode,
+                mode,
+                correlation_id,
+            )),
         }
     }
 
@@ -312,6 +379,7 @@ impl OutboundQueueHandle {
         lane: Option<OutboundLaneKey>,
         lane_mode: Option<OutboundLaneMode>,
         mode: OutboundEnqueueMode,
+        correlation_id: Option<OutboundCorrelationId>,
     ) -> OutboundEnqueue {
         let (response, response_rx) = oneshot::channel();
         let (granted, granted_rx) = oneshot::channel();
@@ -325,6 +393,7 @@ impl OutboundQueueHandle {
             lane,
             lane_mode,
             mode,
+            correlation_id,
             token,
             token_state: token_state.clone(),
             response,
@@ -379,6 +448,40 @@ impl OutboundQueueHandle {
         }
     }
 
+    /// Replaces optional class-specific windows without changing ordinary
+    /// global or per-chat limits.
+    pub async fn set_class_limits(
+        &self,
+        limits: OutboundClassLimits,
+    ) -> Result<(), OutboundSetLimitsError> {
+        let (response, response_rx) = oneshot::channel();
+        self.lifecycle
+            .send(OutboundCommand::SetClassLimits { limits, response })
+            .map_err(|_| OutboundSetLimitsError::Closed)?;
+        match response_rx.await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => Err(OutboundSetLimitsError::Invalid(error)),
+            Err(_) => Err(OutboundSetLimitsError::Closed),
+        }
+    }
+
+    /// Returns the active class-specific windows.
+    pub async fn class_limits(&self) -> Option<OutboundClassLimits> {
+        let (response, response_rx) = oneshot::channel();
+        self.lifecycle.send(OutboundCommand::GetClassLimits { response }).ok()?;
+        response_rx.await.ok()
+    }
+
+    /// Installs or replaces the lifecycle observer.
+    pub fn set_observer(&self, observer: Arc<dyn OutboundObserver>) {
+        let _ = self.lifecycle.send(OutboundCommand::SetObserver { observer: Some(observer) });
+    }
+
+    /// Removes the lifecycle observer.
+    pub fn clear_observer(&self) {
+        let _ = self.lifecycle.send(OutboundCommand::SetObserver { observer: None });
+    }
+
     /// A point-in-time snapshot of the queue state.
     pub async fn snapshot(&self) -> Option<OutboundSnapshot> {
         let (response, response_rx) = oneshot::channel();
@@ -413,7 +516,7 @@ impl OutboundQueueHandle {
 /// An ordering lane obtained from [`OutboundQueueHandle::serial_lane`] or
 /// [`OutboundQueueHandle::ordered_start_lane`]. Requests are always granted
 /// in enqueue order; the release point depends on the lane mode.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct OutboundLane {
     handle: OutboundQueueHandle,
     key: OutboundLaneKey,
@@ -431,6 +534,22 @@ impl OutboundLane {
             Some(self.key),
             Some(self.mode),
             OutboundEnqueueMode::Fifo,
+            None,
+        )
+    }
+
+    /// Acquires a lane request with an observer correlation id.
+    pub fn acquire_with_correlation(
+        &self,
+        metadata: OutboundMetadata,
+        correlation_id: OutboundCorrelationId,
+    ) -> OutboundAcquire {
+        self.handle.acquire_inner(
+            metadata,
+            Some(self.key),
+            Some(self.mode),
+            OutboundEnqueueMode::Fifo,
+            Some(correlation_id),
         )
     }
 
@@ -446,6 +565,7 @@ impl OutboundLane {
             Some(self.key),
             Some(self.mode),
             OutboundEnqueueMode::ReplacePending { user_key },
+            None,
         )
     }
 }
@@ -661,6 +781,7 @@ pub struct OutboundPermit {
     job_id: JobId,
     lifecycle: mpsc::UnboundedSender<OutboundCommand>,
     token_state: Arc<AtomicU8>,
+    correlation_id: Option<OutboundCorrelationId>,
     completed: bool,
     started: bool,
 }
@@ -670,8 +791,9 @@ impl OutboundPermit {
         job_id: JobId,
         lifecycle: mpsc::UnboundedSender<OutboundCommand>,
         token_state: Arc<AtomicU8>,
+        correlation_id: Option<OutboundCorrelationId>,
     ) -> Self {
-        Self { job_id, lifecycle, token_state, completed: false, started: false }
+        Self { job_id, lifecycle, token_state, correlation_id, completed: false, started: false }
     }
 
     /// Confirms that the actual outbound request is about to start.
@@ -684,7 +806,10 @@ impl OutboundPermit {
             return;
         }
         self.started = true;
-        let _ = self.lifecycle.send(OutboundCommand::Start { job_id: self.job_id });
+        let _ = self.lifecycle.send(OutboundCommand::Start {
+            job_id: self.job_id,
+            correlation_id: self.correlation_id,
+        });
     }
 
     /// Reports how the request ended and releases the permit.
@@ -714,6 +839,7 @@ impl OutboundPermit {
         self.token_state.store(TOKEN_TERMINAL, Ordering::Release);
         let _ = self.lifecycle.send(OutboundCommand::Complete {
             job_id: self.job_id,
+            correlation_id: self.correlation_id,
             token_state: self.token_state.clone(),
             outcome,
             observed_at,
@@ -734,6 +860,7 @@ impl OutboundPermit {
         self.completed = true;
         let sent = self.lifecycle.send(OutboundCommand::Complete {
             job_id: self.job_id,
+            correlation_id: self.correlation_id,
             token_state: self.token_state.clone(),
             outcome,
             observed_at: tokio::time::Instant::now(),
@@ -755,6 +882,7 @@ impl Drop for OutboundPermit {
         if !self.completed {
             let _ = self.lifecycle.send(OutboundCommand::Complete {
                 job_id: self.job_id,
+                correlation_id: self.correlation_id,
                 token_state: self.token_state.clone(),
                 outcome: OutboundCompletion::CancelledAfterGrant,
                 observed_at: tokio::time::Instant::now(),
@@ -784,6 +912,7 @@ pub(crate) struct OutboundActor {
     /// [`OutboundActor::deliver_grants`]. Deliberately a lifecycle sender,
     /// never an enqueue sender: the actor must not keep the ingress open.
     lifecycle_tx: mpsc::UnboundedSender<OutboundCommand>,
+    observer: Option<Arc<dyn OutboundObserver>>,
     queue_capacity: usize,
     /// `std` clock anchor: the scheduler sees `base + tokio_elapsed`, so
     /// paused Tokio time drives the scheduler deterministically in tests.
@@ -823,6 +952,16 @@ impl OutboundActor {
         }
     }
 
+    fn observe(&self, kind: OutboundEventKind, correlation_id: Option<OutboundCorrelationId>) {
+        let Some(observer) = &self.observer else { return };
+        let event = OutboundEvent { kind, correlation_id, at: Instant::now() };
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| observer.observe(event)))
+            .is_err()
+        {
+            log::warn!("outbound observer panicked; event was dropped");
+        }
+    }
+
     fn handle_command(&mut self, command: OutboundCommand) {
         match command {
             OutboundCommand::Enqueue {
@@ -830,6 +969,7 @@ impl OutboundActor {
                 lane,
                 lane_mode,
                 mode,
+                correlation_id,
                 token,
                 token_state,
                 response,
@@ -856,17 +996,25 @@ impl OutboundActor {
                     weight: metadata.weight,
                 };
                 let enqueue = match lane_mode {
-                    Some(lane_mode) => self.scheduler.enqueue_with_lane_mode(
+                    Some(lane_mode) => self.scheduler.enqueue_with_lane_mode_and_correlation(
                         meta,
-                        lane_mode,
+                        EnqueueOptions {
+                            lane_mode,
+                            mode,
+                            queue_capacity: self.queue_capacity,
+                            not_before: None,
+                            now: self.now(),
+                            correlation_id,
+                        },
+                    ),
+                    None => self.scheduler.enqueue_with_correlation(
+                        meta,
                         mode,
                         self.queue_capacity,
                         None,
                         self.now(),
+                        correlation_id,
                     ),
-                    None => {
-                        self.scheduler.enqueue(meta, mode, self.queue_capacity, None, self.now())
-                    }
                 };
                 match enqueue {
                     Ok(outcome) => {
@@ -879,6 +1027,7 @@ impl OutboundActor {
                         self.pending_tokens.insert(token, outcome.job);
                         self.job_tokens.insert(outcome.job, token);
                         self.token_states.insert(token, token_state);
+                        self.observe(OutboundEventKind::Enqueued, correlation_id);
                         if response.send(Ok(outcome.job)).is_err() {
                             // The acquire future was dropped before the reply
                             // was delivered. The job is still pending here
@@ -918,17 +1067,31 @@ impl OutboundActor {
                     self.forget_job(job_id);
                 }
             }
-            OutboundCommand::Start { job_id } => {
+            OutboundCommand::Start { job_id, correlation_id } => {
                 self.scheduler.start(job_id, self.now());
+                self.observe(OutboundEventKind::Started, correlation_id);
             }
-            OutboundCommand::Complete { token_state, job_id, outcome, observed_at, ack } => {
-                self.scheduler.complete(job_id, outcome, self.now(), self.to_std(observed_at));
+            OutboundCommand::Complete {
+                token_state,
+                job_id,
+                correlation_id,
+                outcome,
+                observed_at,
+                ack,
+            } => {
+                self.scheduler.complete(
+                    job_id,
+                    outcome.clone(),
+                    self.now(),
+                    self.to_std(observed_at),
+                );
                 token_state.store(TOKEN_TERMINAL, Ordering::Release);
                 // Keep the token mapping through grant delivery so a
                 // buffered grant dropped before polling can still send its
                 // cancellation without creating a permanent tombstone.
                 // Completion is the terminal point for the token lifecycle.
                 self.forget_job(job_id);
+                self.observe(OutboundEventKind::Completed { outcome }, correlation_id);
                 if let Some(ack) = ack {
                     let _ = ack.send(());
                 }
@@ -947,6 +1110,15 @@ impl OutboundActor {
             }
             OutboundCommand::SetLimits { limits, response } => {
                 let _ = response.send(self.scheduler.set_limits(limits, self.now()));
+            }
+            OutboundCommand::GetClassLimits { response } => {
+                let _ = response.send(self.scheduler.class_limits().clone());
+            }
+            OutboundCommand::SetClassLimits { limits, response } => {
+                let _ = response.send(self.scheduler.set_class_limits(limits, self.now()));
+            }
+            OutboundCommand::SetObserver { observer } => {
+                self.observer = observer;
             }
             OutboundCommand::GetSnapshot { response } => {
                 let _ = response.send(self.scheduler.snapshot());
@@ -972,7 +1144,13 @@ impl OutboundActor {
             let token = self.job_tokens.get(&grant.job).copied();
             let Some(token) = token else { continue };
             let Some(token_state) = self.token_states.get(&token).cloned() else { continue };
-            let permit = OutboundPermit::new(grant.job, self.lifecycle_tx.clone(), token_state);
+            let permit = OutboundPermit::new(
+                grant.job,
+                self.lifecycle_tx.clone(),
+                token_state,
+                grant.correlation_id,
+            );
+            self.observe(OutboundEventKind::Granted, grant.correlation_id);
             if let Some(waiter) = self.waiters.remove(&grant.job) {
                 let _ = waiter.send(AcquireResult::Granted(permit));
             }
@@ -1112,11 +1290,15 @@ impl OutboundActor {
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroU32;
+    use std::{
+        num::NonZeroU32,
+        sync::{Arc, Mutex},
+    };
 
     use super::*;
     use crate::outbound::types::{
-        AgingPolicy, OutboundChatKey, OutboundClass, OutboundPriority, WindowLimit,
+        AgingPolicy, OutboundChatKey, OutboundClass, OutboundClassWindowLimit, OutboundPriority,
+        WindowLimit,
     };
 
     fn settings() -> OutboundSettings {
@@ -1428,6 +1610,160 @@ mod tests {
         // released, so the second job of the lane proceeds.
         drop(first);
         let permit = tokio::time::timeout(Duration::from_secs(1), second).await.unwrap().unwrap();
+        permit.complete(OutboundCompletion::Success);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn class_limits_are_applied_by_the_actor() {
+        let class = OutboundClass::new(7);
+        let queue = OutboundQueue::new_spawn_with_class_limits(
+            settings(),
+            OutboundClassLimits {
+                global: vec![OutboundClassWindowLimit::new(class, 1, Duration::from_secs(60))],
+                chat: Vec::new(),
+            },
+        )
+        .unwrap();
+        let handle = queue.handle();
+        let first = handle.acquire(OutboundMetadata {
+            scope: OutboundScope::Global,
+            class,
+            priority: OutboundPriority::NORMAL,
+            weight: NonZeroU32::new(1).unwrap(),
+        });
+        let first = first.await.unwrap();
+        let blocked = handle.acquire(OutboundMetadata {
+            scope: OutboundScope::Global,
+            class,
+            priority: OutboundPriority::NORMAL,
+            weight: NonZeroU32::new(1).unwrap(),
+        });
+        tokio::pin!(blocked);
+        tokio::task::yield_now().await;
+        assert!(futures::poll!(blocked.as_mut()).is_pending());
+        assert_eq!(handle.class_limits().await.unwrap().global.len(), 1);
+        first.complete(OutboundCompletion::Success);
+        tokio::time::advance(Duration::from_secs(61)).await;
+        let permit = tokio::time::timeout(Duration::from_secs(1), blocked).await.unwrap().unwrap();
+        permit.complete(OutboundCompletion::Success);
+    }
+
+    #[derive(Default)]
+    struct RecordingObserver {
+        events: Mutex<Vec<OutboundEvent>>,
+    }
+
+    impl OutboundObserver for RecordingObserver {
+        fn observe(&self, event: OutboundEvent) {
+            self.events.lock().unwrap().push(event);
+        }
+    }
+
+    struct PanickingObserver;
+
+    impl OutboundObserver for PanickingObserver {
+        fn observe(&self, _event: OutboundEvent) {
+            panic!("observer failure must stay inside the actor");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn observer_lifecycle_preserves_correlation_and_is_panic_isolated() {
+        let queue = OutboundQueue::new_spawn(settings()).unwrap();
+        let handle = queue.handle();
+        let first = Arc::new(RecordingObserver::default());
+        handle.set_observer(first.clone());
+        assert!(handle.snapshot().await.is_some());
+
+        let correlation_id = OutboundCorrelationId::new(42);
+        let mut permit = handle
+            .acquire_with_correlation(metadata(OutboundPriority::NORMAL), correlation_id)
+            .await
+            .unwrap();
+        permit.start();
+        permit.complete(OutboundCompletion::Success);
+        assert!(handle.snapshot().await.is_some());
+
+        let events = first.events.lock().unwrap().clone();
+        assert!(matches!(
+            events.first().map(|event| &event.kind),
+            Some(OutboundEventKind::Enqueued)
+        ));
+        assert!(matches!(events.get(1).map(|event| &event.kind), Some(OutboundEventKind::Granted)));
+        assert!(matches!(events.get(2).map(|event| &event.kind), Some(OutboundEventKind::Started)));
+        assert!(matches!(
+            events.get(3).map(|event| &event.kind),
+            Some(OutboundEventKind::Completed { outcome: OutboundCompletion::Success })
+        ));
+        assert!(events.iter().all(|event| event.correlation_id == Some(correlation_id)));
+
+        let second = Arc::new(RecordingObserver::default());
+        handle.set_observer(second.clone());
+        assert!(handle.snapshot().await.is_some());
+        handle.clear_observer();
+        assert!(handle.snapshot().await.is_some());
+        handle.set_observer(Arc::new(PanickingObserver));
+        assert!(handle.snapshot().await.is_some());
+        let permit = handle.acquire(metadata(OutboundPriority::NORMAL)).await.unwrap();
+        permit.complete(OutboundCompletion::Success);
+        assert!(handle.snapshot().await.is_some());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn runtime_class_limits_reconfiguration_carries_history_and_pause() {
+        let queue = OutboundQueue::new_spawn(settings()).unwrap();
+        let handle = queue.handle();
+        let class = OutboundClass::new(8);
+        let limits = OutboundClassLimits {
+            global: vec![OutboundClassWindowLimit::new(class, 1, Duration::from_secs(60))],
+            chat: Vec::new(),
+        };
+        handle.set_class_limits(limits.clone()).await.unwrap();
+        let first = handle
+            .acquire(OutboundMetadata {
+                scope: OutboundScope::Global,
+                class,
+                priority: OutboundPriority::NORMAL,
+                weight: NonZeroU32::new(1).unwrap(),
+            })
+            .await
+            .unwrap();
+        let blocked = handle.acquire(OutboundMetadata {
+            scope: OutboundScope::Global,
+            class,
+            priority: OutboundPriority::NORMAL,
+            weight: NonZeroU32::new(1).unwrap(),
+        });
+        tokio::pin!(blocked);
+        tokio::task::yield_now().await;
+        assert!(futures::poll!(blocked.as_mut()).is_pending());
+
+        handle.set_class_limits(limits.clone()).await.unwrap();
+        tokio::time::advance(Duration::from_secs(59)).await;
+        assert!(futures::poll!(blocked.as_mut()).is_pending());
+        first.complete(OutboundCompletion::Success);
+        tokio::time::advance(Duration::from_secs(2)).await;
+        let permit = tokio::time::timeout(Duration::from_secs(1), blocked).await.unwrap().unwrap();
+        permit.complete(OutboundCompletion::Success);
+
+        handle
+            .set_class_limits(OutboundClassLimits {
+                global: vec![OutboundClassWindowLimit::new(class, 0, Duration::from_secs(60))],
+                chat: Vec::new(),
+            })
+            .await
+            .unwrap();
+        let paused = handle.acquire(OutboundMetadata {
+            scope: OutboundScope::Global,
+            class,
+            priority: OutboundPriority::NORMAL,
+            weight: NonZeroU32::new(1).unwrap(),
+        });
+        tokio::pin!(paused);
+        tokio::task::yield_now().await;
+        assert!(futures::poll!(paused.as_mut()).is_pending());
+        handle.set_class_limits(OutboundClassLimits::default()).await.unwrap();
+        let permit = tokio::time::timeout(Duration::from_secs(1), paused).await.unwrap().unwrap();
         permit.complete(OutboundCompletion::Success);
     }
 

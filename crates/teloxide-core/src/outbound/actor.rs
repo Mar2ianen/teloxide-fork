@@ -1693,11 +1693,13 @@ mod tests {
 
     struct PanickingObserver {
         calls: Arc<AtomicUsize>,
+        events: tokio::sync::mpsc::UnboundedSender<()>,
     }
 
     impl OutboundObserver for PanickingObserver {
         fn observe(&self, _event: OutboundEvent) {
             self.calls.fetch_add(1, Ordering::SeqCst);
+            let _ = self.events.send(());
             panic!("observer failure must stay inside the consumer thread");
         }
     }
@@ -1714,7 +1716,7 @@ mod tests {
         }
     }
 
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn observer_lifecycle_preserves_correlation_and_is_panic_isolated() {
         let queue = OutboundQueue::new_spawn(settings()).unwrap();
         let handle = queue.handle();
@@ -1751,17 +1753,21 @@ mod tests {
         handle.clear_observer();
         assert!(handle.snapshot().await.is_some());
         let panicking_calls = Arc::new(AtomicUsize::new(0));
-        handle.set_observer(Arc::new(PanickingObserver { calls: panicking_calls.clone() }));
+        let (panic_events_tx, mut panic_events_rx) = tokio::sync::mpsc::unbounded_channel();
+        handle.set_observer(Arc::new(PanickingObserver {
+            calls: panicking_calls.clone(),
+            events: panic_events_tx,
+        }));
         assert!(handle.snapshot().await.is_some());
         let permit = handle.acquire(metadata(OutboundPriority::NORMAL)).await.unwrap();
         permit.complete(OutboundCompletion::Success);
         assert!(handle.snapshot().await.is_some());
-        for _ in 0..1_000 {
-            if panicking_calls.load(Ordering::SeqCst) >= 2 {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
+        let received = tokio::time::timeout(Duration::from_secs(1), async {
+            panic_events_rx.recv().await.expect("first observer callback");
+            panic_events_rx.recv().await.expect("second observer callback");
+        })
+        .await;
+        assert!(received.is_ok());
         assert!(panicking_calls.load(Ordering::SeqCst) >= 2);
     }
 

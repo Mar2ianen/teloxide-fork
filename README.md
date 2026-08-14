@@ -48,6 +48,25 @@ This fork includes two opt-in application layers that stay outside the default T
 - `drafter` provides asynchronous latest-wins preview delivery, shared rate limiting, native-draft and edit-in-place backends, segment commits, finalization, abort cleanup and delivery certainty
 - `rich-text` provides the shared semantic Rich Text pipeline: HTML, developer Markdown and LLM Markdown frontends with bound links, custom emoji and time normalization
 - `time-rendering` is a feature-level compatibility alias that also enables the Rich Text pipeline; the former formatter API was replaced by the shared semantic API
+- the outbound scheduler is available through `OutboundQueue` and `Bot::outbound(queue)`; it is opt-in and does not change ordinary `Bot` request behavior
+
+### Outbound scheduler
+
+The scheduler is explicit and opt-in. It can be shared by every requester that
+should use the same admission and rate-limit budget:
+
+```rust,no_run
+use teloxide::{outbound::{OutboundQueue, OutboundSettings}, prelude::*};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let queue = OutboundQueue::new_spawn(OutboundSettings::default())?;
+    let bot = Bot::from_env().outbound(queue);
+
+    bot.send_message(ChatId(1), "scheduled request").await?;
+    Ok(())
+}
+```
 
 The `rich-text` context is shared by all three frontends and contains both
 `TimeBindings` and `RichTextBindings`. Use `RichTextRenderContext::for_developer`
@@ -58,7 +77,7 @@ parser landmarks, not safe message-segmentation boundaries.
 Enable only the layer an application needs:
 
 ```toml
-teloxide = { version = "0.18.0", features = ["macros", "drafter", "rich-text"] }
+teloxide = { version = "0.19.0", features = ["macros", "drafter", "rich-text"] }
 ```
 
 The Drafter example requires the feature explicitly:
@@ -123,7 +142,7 @@ $ rustup override set nightly
  5. Run `cargo new my_bot`, enter the directory and put these lines into your `Cargo.toml`:
 ```toml
 [dependencies]
-teloxide = { version = "0.18.0", features = ["macros"] }
+teloxide = { version = "0.19.0", features = ["macros"] }
 log = "0.4"
 pretty_env_logger = "0.5"
 tokio = { version =  "1.39", features = ["rt-multi-thread", "macros"] }

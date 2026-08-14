@@ -1,4 +1,4 @@
-# Outbound scheduler — design note (Commits 1–9)
+# Outbound scheduler — design note (Commits 1–10)
 
 Deterministic outbound scheduling model in `crates/teloxide-core/src/outbound/`.
 
@@ -15,7 +15,7 @@ Deterministic outbound scheduling model in `crates/teloxide-core/src/outbound/`.
   classified), and every `Requester` method of `Outbound<R>` returns a
   `ScheduledRequest` (see "Payload classification (Commit 4)" below).
   Public API: `OutboundMetadata`, `OutboundPriority`, `OutboundScope`,
-  `OutboundCompletion`, `OutboundLimits`, `OutboundSettings` (with
+  `OutboundLaneMode`, `OutboundCompletion`, `OutboundLimits`, `OutboundSettings` (with
   `OutboundSettings::default()`), `AgingPolicy`, `OutboundQueueError`,
   `OutboundAcquireError` (now `Display` + `std::error::Error`),
   `OutboundSnapshot`, `SchedulerConfigError`, `Outbound`, `ScheduledRequest`,
@@ -42,8 +42,12 @@ Deterministic outbound scheduling model in `crates/teloxide-core/src/outbound/`.
   silently probing `get_chat`.
 - **Commit 9**: the old `Throttle` worker, request-lock and legacy requester
   modules are removed physically. The compatibility tests now exercise only
-  the scheduler-backed implementation; `OrderedStart` remains a separate
-  future ordering-lane design.
+  the scheduler-backed implementation.
+- **Commit 10**: `OutboundLaneMode::OrderedStart` adds an explicit start
+  boundary to ordering lanes. Requests are still granted in enqueue order,
+  but the next permit may be granted after `OutboundPermit::start()` and
+  before the earlier request completes; rate accounting and completion remain
+  attached to each individual permit.
 
 ## Scope
 
@@ -73,7 +77,7 @@ reservations: HashMap<WindowRef, Reservation>
       Reservation { until, queue: VecDeque<CandidateRef> } (parked
       consumers; a lane reference wakes the lane's current head)
 lanes: HashMap<OutboundLaneKey, LaneState>
-      LaneState { pending: BTreeSet<(u64 order, JobId)>, in_flight,
+      LaneState { pending: BTreeSet<(u64 order, JobId)>, mode, in_flight,
                   next_order, stale, in_candidate_heap, candidate_effective }
       (order is the lane's own counter — lane FIFO is immune to the global
        sequence wraparound; the window is rebased densely on counter wrap)
@@ -135,9 +139,12 @@ stale key in the heap.
 
 ## Ordering lanes
 
-Strict FIFO in enqueue order, **independent of priority and `not_before`**:
-the lane head is the only grantable job, so a later Critical job can never
-overtake an earlier Normal head, and a delayed head blocks the whole lane.
+Both lane modes preserve strict FIFO in enqueue order, **independent of
+priority and `not_before`**: a later Critical job can never overtake an
+earlier Normal head, and a delayed head blocks the whole lane. `Serial`
+keeps the lane occupied until completion. `OrderedStart` keeps the lane
+occupied until the granted permit receives `start()`; subsequent grants may
+then run concurrently with earlier requests, but can never start before them.
 Priority only chooses between the heads of different lanes (and between
 unlaned jobs).
 
@@ -247,8 +254,8 @@ quadratic regressions.
 `new_spawn` spawns it on the current runtime. The handle speaks command
 RPC: `Enqueue` goes through a **bounded** channel of capacity
 `OutboundSettings::queue_capacity` (fail-fast `QueueFull`), while lifecycle
-commands (`Cancel`, `Complete`, `Penalize`, `GetLimits`, `SetLimits`,
-`GetSnapshot`, `Shutdown`) ride a separate **unbounded** channel so that
+commands (`Cancel`, `Start`, `Complete`, `Penalize`, `GetLimits`,
+`SetLimits`, `GetSnapshot`, `Shutdown`) ride a separate **unbounded** channel so that
 `Drop`-based completions can never await a bounded send and a saturated
 ingress cannot delay them. The actor is the sole owner of the scheduler
 state. The actor clock derives `now` from the Tokio clock, so
@@ -258,8 +265,10 @@ state. The actor clock derives `now` from the Tokio clock, so
 
 - `acquire(metadata)` enqueues a FIFO request; `acquire_latest_wins(metadata,
   user_key)` uses a latest-wins slot. `serial_lane()` allocates a strict FIFO
-  ordering lane (`OutboundLane`); at most one lane request is in flight and
-  the lane is served in enqueue order.
+  lane that releases on completion; `ordered_start_lane()` allocates a lane
+  that releases after the caller invokes `OutboundPermit::start()`. Both
+  modes preserve enqueue order, while `OrderedStart` permits already-started
+  requests to run concurrently.
 - `OutboundAcquire` resolves with `OutboundPermit` or an error. The grant
   receiver is owned by the future from the moment of creation (it is not
   nested inside the enqueue reply), and the **permit is minted by the actor
@@ -342,7 +351,6 @@ capacity (the debit is never refunded) until it expires.
 
 `Outbound<R>` wraps any `Requester` and returns `ScheduledRequest<R::Method>`
 values for the full method set (Commit 4 generates the `Requester` impl).
-A
 `ScheduledRequest<Req>` is itself a `Request`: it holds the inner request,
 the queue, the lane and the request-level `OutboundOverrides`
 (priority/weight/class), and its `Send` future runs the vertical slice:
@@ -352,6 +360,7 @@ compute the effective hint from the final payload + overrides (adaptor
 requests: scope/class/priority/weight, batch weights from the current
 batch length)
   ->  acquire permit (lane or queue handle)
+  ->  permit.start()
   ->  ONLY NOW create and poll the inner request (send()/send_ref())
   ->  classify the outcome
         Ok(_)                   -> Success
@@ -513,7 +522,7 @@ pub trait OutboundPayload {
   every throttled request, preserving the legacy "one API call = one
   message" accounting.
 - **Not** in `OutboundPayload` by design: `ReplacePending`/`user_key`
-  (latest-wins slots are chosen by the calling layer), serial lanes
+  (latest-wins slots are chosen by the calling layer), lane mode
   (`on_lane` stays an explicit choice), retry policy and correlation ids.
   The payload classifies only what is actually being sent.
 
@@ -738,7 +747,5 @@ into the new hook when they issue cleanup requests.
 
 ## Out of scope (later commits)
 
-`OrderedStart` lanes (Commit 2 is serial-only), `Bot::outbound`-style
-extension sugar, class-aware window sets for the raw `Outbound` adaptor,
-durable outbox,
-observability hooks.
+`Bot::outbound`-style extension sugar, class-aware window sets for the raw
+`Outbound` adaptor, durable outbox, observability hooks.

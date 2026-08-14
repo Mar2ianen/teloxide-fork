@@ -9,8 +9,8 @@
 //! - one enqueue yields at most one permit;
 //! - FIFO within the same effective priority; ordering lanes are strictly FIFO
 //!   in enqueue order regardless of priority or `not_before`;
-//! - at most one in-flight request per ordering lane, and only the lane head
-//!   can be granted;
+//! - only the lane head can be granted; `Serial` lanes keep their lock until
+//!   completion, while `OrderedStart` lanes release it at start;
 //! - cancelling a waiting job removes it without a phantom lock;
 //! - rolling-window budget is debited at grant time; it is refunded only for an
 //!   explicit `NoRequest` completion when no outbound request started;
@@ -42,14 +42,14 @@ const BLOCKED_FOREVER_DELAY: Duration = Duration::from_secs(365 * 24 * 3600);
 
 use super::types::{
     AgingPolicy, EnqueueError, EnqueueOutcome, Grant, JobId, OutboundChatKey, OutboundClass,
-    OutboundCompletion, OutboundEnqueueMode, OutboundLaneKey, OutboundLimits, OutboundMeta,
-    OutboundPriority, OutboundScope, OutboundSnapshot, SchedulerConfigError, SchedulerWakeup,
-    WindowChatKind, WindowLimit,
+    OutboundCompletion, OutboundEnqueueMode, OutboundLaneKey, OutboundLaneMode, OutboundLimits,
+    OutboundMeta, OutboundPriority, OutboundScope, OutboundSnapshot, SchedulerConfigError,
+    SchedulerWakeup, WindowChatKind, WindowLimit,
 };
 
-/// A granted job whose permit is still in flight. The lane is released on
-/// completion; the penalty scope is carried by the completion itself, so it
-/// is not stored here.
+/// A granted job whose permit is still in flight. Its lane may already be
+/// released for an `OrderedStart` request; the penalty scope is carried by
+/// the completion itself, so it is not stored here.
 struct InFlight {
     lane: Option<OutboundLaneKey>,
     scope: OutboundScope,
@@ -95,8 +95,9 @@ struct Job {
 }
 
 /// An ordering lane: strictly FIFO in sequence order. The lane head is the
-/// only job that can be granted; the head can still be a delayed job, which
-/// blocks the whole lane until it becomes ready.
+/// only job that can be granted while the lane is locked; `Serial` keeps the
+/// lock until completion and `OrderedStart` releases it at explicit start.
+/// The head can still be delayed, which blocks the whole lane until ready.
 ///
 /// Pending jobs are keyed by `(lane order, job id)` for O(log N) insertion
 /// and head removal. The order comes from the lane's own counter, so lane
@@ -105,6 +106,7 @@ struct Job {
 /// counted in `stale` for periodic compaction.
 struct LaneState {
     pending: BTreeSet<(u64, JobId)>,
+    mode: OutboundLaneMode,
     in_flight: Option<JobId>,
     /// Order counter of the next enqueued job; wraps after 2^64 enqueues
     /// to this lane (unobservable in practice).
@@ -573,6 +575,25 @@ impl SchedulerState {
         not_before: Option<Instant>,
         now: Instant,
     ) -> Result<EnqueueOutcome, EnqueueError> {
+        self.enqueue_with_lane_mode(
+            meta,
+            OutboundLaneMode::Serial,
+            mode,
+            queue_capacity,
+            not_before,
+            now,
+        )
+    }
+
+    pub(crate) fn enqueue_with_lane_mode(
+        &mut self,
+        meta: OutboundMeta,
+        lane_mode: OutboundLaneMode,
+        mode: OutboundEnqueueMode,
+        queue_capacity: usize,
+        not_before: Option<Instant>,
+        now: Instant,
+    ) -> Result<EnqueueOutcome, EnqueueError> {
         // A job that exceeds a positive-capacity applicable window could
         // never be granted; reject it at enqueue time instead of parking it
         // forever. A zero-capacity window is an explicit pause.
@@ -683,7 +704,7 @@ impl SchedulerState {
         }
         match lane {
             Some(lane) => {
-                let order = self.insert_lane_pending(lane, job, lane_order);
+                let order = self.insert_lane_pending(lane, job, lane_order, lane_mode);
                 self.jobs.get_mut(&job).expect("job exists").lane_order = Some(order);
                 // A replacement of the queued head may change its priority:
                 // drop the lane's candidate state so that the fresh key
@@ -1152,9 +1173,11 @@ impl SchedulerState {
         lane: OutboundLaneKey,
         job: JobId,
         inherited_order: Option<u64>,
+        mode: OutboundLaneMode,
     ) -> u64 {
         let lane_state = self.lanes.entry(lane).or_insert_with(|| LaneState {
             pending: BTreeSet::new(),
+            mode,
             in_flight: None,
             next_order: 0,
             stale: 0,
@@ -1163,6 +1186,7 @@ impl SchedulerState {
             blocked_generation: 0,
             candidate_effective: 0,
         });
+        debug_assert_eq!(lane_state.mode, mode, "a lane cannot change ordering mode");
         let order = match inherited_order {
             Some(order) => order,
             None => {
@@ -1827,6 +1851,31 @@ impl SchedulerState {
         );
     }
 
+    /// Confirms that an ordered-start job has begun executing. This releases
+    /// its lane, but keeps the job in the global in-flight map until completion
+    /// so rate accounting and the permit lifecycle remain per-request.
+    pub(crate) fn start(&mut self, job: JobId, now: Instant) {
+        let Some(lane) = self.in_flight.get(&job).and_then(|in_flight| in_flight.lane) else {
+            return;
+        };
+        let release = self.lanes.get_mut(&lane).is_some_and(|state| {
+            if state.mode != OutboundLaneMode::OrderedStart || state.in_flight != Some(job) {
+                return false;
+            }
+            state.in_flight = None;
+            true
+        });
+        if !release {
+            return;
+        }
+        let has_pending = self.lanes.get(&lane).is_some_and(|state| !state.pending.is_empty());
+        if has_pending {
+            self.push_lane_head_candidate(lane, now);
+        } else {
+            self.lanes.remove(&lane);
+        }
+    }
+
     /// Finishes a granted job and releases its lane exactly once (a repeated
     /// completion is a no-op). A `RetryAfter` completion penalizes the
     /// reported scope until `penalty_observed_at + duration`: the deadline
@@ -1844,17 +1893,28 @@ impl SchedulerState {
         let Some(in_flight) = self.in_flight.remove(&job) else { return };
         let refund = matches!(&completion, OutboundCompletion::NoRequest);
         if let Some(lane) = in_flight.lane {
-            let has_pending = match self.lanes.get_mut(&lane) {
-                Some(state) => {
-                    debug_assert_eq!(state.in_flight, Some(job), "the lane belongs to the job");
-                    state.in_flight = None;
-                    !state.pending.is_empty()
+            let released = self.lanes.get_mut(&lane).is_some_and(|state| {
+                if state.in_flight != Some(job) {
+                    return false;
                 }
-                None => false,
-            };
-            if has_pending {
-                self.push_lane_head_candidate(lane, now);
-            } else {
+                state.in_flight = None;
+                true
+            });
+            if released {
+                let has_pending =
+                    self.lanes.get(&lane).is_some_and(|state| !state.pending.is_empty());
+                if has_pending {
+                    self.push_lane_head_candidate(lane, now);
+                } else {
+                    self.lanes.remove(&lane);
+                }
+            } else if self
+                .lanes
+                .get(&lane)
+                .is_some_and(|state| state.in_flight.is_none() && state.pending.is_empty())
+            {
+                // OrderedStart may have released the lane before this
+                // completion; no future enqueue needs this empty state.
                 self.lanes.remove(&lane);
             }
         }
@@ -2285,6 +2345,19 @@ mod tests {
     ) -> EnqueueOutcome {
         s.enqueue(meta, OutboundEnqueueMode::ReplacePending { user_key }, usize::MAX, None, now)
             .unwrap()
+    }
+
+    fn ordered_fifo(s: &mut SchedulerState, meta: OutboundMeta, now: Instant) -> JobId {
+        s.enqueue_with_lane_mode(
+            meta,
+            OutboundLaneMode::OrderedStart,
+            OutboundEnqueueMode::Fifo,
+            usize::MAX,
+            None,
+            now,
+        )
+        .unwrap()
+        .job
     }
 
     #[test]
@@ -3621,6 +3694,96 @@ mod tests {
     }
 
     #[test]
+    fn ordered_start_waits_for_start_but_not_completion() {
+        let mut s = scheduler(limits(100), aging());
+        let t0 = base();
+        let lane = Some(OutboundLaneKey(1));
+        let first =
+            ordered_fifo(&mut s, meta(OutboundScope::Global, lane, OutboundPriority::NORMAL), t0);
+        let second =
+            ordered_fifo(&mut s, meta(OutboundScope::Global, lane, OutboundPriority::NORMAL), t0);
+
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![first]);
+        assert!(s.grant_ready(t0).is_empty(), "ordered lane must wait for start");
+
+        s.start(first, t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![second]);
+    }
+
+    #[test]
+    fn serial_lane_still_waits_for_completion() {
+        let mut s = scheduler(limits(100), aging());
+        let t0 = base();
+        let lane = Some(OutboundLaneKey(1));
+        let first = fifo(&mut s, meta(OutboundScope::Global, lane, OutboundPriority::NORMAL), t0);
+        let second = fifo(&mut s, meta(OutboundScope::Global, lane, OutboundPriority::NORMAL), t0);
+
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![first]);
+        s.start(first, t0);
+        assert!(s.grant_ready(t0).is_empty(), "serial lane must ignore start");
+
+        s.complete(first, OutboundCompletion::Success, t0, t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![second]);
+    }
+
+    #[test]
+    fn ordered_start_completion_does_not_release_a_newer_job() {
+        let mut s = scheduler(limits(100), aging());
+        let t0 = base();
+        let lane = Some(OutboundLaneKey(1));
+        let first =
+            ordered_fifo(&mut s, meta(OutboundScope::Global, lane, OutboundPriority::NORMAL), t0);
+        let second =
+            ordered_fifo(&mut s, meta(OutboundScope::Global, lane, OutboundPriority::NORMAL), t0);
+        let third =
+            ordered_fifo(&mut s, meta(OutboundScope::Global, lane, OutboundPriority::NORMAL), t0);
+
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![first]);
+        s.start(first, t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![second]);
+
+        s.complete(first, OutboundCompletion::Success, t0, t0);
+        assert!(s.grant_ready(t0).is_empty(), "old completion released the newer job");
+
+        s.complete(second, OutboundCompletion::Success, t0, t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![third]);
+    }
+
+    #[test]
+    fn ordered_start_drop_before_start_releases_the_lane() {
+        let mut s = scheduler(limits(100), aging());
+        let t0 = base();
+        let lane = Some(OutboundLaneKey(1));
+        let first =
+            ordered_fifo(&mut s, meta(OutboundScope::Global, lane, OutboundPriority::NORMAL), t0);
+        let second =
+            ordered_fifo(&mut s, meta(OutboundScope::Global, lane, OutboundPriority::NORMAL), t0);
+
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![first]);
+        s.complete(first, OutboundCompletion::CancelledAfterGrant, t0, t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![second]);
+    }
+
+    #[test]
+    fn ordered_start_duplicate_start_is_harmless() {
+        let mut s = scheduler(limits(100), aging());
+        let t0 = base();
+        let lane = Some(OutboundLaneKey(1));
+        let first =
+            ordered_fifo(&mut s, meta(OutboundScope::Global, lane, OutboundPriority::NORMAL), t0);
+        let second =
+            ordered_fifo(&mut s, meta(OutboundScope::Global, lane, OutboundPriority::NORMAL), t0);
+
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![first]);
+        s.start(first, t0);
+        s.start(first, t0);
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![second]);
+        s.start(first, t0);
+        s.complete(first, OutboundCompletion::Success, t0, t0);
+        assert!(s.grant_ready(t0).is_empty(), "late duplicate start changed the lane");
+    }
+
+    #[test]
     fn lane_fifo_survives_order_wraparound() {
         let mut s = scheduler(limits(100), aging());
         let t0 = base();
@@ -3631,6 +3794,7 @@ mod tests {
             lane,
             LaneState {
                 pending: BTreeSet::new(),
+                mode: OutboundLaneMode::Serial,
                 in_flight: None,
                 next_order: u64::MAX - 1,
                 stale: 0,

@@ -45,9 +45,9 @@ use super::{
     scheduler::SchedulerState,
     types::{
         EnqueueError, Grant, JobId, OutboundAcquireError, OutboundCompletion, OutboundEnqueueMode,
-        OutboundLaneKey, OutboundLimits, OutboundMeta, OutboundMetadata, OutboundQueueError,
-        OutboundScope, OutboundSetLimitsError, OutboundSettings, OutboundSnapshot,
-        SchedulerConfigError, SchedulerWakeup,
+        OutboundLaneKey, OutboundLaneMode, OutboundLimits, OutboundMeta, OutboundMetadata,
+        OutboundQueueError, OutboundScope, OutboundSetLimitsError, OutboundSettings,
+        OutboundSnapshot, SchedulerConfigError, SchedulerWakeup,
     },
 };
 
@@ -107,6 +107,7 @@ enum OutboundCommand {
     Enqueue {
         metadata: OutboundMetadata,
         lane: Option<OutboundLaneKey>,
+        lane_mode: Option<OutboundLaneMode>,
         mode: OutboundEnqueueMode,
         /// Unique cancellation identity of the acquire future. The caller
         /// can cancel a job with `Cancel { token }` BEFORE the actor has
@@ -128,6 +129,9 @@ enum OutboundCommand {
     },
     Cancel {
         token: u64,
+    },
+    Start {
+        job_id: JobId,
     },
     Complete {
         job_id: JobId,
@@ -236,7 +240,7 @@ impl OutboundQueueHandle {
     /// the queue is full or closed, or the job was superseded. Dropping the
     /// future before it resolves cancels the pending job.
     pub fn acquire(&self, metadata: OutboundMetadata) -> OutboundAcquire {
-        self.acquire_inner(metadata, None, OutboundEnqueueMode::Fifo)
+        self.acquire_inner(metadata, None, None, OutboundEnqueueMode::Fifo)
     }
 
     /// Starts a TWO-PHASE acquire for an independent request (no ordering
@@ -253,7 +257,7 @@ impl OutboundQueueHandle {
     /// when a second caller appears.
     #[cfg(any(feature = "throttle", test))]
     pub(crate) fn enqueue(&self, metadata: OutboundMetadata) -> OutboundEnqueue {
-        self.enqueue_inner(metadata, None, OutboundEnqueueMode::Fifo)
+        self.enqueue_inner(metadata, None, None, OutboundEnqueueMode::Fifo)
     }
 
     /// Acquires a permit for a latest-wins slot: while the job is still
@@ -266,30 +270,47 @@ impl OutboundQueueHandle {
         metadata: OutboundMetadata,
         user_key: u64,
     ) -> OutboundAcquire {
-        self.acquire_inner(metadata, None, OutboundEnqueueMode::ReplacePending { user_key })
+        self.acquire_inner(metadata, None, None, OutboundEnqueueMode::ReplacePending { user_key })
     }
 
     /// Creates a strictly FIFO ordering lane. At most one request of the
     /// lane is in flight at a time, and requests of the lane are granted in
-    /// enqueue order regardless of priority.
+    /// enqueue order regardless of priority. The lane is released on
+    /// completion.
     pub fn serial_lane(&self) -> OutboundLane {
+        self.new_lane(OutboundLaneMode::Serial)
+    }
+
+    /// Creates an ordering lane whose requests start strictly in enqueue
+    /// order. Call [`OutboundPermit::start`] immediately before beginning
+    /// the actual request; after that confirmation the next lane request may
+    /// start while this one is still running.
+    pub fn ordered_start_lane(&self) -> OutboundLane {
+        self.new_lane(OutboundLaneMode::OrderedStart)
+    }
+
+    fn new_lane(&self, mode: OutboundLaneMode) -> OutboundLane {
         let key = OutboundLaneKey(self.next_lane_id.fetch_add(1, Ordering::Relaxed));
-        OutboundLane { handle: self.clone(), key }
+        OutboundLane { handle: self.clone(), key, mode }
     }
 
     fn acquire_inner(
         &self,
         metadata: OutboundMetadata,
         lane: Option<OutboundLaneKey>,
+        lane_mode: Option<OutboundLaneMode>,
         mode: OutboundEnqueueMode,
     ) -> OutboundAcquire {
-        OutboundAcquire { inner: AcquireInner::Enqueuing(self.enqueue_inner(metadata, lane, mode)) }
+        OutboundAcquire {
+            inner: AcquireInner::Enqueuing(self.enqueue_inner(metadata, lane, lane_mode, mode)),
+        }
     }
 
     fn enqueue_inner(
         &self,
         metadata: OutboundMetadata,
         lane: Option<OutboundLaneKey>,
+        lane_mode: Option<OutboundLaneMode>,
         mode: OutboundEnqueueMode,
     ) -> OutboundEnqueue {
         let (response, response_rx) = oneshot::channel();
@@ -302,6 +323,7 @@ impl OutboundQueueHandle {
         let command = OutboundCommand::Enqueue {
             metadata,
             lane,
+            lane_mode,
             mode,
             token,
             token_state: token_state.clone(),
@@ -388,20 +410,28 @@ impl OutboundQueueHandle {
     }
 }
 
-/// A strictly FIFO ordering lane obtained from
-/// [`OutboundQueueHandle::serial_lane`].
+/// An ordering lane obtained from [`OutboundQueueHandle::serial_lane`] or
+/// [`OutboundQueueHandle::ordered_start_lane`]. Requests are always granted
+/// in enqueue order; the release point depends on the lane mode.
 #[derive(Clone)]
 pub struct OutboundLane {
     handle: OutboundQueueHandle,
     key: OutboundLaneKey,
+    mode: OutboundLaneMode,
 }
 
 impl OutboundLane {
-    /// Acquires a permit for a request of this lane. Requests of the lane
-    /// are granted strictly in enqueue order; the next request starts only
-    /// after the previous one completed (or was cancelled after grant).
+    /// Acquires a permit for a request of this lane. Requests are granted
+    /// strictly in enqueue order. A serial lane waits for completion; an
+    /// ordered-start lane waits until the previous permit is explicitly
+    /// started (or cancelled after grant).
     pub fn acquire(&self, metadata: OutboundMetadata) -> OutboundAcquire {
-        self.handle.acquire_inner(metadata, Some(self.key), OutboundEnqueueMode::Fifo)
+        self.handle.acquire_inner(
+            metadata,
+            Some(self.key),
+            Some(self.mode),
+            OutboundEnqueueMode::Fifo,
+        )
     }
 
     /// Latest-wins variant for a lane slot: replaces the pending job of the
@@ -414,6 +444,7 @@ impl OutboundLane {
         self.handle.acquire_inner(
             metadata,
             Some(self.key),
+            Some(self.mode),
             OutboundEnqueueMode::ReplacePending { user_key },
         )
     }
@@ -631,6 +662,7 @@ pub struct OutboundPermit {
     lifecycle: mpsc::UnboundedSender<OutboundCommand>,
     token_state: Arc<AtomicU8>,
     completed: bool,
+    started: bool,
 }
 
 impl OutboundPermit {
@@ -639,7 +671,20 @@ impl OutboundPermit {
         lifecycle: mpsc::UnboundedSender<OutboundCommand>,
         token_state: Arc<AtomicU8>,
     ) -> Self {
-        Self { job_id, lifecycle, token_state, completed: false }
+        Self { job_id, lifecycle, token_state, completed: false, started: false }
+    }
+
+    /// Confirms that the actual outbound request is about to start.
+    ///
+    /// This is idempotent. It matters for [`OutboundLaneMode::OrderedStart`],
+    /// where the confirmation releases the lane for the next request; for a
+    /// serial lane it is harmless.
+    pub fn start(&mut self) {
+        if self.started || self.completed {
+            return;
+        }
+        self.started = true;
+        let _ = self.lifecycle.send(OutboundCommand::Start { job_id: self.job_id });
     }
 
     /// Reports how the request ended and releases the permit.
@@ -783,6 +828,7 @@ impl OutboundActor {
             OutboundCommand::Enqueue {
                 metadata,
                 lane,
+                lane_mode,
                 mode,
                 token,
                 token_state,
@@ -809,7 +855,20 @@ impl OutboundActor {
                     priority: metadata.priority,
                     weight: metadata.weight,
                 };
-                match self.scheduler.enqueue(meta, mode, self.queue_capacity, None, self.now()) {
+                let enqueue = match lane_mode {
+                    Some(lane_mode) => self.scheduler.enqueue_with_lane_mode(
+                        meta,
+                        lane_mode,
+                        mode,
+                        self.queue_capacity,
+                        None,
+                        self.now(),
+                    ),
+                    None => {
+                        self.scheduler.enqueue(meta, mode, self.queue_capacity, None, self.now())
+                    }
+                };
+                match enqueue {
                     Ok(outcome) => {
                         if let Some(superseded) = outcome.superseded {
                             if let Some(waiter) = self.waiters.remove(&superseded) {
@@ -858,6 +917,9 @@ impl OutboundActor {
                     self.scheduler.cancel(job_id, self.now());
                     self.forget_job(job_id);
                 }
+            }
+            OutboundCommand::Start { job_id } => {
+                self.scheduler.start(job_id, self.now());
             }
             OutboundCommand::Complete { token_state, job_id, outcome, observed_at, ack } => {
                 self.scheduler.complete(job_id, outcome, self.now(), self.to_std(observed_at));
@@ -1367,6 +1429,31 @@ mod tests {
         drop(first);
         let permit = tokio::time::timeout(Duration::from_secs(1), second).await.unwrap().unwrap();
         permit.complete(OutboundCompletion::Success);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ordered_start_lane_grants_next_before_first_completion() {
+        let queue = OutboundQueue::new_spawn(settings()).unwrap();
+        let handle = queue.handle();
+        let lane = handle.ordered_start_lane();
+
+        let mut first = lane.acquire(metadata(OutboundPriority::NORMAL));
+        let second = lane.acquire(metadata(OutboundPriority::NORMAL));
+        let mut first =
+            tokio::time::timeout(Duration::from_secs(1), &mut first).await.unwrap().unwrap();
+        let mut second = Box::pin(second);
+        tokio::task::yield_now().await;
+        assert!(futures::poll!(second.as_mut()).is_pending());
+
+        first.start();
+        let second = tokio::time::timeout(Duration::from_secs(1), second).await.unwrap().unwrap();
+        let snapshot = handle.snapshot().await.unwrap();
+        assert_eq!(snapshot.in_flight, 2);
+
+        first.complete(OutboundCompletion::Success);
+        let snapshot = handle.snapshot().await.unwrap();
+        assert_eq!(snapshot.in_flight, 1);
+        second.complete(OutboundCompletion::Success);
     }
 
     #[tokio::test(start_paused = true)]

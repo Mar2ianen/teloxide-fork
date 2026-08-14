@@ -1,9 +1,8 @@
 //! Compatibility `Throttle` built on top of the outbound scheduler.
 //!
-//! Commit 9 of the outbound scheduler migration: the public
-//! [`Throttle`](crate::adaptors::Throttle) uses this implementation over the
-//! [`OutboundQueue`](crate::outbound::OutboundQueue). The old worker has been
-//! removed; `tests` pin the scheduler-backed compatibility contract directly.
+//! Compatibility `Throttle` implementation backed by the outbound scheduler.
+//! The old worker is no longer used; tests pin the historical compatibility
+//! contract directly.
 //!
 //! Retained compatibility contract:
 //!

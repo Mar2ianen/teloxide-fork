@@ -113,6 +113,19 @@ impl OutboundChatKey {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct OutboundLaneKey(pub(crate) u64);
 
+/// Controls when a request releases its ordering lane.
+///
+/// [`OutboundLaneMode::Serial`] keeps the lane occupied until the request
+/// completes. [`OutboundLaneMode::OrderedStart`] releases the lane when the
+/// caller explicitly confirms that the request has started, allowing later
+/// requests to start in enqueue order while earlier requests are still
+/// running.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutboundLaneMode {
+    Serial,
+    OrderedStart,
+}
+
 /// Draft request class (message send, preview, chat action, ...). Part of
 /// the request metadata so that latest-wins slots can never be spoofed with
 /// different semantics.
@@ -300,6 +313,7 @@ pub enum SchedulerConfigError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Grant {
     pub(crate) job: JobId,
+    pub(crate) correlation_id: Option<OutboundCorrelationId>,
 }
 
 /// How a granted request ended.
@@ -395,6 +409,28 @@ impl WindowLimit {
 pub struct OutboundLimits {
     pub global: Vec<WindowLimit>,
     pub chat: Vec<WindowLimit>,
+}
+
+/// A rate window applying only to one outbound request class.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OutboundClassWindowLimit {
+    pub class: OutboundClass,
+    pub capacity: u32,
+    pub window: Duration,
+}
+
+impl OutboundClassWindowLimit {
+    pub const fn new(class: OutboundClass, capacity: u32, window: Duration) -> Self {
+        Self { class, capacity, window }
+    }
+}
+
+/// Optional class-specific windows layered on top of the ordinary global and
+/// per-chat windows. An empty set preserves the legacy behavior.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OutboundClassLimits {
+    pub global: Vec<OutboundClassWindowLimit>,
+    pub chat: Vec<OutboundClassWindowLimit>,
 }
 
 /// Construction settings of an outbound queue.

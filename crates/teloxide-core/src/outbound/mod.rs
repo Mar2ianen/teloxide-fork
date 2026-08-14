@@ -12,6 +12,8 @@
 mod actor;
 mod adaptor;
 pub(crate) mod classify;
+mod observability;
+mod outbox;
 mod scheduler;
 mod types;
 
@@ -19,9 +21,17 @@ pub use actor::{
     OutboundAcquire, OutboundLane, OutboundPermit, OutboundQueue, OutboundQueueHandle,
 };
 pub use adaptor::{class, Outbound, OutboundRequestError, ScheduledRequest};
+pub use observability::{NoopOutboundObserver, OutboundEvent, OutboundEventKind, OutboundObserver};
+pub use outbox::{
+    ClaimedOutboxRequest, InMemoryOutboxError, InMemoryOutboxStore, NewOutboxRequest,
+    OutboundOutbox, OutboxAttemptStart, OutboxEnqueueResult, OutboxExecutionError, OutboxExecutor,
+    OutboxFailure, OutboxFailureKind, OutboxId, OutboxLease, OutboxRetry, OutboxSnapshot,
+    OutboxStatus, OutboxStore, OutboxWorkerError, OutboxWorkerId, OutboxWorkerSettings,
+};
 pub use types::{
-    AgingPolicy, OutboundAcquireError, OutboundChatKey, OutboundClass, OutboundCompletion,
-    OutboundCorrelationId, OutboundHint, OutboundLimits, OutboundMetadata, OutboundOverrides,
-    OutboundPayload, OutboundPriority, OutboundQueueError, OutboundScope, OutboundSetLimitsError,
-    OutboundSettings, OutboundSnapshot, SchedulerConfigError, WindowChatKind, WindowLimit,
+    AgingPolicy, OutboundAcquireError, OutboundChatKey, OutboundClass, OutboundClassLimits,
+    OutboundClassWindowLimit, OutboundCompletion, OutboundCorrelationId, OutboundHint,
+    OutboundLaneMode, OutboundLimits, OutboundMetadata, OutboundOverrides, OutboundPayload,
+    OutboundPriority, OutboundQueueError, OutboundScope, OutboundSetLimitsError, OutboundSettings,
+    OutboundSnapshot, SchedulerConfigError, WindowChatKind, WindowLimit,
 };

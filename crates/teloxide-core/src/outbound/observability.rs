@@ -2,6 +2,10 @@
 
 use std::time::Instant;
 
+/// Bounded hand-off capacity. A slow observer drops events rather than
+/// applying backpressure to the scheduler actor.
+pub(crate) const OBSERVER_CHANNEL_CAPACITY: usize = 256;
+
 use super::types::{OutboundCompletion, OutboundCorrelationId};
 
 /// Lifecycle phase emitted by an outbound queue observer.
@@ -23,8 +27,10 @@ pub struct OutboundEvent {
 
 /// Receives outbound lifecycle events.
 ///
-/// Observer callbacks run inside the queue actor and are isolated with
-/// `catch_unwind`; a faulty observer cannot take down admission processing.
+/// Callbacks run on a dedicated consumer thread behind a bounded channel;
+/// they never run in the queue actor. A slow observer drops new events when
+/// the channel is full, and a panic is isolated from both the actor and the
+/// consumer thread.
 pub trait OutboundObserver: Send + Sync + 'static {
     fn observe(&self, event: OutboundEvent);
 }

@@ -32,6 +32,7 @@ use std::{
     pin::Pin,
     sync::{
         atomic::{AtomicU64, AtomicU8, Ordering},
+        mpsc::SyncSender,
         Arc,
     },
     task::{Context, Poll},
@@ -42,7 +43,9 @@ use futures::FutureExt;
 use tokio::sync::{mpsc, oneshot};
 
 use super::{
-    observability::{OutboundEvent, OutboundEventKind, OutboundObserver},
+    observability::{
+        OutboundEvent, OutboundEventKind, OutboundObserver, OBSERVER_CHANNEL_CAPACITY,
+    },
     scheduler::{EnqueueOptions, SchedulerState},
     types::{
         EnqueueError, Grant, JobId, OutboundAcquireError, OutboundClassLimits, OutboundCompletion,
@@ -912,7 +915,7 @@ pub(crate) struct OutboundActor {
     /// [`OutboundActor::deliver_grants`]. Deliberately a lifecycle sender,
     /// never an enqueue sender: the actor must not keep the ingress open.
     lifecycle_tx: mpsc::UnboundedSender<OutboundCommand>,
-    observer: Option<Arc<dyn OutboundObserver>>,
+    observer: Option<SyncSender<OutboundEvent>>,
     queue_capacity: usize,
     /// `std` clock anchor: the scheduler sees `base + tokio_elapsed`, so
     /// paused Tokio time drives the scheduler deterministically in tests.
@@ -955,11 +958,7 @@ impl OutboundActor {
     fn observe(&self, kind: OutboundEventKind, correlation_id: Option<OutboundCorrelationId>) {
         let Some(observer) = &self.observer else { return };
         let event = OutboundEvent { kind, correlation_id, at: Instant::now() };
-        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| observer.observe(event)))
-            .is_err()
-        {
-            log::warn!("outbound observer panicked; event was dropped");
-        }
+        let _ = observer.try_send(event);
     }
 
     fn handle_command(&mut self, command: OutboundCommand) {
@@ -1118,7 +1117,27 @@ impl OutboundActor {
                 let _ = response.send(self.scheduler.set_class_limits(limits, self.now()));
             }
             OutboundCommand::SetObserver { observer } => {
-                self.observer = observer;
+                self.observer = observer.map(|observer| {
+                    let (sender, receiver) =
+                        std::sync::mpsc::sync_channel(OBSERVER_CHANNEL_CAPACITY);
+                    let thread = std::thread::Builder::new()
+                        .name("teloxide-outbound-observer".to_owned())
+                        .spawn(move || {
+                            while let Ok(event) = receiver.recv() {
+                                if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    observer.observe(event);
+                                }))
+                                .is_err()
+                                {
+                                    log::warn!("outbound observer panicked; event was dropped");
+                                }
+                            }
+                        });
+                    if thread.is_err() {
+                        log::warn!("failed to start outbound observer consumer");
+                    }
+                    sender
+                });
             }
             OutboundCommand::GetSnapshot { response } => {
                 let _ = response.send(self.scheduler.snapshot());
@@ -1292,7 +1311,10 @@ impl OutboundActor {
 mod tests {
     use std::{
         num::NonZeroU32,
-        sync::{Arc, Mutex},
+        sync::{
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+            Arc, Barrier, Mutex,
+        },
     };
 
     use super::*;
@@ -1659,11 +1681,36 @@ mod tests {
         }
     }
 
-    struct PanickingObserver;
+    async fn wait_for_events(observer: &RecordingObserver, count: usize) {
+        for _ in 0..1_000 {
+            if observer.events.lock().unwrap().len() >= count {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+        panic!("observer did not receive {count} events");
+    }
+
+    struct PanickingObserver {
+        calls: Arc<AtomicUsize>,
+    }
 
     impl OutboundObserver for PanickingObserver {
         fn observe(&self, _event: OutboundEvent) {
-            panic!("observer failure must stay inside the actor");
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            panic!("observer failure must stay inside the consumer thread");
+        }
+    }
+
+    struct BlockingObserver {
+        entered: Arc<AtomicBool>,
+        release: Arc<Barrier>,
+    }
+
+    impl OutboundObserver for BlockingObserver {
+        fn observe(&self, _event: OutboundEvent) {
+            self.entered.store(true, Ordering::SeqCst);
+            self.release.wait();
         }
     }
 
@@ -1683,6 +1730,7 @@ mod tests {
         permit.start();
         permit.complete(OutboundCompletion::Success);
         assert!(handle.snapshot().await.is_some());
+        wait_for_events(&first, 4).await;
 
         let events = first.events.lock().unwrap().clone();
         assert!(matches!(
@@ -1702,11 +1750,52 @@ mod tests {
         assert!(handle.snapshot().await.is_some());
         handle.clear_observer();
         assert!(handle.snapshot().await.is_some());
-        handle.set_observer(Arc::new(PanickingObserver));
+        let panicking_calls = Arc::new(AtomicUsize::new(0));
+        handle.set_observer(Arc::new(PanickingObserver { calls: panicking_calls.clone() }));
         assert!(handle.snapshot().await.is_some());
         let permit = handle.acquire(metadata(OutboundPriority::NORMAL)).await.unwrap();
         permit.complete(OutboundCompletion::Success);
         assert!(handle.snapshot().await.is_some());
+        for _ in 0..1_000 {
+            if panicking_calls.load(Ordering::SeqCst) >= 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(panicking_calls.load(Ordering::SeqCst) >= 2);
+    }
+
+    #[tokio::test]
+    async fn slow_observer_does_not_block_actor_commands() {
+        let queue = OutboundQueue::new_spawn(settings()).unwrap();
+        let handle = queue.handle().clone();
+        let entered = Arc::new(AtomicBool::new(false));
+        let release = Arc::new(Barrier::new(2));
+        handle.set_observer(Arc::new(BlockingObserver {
+            entered: entered.clone(),
+            release: release.clone(),
+        }));
+        assert!(handle.snapshot().await.is_some());
+
+        let permit = handle.acquire(metadata(OutboundPriority::NORMAL)).await.unwrap();
+        for _ in 0..1_000 {
+            if entered.load(Ordering::SeqCst) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(entered.load(Ordering::SeqCst));
+
+        permit.complete(OutboundCompletion::Success);
+        for _ in 0..(OBSERVER_CHANNEL_CAPACITY + 8) {
+            let permit = handle.acquire(metadata(OutboundPriority::NORMAL)).await.unwrap();
+            permit.complete(OutboundCompletion::Success);
+        }
+
+        let snapshot =
+            tokio::time::timeout(Duration::from_secs(1), handle.snapshot()).await.unwrap().unwrap();
+        assert_eq!(snapshot.pending, 0);
+        release.wait();
     }
 
     #[tokio::test(start_paused = true)]

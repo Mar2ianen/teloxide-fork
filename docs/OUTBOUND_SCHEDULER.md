@@ -73,10 +73,13 @@ replayed after a process crash or an ambiguous transport result, so callers
 should pass the durable idempotency key to providers that support idempotent
 operations.
 
-A claimed record is fenced by `(worker, token, until)`. The worker keeps a
+A claimed record is fenced by the immutable `(worker, token)` pair; `until`
+controls liveness and is refreshed by the heartbeat. The worker keeps a
 heartbeat from the initial scheduler acquire through `begin_attempt`, the
 executor future, permit completion and the final store mutation. Every store
-mutation uses the heartbeat's latest lease. A lease can therefore outlive a
+mutation is checked against the current lease liveness using the same fence
+token, so renewal cannot invalidate an operation already in flight. A lease
+can therefore outlive a
 slow rate-limit wait or a slow provider call without allowing a second worker
 to reclaim the record while the first worker is still active.
 
@@ -816,26 +819,30 @@ weight safety and wakes the actor immediately. `class_limits()` returns the
 active configuration. Removing a class window removes only that class's
 additional constraint; ordinary windows and their history remain untouched.
 
-## Observability and correlation (Commit 12)
+## Observability and correlation (Commits 12 and 15)
 
 `OutboundObserver` receives `OutboundEvent` values for `Enqueued`, `Granted`,
-`Started` and `Completed { outcome }`. Callbacks execute inside the actor but
-are wrapped in `catch_unwind`; a faulty metrics/tracing hook cannot terminate
-admission. `OutboundQueue::with_observer`, `set_observer` and
-`clear_observer` support installation and replacement at runtime.
+`Started` and `Completed { outcome }`. Events are handed off with bounded
+`try_send` to a dedicated consumer thread; a slow callback drops new events
+instead of delaying the actor, and `catch_unwind` prevents a faulty
+metrics/tracing hook from terminating the consumer or admission.
+
+`OutboundQueue::with_observer`, `set_observer` and `clear_observer` support
+installation and replacement at runtime.
 
 `OutboundCorrelationId` is optional. It can be attached directly to a queue
 acquire (`acquire_with_correlation`) or to an adaptor request with
 `ScheduledRequest::with_correlation_id`. The ID is preserved through the
 scheduler job, grant, permit and all lifecycle events.
 
-## Durable outbox runtime (Commit 14)
+## Durable outbox runtime (Commits 14 and 15)
 
 `OutboundOutbox<S, E>` is a generic runtime over an application-defined
 `OutboxStore` and `OutboxExecutor`. The store owns persistence of an
 idempotency key, opaque payload bytes, payload version, frozen
-`OutboundMetadata`, attempt count, status, availability time and lease
-fencing token. `InMemoryOutboxStore` is provided for deterministic tests and
+`OutboundMetadata`, delivery-attempt and claim counters, status,
+availability time and lease fence. `InMemoryOutboxStore` is provided for
+deterministic tests and
 small processes; production applications can implement the same trait for
 PostgreSQL or another durable database.
 
@@ -843,10 +850,12 @@ The worker claims at most `OutboxWorkerSettings::max_in_flight` records and
 uses `FuturesUnordered` rather than spawning an unbounded number of tasks. It
 acquires a normal outbound permit, calls `start()` immediately before the
 executor, reports success/retry/failure to the scheduler, then completes the
-store mutation with the same lease. Expired leases can be reclaimed, and
-stale lease mutations are rejected. Retry-after penalties, capped transient
-backoff, max-attempt exhaustion, scheduler queue closure and idempotency
-conflicts are explicit and testable outcomes.
+store mutation with the same fence token while the current lease remains
+live. Heartbeat renewal cannot invalidate an already-created store mutation.
+Expired leases can be reclaimed, and stale fence mutations are rejected.
+Retry-after penalties, capped transient backoff, max-attempt exhaustion,
+scheduler queue closure and idempotency conflicts are explicit and testable
+outcomes.
 
 The outbox does **not** serialize arbitrary `Outbound<Bot>` values, request
 futures or multipart files. The application must define the payload codec and

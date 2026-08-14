@@ -1,7 +1,8 @@
 //! The outbound request adaptor.
 //!
 //! [`ScheduledRequest`] runs any [`Request`] through an [`OutboundQueue`]:
-//! the metadata is computed once at construction, a permit is acquired, the
+//! the final payload metadata is computed at send time, a permit is acquired,
+//! the permit is explicitly marked started, and the
 //! inner request is executed **only after the grant** (nothing about the
 //! inner request — e.g. a timeout captured at construction — can start
 //! before the permit is held), the outcome is classified (success /
@@ -10,8 +11,9 @@
 //! records the penalty, retry stays the policy of the calling layer.
 //!
 //! [`Outbound`] wraps any [`Requester`] so that every method returns a
-//! [`ScheduledRequest`]; [`ScheduledRequest::on_lane`] attaches a serial
-//! ordering lane. The classification (`OutboundPayload`) is generated from
+//! [`ScheduledRequest`]; [`ScheduledRequest::on_lane`] attaches an explicit
+//! ordering lane whose mode is selected when the lane is created. The
+//! classification (`OutboundPayload`) is generated from
 //! the Bot API schema for every payload, so the hint always reflects the
 //! payload that is actually sent.
 
@@ -30,9 +32,9 @@ use crate::{
     types::*,
 };
 
-/// Draft request classes used by the generated [`OutboundPayload`] impls
-/// (spec §11.1). The taxonomy will be refined when `Throttle` migrates
-/// onto the outbound queue; the scope classification is the strict part.
+/// Request classes used by the generated [`OutboundPayload`] implementations
+/// (spec §11.1). The taxonomy is deliberately compact; scope classification
+/// is the strict part of the scheduler contract.
 pub mod class {
     /// Read-only queries (`get_me`, ...).
     pub const READ: u64 = 1;
@@ -133,6 +135,7 @@ pub struct ScheduledRequest<Req: HasPayload> {
     queue: OutboundQueue,
     lane: Option<OutboundLane>,
     overrides: OutboundOverrides,
+    correlation_id: Option<crate::outbound::OutboundCorrelationId>,
 }
 
 impl<Req: HasPayload> Clone for ScheduledRequest<Req>
@@ -145,17 +148,26 @@ where
             queue: self.queue.clone(),
             lane: self.lane.clone(),
             overrides: self.overrides,
+            correlation_id: self.correlation_id,
         }
     }
 }
 
 impl<Req: HasPayload> ScheduledRequest<Req> {
     pub fn new(request: Req, queue: OutboundQueue) -> Self {
-        Self { request, queue, lane: None, overrides: OutboundOverrides::default() }
+        Self {
+            request,
+            queue,
+            lane: None,
+            overrides: OutboundOverrides::default(),
+            correlation_id: None,
+        }
     }
 
-    /// Attaches a serial ordering lane: at most one request of the lane is
-    /// in flight and the lane is served strictly in enqueue order.
+    /// Attaches an ordering lane. Requests are served strictly in enqueue
+    /// order; the lane's [`crate::outbound::OutboundLaneMode`] decides whether
+    /// the next request waits for completion or only for
+    /// [`crate::outbound::OutboundPermit::start`].
     pub fn on_lane(mut self, lane: &OutboundLane) -> Self {
         self.lane = Some(lane.clone());
         self
@@ -186,6 +198,15 @@ impl<Req: HasPayload> ScheduledRequest<Req> {
     /// Replaces the whole override set (see [`OutboundOverrides`]).
     pub fn with_outbound_overrides(mut self, overrides: OutboundOverrides) -> Self {
         self.overrides = overrides;
+        self
+    }
+
+    /// Associates this request with a stable observer correlation id.
+    pub fn with_correlation_id(
+        mut self,
+        correlation_id: crate::outbound::OutboundCorrelationId,
+    ) -> Self {
+        self.correlation_id = Some(correlation_id);
         self
     }
 
@@ -269,6 +290,7 @@ where
             queue: self.queue.clone(),
             lane: self.lane.clone(),
             metadata,
+            correlation_id: self.correlation_id,
         })
     }
 }
@@ -294,20 +316,26 @@ req_future! {
             // publicly mutable until send (teloxide's `send_ref` flow
             // changes `chat_id` before sending), so admission, lanes and
             // `RetryAfter` penalties always follow what is actually sent.
-            let ScheduledRequest { request, queue, lane, overrides } = it;
+            let ScheduledRequest { request, queue, lane, overrides, correlation_id } = it;
             let hint = request.payload_ref().outbound_hint();
             let metadata = effective_metadata(hint, overrides);
             // The classifier below runs after the acquire consumed the
             // metadata, so the policy copy is kept separately.
             let policy_metadata = metadata.clone();
-            let acquire = match &lane {
-                Some(lane) => lane.acquire(metadata),
-                None => queue.handle().acquire(metadata),
+            let acquire = match (&lane, correlation_id) {
+                (Some(lane), Some(correlation_id)) => lane.acquire_with_correlation(metadata, correlation_id),
+                (Some(lane), None) => lane.acquire(metadata),
+                (None, Some(correlation_id)) => queue.handle().acquire_with_correlation(metadata, correlation_id),
+                (None, None) => queue.handle().acquire(metadata),
             };
-            let permit = match acquire.await {
+            let mut permit = match acquire.await {
                 Ok(permit) => permit,
                 Err(error) => return Err(OutboundRequestError::Acquire(error)),
             };
+            // Make the start boundary explicit before constructing or polling
+            // the inner send future. OrderedStart lanes use this signal to
+            // admit the next request without waiting for this one to finish.
+            permit.start();
             // The inner send future is created and polled only now, after
             // the grant: nothing about it (e.g. a timeout captured at
             // construction) can start before the permit is held.
@@ -351,20 +379,25 @@ struct SendRefPlan<U: Request> {
     queue: OutboundQueue,
     lane: Option<OutboundLane>,
     metadata: OutboundMetadata,
+    correlation_id: Option<crate::outbound::OutboundCorrelationId>,
 }
 
 req_future! {
     def: |it: SendRefPlan<U>| {
         async move {
             let policy_metadata = it.metadata.clone();
-            let acquire = match &it.lane {
-                Some(lane) => lane.acquire(it.metadata),
-                None => it.queue.handle().acquire(it.metadata),
+            let acquire = match (&it.lane, it.correlation_id) {
+                (Some(lane), Some(correlation_id)) => lane.acquire_with_correlation(it.metadata, correlation_id),
+                (Some(lane), None) => lane.acquire(it.metadata),
+                (None, Some(correlation_id)) => it.queue.handle().acquire_with_correlation(it.metadata, correlation_id),
+                (None, None) => it.queue.handle().acquire(it.metadata),
             };
-            let permit = match acquire.await {
+            let mut permit = match acquire.await {
                 Ok(permit) => permit,
                 Err(error) => return Err(OutboundRequestError::Acquire(error)),
             };
+            // Keep the start boundary before calling the inner `send_ref`.
+            permit.start();
             // The inner `send_ref` is called only now, after the grant:
             // any side effect of the call (deadline capture, resource
             // opening, ...) is deferred past admission.
@@ -1783,6 +1816,43 @@ mod tests {
         assert_eq!(snapshot.pending, 0);
         assert_eq!(snapshot.in_flight, 1); // только holder
         holder.complete(OutboundCompletion::Success);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ordered_start_adaptor_starts_next_request_before_first_finishes() {
+        let queue = OutboundQueue::new_spawn(settings()).unwrap();
+        let lane = queue.handle().ordered_start_lane();
+        let release = Arc::new(Notify::new());
+        let entered = Arc::new(Notify::new());
+
+        let first = tokio::spawn({
+            let queue = queue.clone();
+            let lane = lane.clone();
+            let release = release.clone();
+            let entered = entered.clone();
+            async move {
+                let request = FakeRequest::<SendChatAction> {
+                    _payload: SendChatAction::new(ChatId(1), ChatAction::Typing),
+                    result: Ok(True),
+                    polls: Arc::new(AtomicUsize::new(0)),
+                    release: Some(release),
+                    entered: Some(entered),
+                    send_ref_calls: Arc::new(AtomicUsize::new(0)),
+                };
+                ScheduledRequest::new(request, queue).on_lane(&lane).await
+            }
+        });
+
+        tokio::time::timeout(Duration::from_secs(1), entered.notified())
+            .await
+            .expect("first request did not enter the inner future");
+
+        let second = ScheduledRequest::new(fake_chat_action(Ok(True)), queue).on_lane(&lane);
+        let second = tokio::time::timeout(Duration::from_secs(1), second).await.unwrap().unwrap();
+        assert_eq!(second, True);
+
+        first.abort();
+        let _ = first.await;
     }
 
     #[tokio::test(start_paused = true)]

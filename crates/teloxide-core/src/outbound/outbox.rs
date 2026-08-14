@@ -60,7 +60,13 @@ impl OutboxWorkerId {
     }
 }
 
-/// Fencing token for a claimed record.
+/// Fencing token and liveness snapshot for a claimed record.
+///
+/// `worker` + `token` are the immutable fencing identity. `until` is mutable
+/// lease metadata: a heartbeat may replace it while an already-created store
+/// operation is still in flight. Stores must therefore compare the worker and
+/// token for fencing, then check the CURRENT lease expiry independently; they
+/// must not compare the whole struct for equality.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct OutboxLease {
     pub worker: OutboxWorkerId,
@@ -226,7 +232,8 @@ pub trait OutboxStore: Send + Sync + 'static {
     ) -> BoxFuture<'_, Result<Vec<ClaimedOutboxRequest>, Self::Error>>;
 
     /// Extends a still-valid lease. The owner and fencing token stay stable;
-    /// the returned lease carries the new expiry.
+    /// the returned lease carries the new expiry. Implementations must fence
+    /// by `worker` + `token`, not by equality of the complete lease snapshot.
     fn renew_lease(
         &self,
         id: OutboxId,
@@ -235,7 +242,9 @@ pub trait OutboxStore: Send + Sync + 'static {
     ) -> BoxFuture<'_, Result<OutboxLease, Self::Error>>;
 
     /// Increments the delivery-attempt counter immediately before the
-    /// executor is called. Claim retries never increment this counter.
+    /// executor is called. Claim retries never increment this counter. The
+    /// lease's expiry is checked from the store's current state, while its
+    /// worker/token pair is used as the fencing identity.
     fn begin_attempt(
         &self,
         id: OutboxId,
@@ -680,6 +689,8 @@ struct InMemoryState {
     records: HashMap<OutboxId, InMemoryRecord>,
     by_key: HashMap<String, OutboxId>,
     fail_next_complete: bool,
+    #[cfg(test)]
+    delay_next_complete: Option<Duration>,
 }
 
 struct InMemoryRecord {
@@ -738,6 +749,19 @@ impl InMemoryOutboxStore {
         Ok(())
     }
 
+    #[cfg(test)]
+    fn delay_next_complete(&self, delay: Duration) -> Result<(), InMemoryOutboxError> {
+        let mut state = self.inner.lock().map_err(|_| InMemoryOutboxError::Poisoned)?;
+        state.delay_next_complete = Some(delay);
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn take_complete_delay(&self) -> Result<Option<Duration>, InMemoryOutboxError> {
+        let mut state = self.inner.lock().map_err(|_| InMemoryOutboxError::Poisoned)?;
+        Ok(state.delay_next_complete.take())
+    }
+
     pub fn get(&self, id: OutboxId) -> Result<Option<OutboxSnapshot>, InMemoryOutboxError> {
         let state = self.inner.lock().map_err(|_| InMemoryOutboxError::Poisoned)?;
         Ok(state.records.get(&id).map(|record| snapshot(id, record)))
@@ -790,7 +814,13 @@ fn same_request(left: &NewOutboxRequest, right: &NewOutboxRequest) -> bool {
 }
 
 fn lease_is_current(status: &InMemoryStatus, lease: OutboxLease) -> bool {
-    matches!(status, InMemoryStatus::Claimed(current) if *current == lease && current.until > SystemTime::now())
+    matches!(
+        status,
+        InMemoryStatus::Claimed(current)
+            if current.worker == lease.worker
+                && current.token == lease.token
+                && current.until > SystemTime::now()
+    )
 }
 
 impl OutboxStore for InMemoryOutboxStore {
@@ -934,6 +964,11 @@ impl OutboxStore for InMemoryOutboxStore {
         _completed_at: SystemTime,
     ) -> BoxFuture<'_, Result<(), Self::Error>> {
         Box::pin(async move {
+            #[cfg(test)]
+            if let Some(delay) = self.take_complete_delay()? {
+                tokio::time::sleep(delay).await;
+            }
+
             let mut state = self.lock()?;
             if state.fail_next_complete {
                 state.fail_next_complete = false;
@@ -1064,7 +1099,7 @@ mod tests {
         let stale = store
             .complete(
                 id,
-                OutboxLease { until: SystemTime::UNIX_EPOCH, ..first.lease },
+                OutboxLease { token: first.lease.token + 1, ..first.lease },
                 SystemTime::UNIX_EPOCH,
             )
             .await;
@@ -1206,6 +1241,31 @@ mod tests {
         let snapshot = store.get(id).unwrap().unwrap();
         assert_eq!(snapshot.status, OutboxStatus::Completed);
         assert_eq!(snapshot.attempt, 1);
+    }
+
+    #[tokio::test]
+    async fn lease_heartbeat_does_not_fence_slow_store_mutation() {
+        let store = InMemoryOutboxStore::new();
+        let id = match store.enqueue(request("slow-store")).await.unwrap() {
+            OutboxEnqueueResult::Inserted(id) => id,
+            OutboxEnqueueResult::Existing(_) => unreachable!(),
+        };
+        store.delay_next_complete(Duration::from_millis(120)).unwrap();
+        let settings = OutboxWorkerSettings {
+            lease_for: Duration::from_millis(30),
+            ..OutboxWorkerSettings::default()
+        };
+        let executor = RecordingExecutor {
+            started: Arc::new(Mutex::new(Vec::new())),
+            result: Mutex::new(VecDeque::new()),
+        };
+        let worker = OutboundOutbox::new(store.clone(), executor, queue(), settings);
+
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), worker.run_once()).await.unwrap().unwrap(),
+            1
+        );
+        assert_eq!(store.get(id).unwrap().unwrap().status, OutboxStatus::Completed);
     }
 
     #[tokio::test]

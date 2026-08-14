@@ -7,11 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## unreleased
 
-### Changed
-
-- Raise MSRV from Rust 1.82 to 1.85.
+## 0.15.0 - 2026-08-14
 
 ### Added
+
+- Deterministic outbound scheduling with bounded admission, rolling windows, priority aging, explicit ordering lanes, payload classification and completion-aware permits.
+- Scheduler-backed `Throttle` compatibility, lifecycle observers, correlation identifiers and the application-defined durable outbox runtime with fenced leases and bounded retries.
 
 - Add `RequestError::is_multipart_serialization_error` to distinguish multipart serialization failures from file I/O errors.
 - Support for TBA 10.0
@@ -19,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Add `GuestMessage` and `ManagedBot` update kinds
   - Add live photo, managed bot, gift background, poll media, poll option change, profile audio and video quality types
   - Add TBA 9.3 through 10.0 fields to users, messages, polls, chats, gifts, keyboards, chat members, media and related service-message types [**BC**]
+
+
+### Changed
+
+- Raise MSRV from Rust 1.82 to 1.85.
 
 - Support for TBA 9.2 ([#1403](https://github.com/teloxide/teloxide/pull/1403))
   - Add `checklist_task_id` field to `ReplyParameters` struct

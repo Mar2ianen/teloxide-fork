@@ -26,6 +26,12 @@ The new scheduler is opt-in. Existing `Bot` request behavior is unchanged; wrap 
 
 `OrderedStart` releases an ordering lane after `OutboundPermit::start()`, while `Serial` keeps it until completion. The durable outbox is at-least-once: applications must use idempotency keys when a remote operation can be replayed after an ambiguous transport result.
 
+For FIFO admission with bounded concurrency, use
+`OutboundQueueHandle::bounded_ordered_start_lane(max_in_flight)` and attach
+the returned lane with `ScheduledRequest::on_ordered_start_lane`. Grants are
+FIFO, completions may arrive in any order, and each completion frees one
+bounded slot; this mode does not require an explicit `start()` call.
+
 ### teloxide-core
 
 Bot API 10.0 support adds new public fields to several structs, including

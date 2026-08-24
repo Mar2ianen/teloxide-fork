@@ -1,70 +1,24 @@
-# Outbound scheduler — design note (Commits 1–15)
+# Outbound scheduler
 
-Deterministic outbound scheduling model in `crates/teloxide-core/src/outbound/`.
+The outbound scheduler is a deterministic admission, rate-limit and ordering
+layer for Telegram requests. It is opt-in: construct an `OutboundQueue` and
+wrap a requester with `Outbound` (or use `Bot::outbound(queue)`). An ordinary
+`Bot` keeps its existing behavior.
 
-- **Commit 1**: the pure state machine (`SchedulerState`) — no Tokio, no
-  actor. Time is passed as a parameter (`now: Instant`).
-- **Commit 2**: the Tokio actor (`OutboundActor`), the clone-friendly
-  `OutboundQueue`/`OutboundQueueHandle`, `OutboundAcquire` (a future with
-  cancellation) and the completion-aware `OutboundPermit`.
-- **Commit 3**: the `Outbound<R>` requester adaptor and `ScheduledRequest<R>`
-  — the vertical slice that wires real typed requests through the queue
-  without any automatic retry (see "Requester adaptor (Commit 3)" below).
-- **Commit 4**: full payload classification. Every Bot API payload
-  implements `OutboundPayload` (generated from the schema, strictly
-  classified), and every `Requester` method of `Outbound<R>` returns a
-  `ScheduledRequest` (see "Payload classification (Commit 4)" below).
-  Public API: `OutboundMetadata`, `OutboundPriority`, `OutboundScope`,
-  `OutboundLaneMode`, `OutboundCompletion`, `OutboundLimits`, `OutboundSettings` (with
-  `OutboundSettings::default()`), `AgingPolicy`, `OutboundQueueError`,
-  `OutboundAcquireError` (now `Display` + `std::error::Error`),
-  `OutboundSnapshot`, `SchedulerConfigError`, `Outbound`, `ScheduledRequest`,
-  `OutboundRequestError<E>`, `outbound::class`. Draft quality: naming and
-  shape are expected to be refined during the architectural review of each
-  commit. `OutboundScope`/`OutboundChatKey`/`OutboundMetadata` are
-  intentionally not `Copy` (the chat key stores the username as text).
-- **Commit 5**: the `Throttle` compatibility layer (`ThrottleCompat`)
-  over the scheduler, plus the chat-kind window limits extension
-  (`WindowLimit::kind`, `WindowChatKind`).
-- **Commit 6**: the `Drafter` migration. The Drafter actor remains the
-  lifecycle/coalescing state machine, while every real Telegram request
-  (send, edit, native draft and delete) receives its own queue permit.
-  Confirmed primary delivery is separated from best-effort success cleanup,
-  so cleanup admission cannot turn a successful final into an operation
-  deadline error.
-- **Commit 7**: zero-capacity rate windows. A zero global or chat window is a
-  valid pause until `set_limits` reconfigures it; affected jobs remain pending
-  without a timer wake-up. The compat layer keeps one ingress slot when the
-  legacy global rate is zero, because the rate pause must still be able to
-  receive a job and later release it after reconfiguration.
-- **Commit 8**: the public `Throttle` alias is switched to `ThrottleCompat`.
-  `check_slow_mode` is retained as an explicit documented no-op rather than
-  silently probing `get_chat`.
-- **Commit 9**: the old `Throttle` worker, request-lock and legacy requester
-  modules are removed physically. The compatibility tests now exercise only
-  the scheduler-backed implementation.
-- **Commit 10**: `OutboundLaneMode::OrderedStart` adds an explicit start
-  boundary to ordering lanes. Requests are still granted in enqueue order,
-  but the next permit may be granted after `OutboundPermit::start()` and
-  before the earlier request completes; rate accounting and completion remain
-  attached to each individual permit.
-- **Commit 11**: class-aware windows add exact-class global and per-chat
-  rolling limits (`OutboundClassLimits`). They layer on ordinary windows,
-  support zero-capacity pauses and runtime reconfiguration with history
-  carry-over, and never infer arbitrary predicates from class names.
-- **Commit 12**: observability hooks emit panic-isolated `Enqueued`, `Granted`,
-  `Started` and `Completed` events. `OutboundCorrelationId` is carried from
-  `ScheduledRequest::with_correlation_id` through the permit lifecycle.
-- **Commit 13**: `Bot::outbound(queue)` is convenience sugar for
-  `Outbound::new(bot, queue)`.
-- **Commit 14**: the application-defined durable outbox runtime stores opaque
-  versioned payloads plus frozen `OutboundMetadata`, claims records with
-  fenced leases, and executes bounded batches through the shared scheduler.
-- **Commit 15**: durable outbox execution renews leases through scheduler
-  admission, delivery-attempt start, executor execution and durable
-  finalization. Claim retries and scheduler backpressure no longer consume
-  delivery attempts; batch failures are drained, shutdown is graceful, and
-  observer callbacks run behind a bounded non-blocking consumer channel.
+The queue combines bounded ingress, global/per-chat rolling windows, exact-class
+windows, priority aging, explicit ordering lanes and completion-aware permits.
+It never executes requests itself and never retries ordinary requests. The
+requester adaptor classifies the final payload immediately before admission,
+propagates `RetryAfter` penalties and returns queue failures separately from
+inner Telegram errors.
+
+The scheduler also provides a compatibility implementation of `Throttle`,
+panic-isolated lifecycle observers and an application-defined durable outbox.
+The outbox is at-least-once by design and uses fenced leases, bounded batches,
+heartbeat renewal and explicit delivery-attempt accounting.
+
+The sections below describe the stable runtime contract, classification rules,
+compatibility behavior and outbox lifecycle.
 
 ## Durable outbox lifecycle
 
@@ -279,7 +233,7 @@ After a `grant_ready` pass `Immediate` never occurs.
   actually becomes ready.
 - The old `JobId` is invalidated: a late `cancel(old_id)` is a no-op.
 - `EnqueueOutcome { job, superseded }` reports the superseded id; its waiter
-  must be completed with `Superseded` (Commit 2) — never silently dropped,
+  must be completed with `Superseded` — never silently dropped,
   never given a fake permit.
 - Replacing a pending job does not debit rate budget; the penalty scope is
   preserved (scope is part of the key).
@@ -304,7 +258,7 @@ is linear in the number of ticks. The
 (50k jobs at capacity 1 over 50k ticks; 100k promoted jobs) guard against
 quadratic regressions.
 
-## Actor (Commit 2)
+## Actor
 
 `OutboundQueue::new(settings)` returns the queue plus the actor future;
 `new_spawn` spawns it on the current runtime. `new_with_class_limits` and
@@ -407,10 +361,10 @@ not retroactively constrain grants that already expired under the old
 windows; shrinking a window may temporarily hold more history than its
 capacity (the debit is never refunded) until it expires.
 
-## Requester adaptor (Commit 3)
+## Requester adaptor
 
 `Outbound<R>` wraps any `Requester` and returns `ScheduledRequest<R::Method>`
-values for the full method set (Commit 4 generates the `Requester` impl).
+values for the full method set (payload classification generates the `Requester` impl).
 `ScheduledRequest<Req>` is itself a `Request`: it holds the inner request,
 the queue, the lane and the request-level `OutboundOverrides`
 (priority/weight/class), and its `Send` future runs the vertical slice:
@@ -479,11 +433,11 @@ Key restrictions of the slice:
   `Request` already requires from `Err`), so it works for any inner error
   type. A future global-flood flag or a chat-to-global promotion policy
   plugs in here without touching the execution path.
-- The `class` module holds draft request classes (`READ`, `MESSAGE_SEND`,
+- The `class` module holds request classes (`READ`, `MESSAGE_SEND`,
   `MESSAGE_MUTATION`, `CHAT_ACTION`, `OTHER`); the taxonomy will be
   refined during the `Throttle` migration.
 
-Actor note (Commit 2 refinement): causal ordering of completions is
+Actor note (Actor ordering note): causal ordering of completions is
 guaranteed by two mechanisms instead of a channel bias:
 
 1. **Bounded lifecycle drain**: before the fair `select!`, the actor drains
@@ -504,7 +458,7 @@ The bounded drain keeps the causal ordering for same-caller sequences
 while the fair `select!` guarantees enqueue progress under any lifecycle
 load.
 
-## Payload classification (Commit 4)
+## Payload classification
 
 Every Bot API payload now implements the `OutboundPayload` trait (in
 `crates/teloxide-core/src/payloads/*.rs`, generated by `codegen_payloads`):
@@ -518,7 +472,7 @@ pub trait OutboundPayload {
 - The hint is computed from the **final payload at send time**: the payload
   is publicly mutable until `send`, so admission, lanes and `RetryAfter`
   penalties always follow what is actually sent. The manual per-payload
-  `scope_fn` machinery of Commit 3 is gone entirely — there is exactly one
+  `scope_fn` machinery of the requester adaptor is gone entirely — there is exactly one
   classification path.
 - `ScheduledRequest::metadata()` reclassifies the current payload on
   demand, so it never goes stale after setter calls or mutations.
@@ -565,9 +519,8 @@ pub trait OutboundPayload {
   per call (`send_media_group.media`, `forward_messages.message_ids`,
   `copy_messages.message_ids`), so per-window budgets measure message
   traffic, not call count.
-- The `class` taxonomy is still draft (`READ`, `MESSAGE_SEND`,
-  `MESSAGE_MUTATION`, `CHAT_ACTION`, `OTHER`); it will be refined when
-  `Throttle` migrates. `send_chat_action` is the only `BACKGROUND`
+- The `class` taxonomy is intentionally compact (`READ`, `MESSAGE_SEND`,
+  `MESSAGE_MUTATION`, `CHAT_ACTION`, `OTHER`); it is shared by the raw scheduler and the compatibility layer. `send_chat_action` is the only `BACKGROUND`
   priority today.
 - **Compatibility filtering remains separate from class windows**: the
   `ThrottleCompat` allowlist (see below) routes exactly the legacy throttled
@@ -584,7 +537,7 @@ pub trait OutboundPayload {
   (`on_lane` stays an explicit choice), retry policy and correlation ids.
   The payload classifies only what is actually being sent.
 
-## Throttle compatibility layer (Commits 5 and 9)
+## Throttle compatibility layer
 
 `ThrottleCompat<B>` (`crates/teloxide-core/src/adaptors/throttle_compat/`)
 implements the public `Throttle` contract on top of the outbound scheduler.
@@ -606,7 +559,7 @@ Retained compatibility contract:
   `messages_per_min_chat` (users/groups) and
   `messages_per_min_channel_or_supergroup` (channels, `-100…` ids and
   usernames), reproducing the legacy distinction exactly. This required
-  the small scheduler extension of Commit 5: `WindowLimit` gains a
+  the small scheduler extension of scheduler compatibility: `WindowLimit` gains a
   `kind` field and per-chat window sets are filtered by the chat kind at
   creation; global windows must be `Any` (validated).
 - **Weight 1**: every throttled request overrides the payload weight to
@@ -769,7 +722,7 @@ In particular, the regressions for a full backlog during a freeze and for a
 finite deadline hidden behind a permanent zero-window pause remain covered
 without depending on a second implementation.
 
-## Drafter migration (Commit 6)
+## Drafter migration
 
 The `Drafter` worker is deliberately retained as the owner of lifecycle
 state, source revisions, coalescing, flush waiters and segment transitions.
@@ -790,7 +743,7 @@ exact queue accounting only when no Bot API request started. Dropped permits
 retain the conservative `CancelledAfterGrant` behavior because cancellation
 may happen after a request began.
 
-Commit 6 also adds the following public Drafter surface: the
+Drafter integration also adds the following public Drafter surface: the
 `prepare_cleanup_after_delivery`, `cleanup_after_delivery` and
 `cleanup_after_delivery_possible` backend hooks and
 `DrafterPermitCompletion::NoRequest`. `DrafterRequestError` is now a public
@@ -803,7 +756,7 @@ remain legacy operation-level schedulers by default; scheduler-aware custom
 backends must keep success cleanup outside `finish`/`commit_segment` and opt
 into the new hook when they issue cleanup requests.
 
-## Class-aware windows (Commit 11)
+## Class-aware windows
 
 `OutboundClassWindowLimit { class, capacity, window }` applies to one exact
 class. `OutboundClassLimits { global, chat }` layers those windows over the
@@ -819,7 +772,7 @@ weight safety and wakes the actor immediately. `class_limits()` returns the
 active configuration. Removing a class window removes only that class's
 additional constraint; ordinary windows and their history remain untouched.
 
-## Observability and correlation (Commits 12 and 15)
+## Observability and correlation
 
 `OutboundObserver` receives `OutboundEvent` values for `Enqueued`, `Granted`,
 `Started` and `Completed { outcome }`. Events are handed off with bounded
@@ -835,7 +788,7 @@ acquire (`acquire_with_correlation`) or to an adaptor request with
 `ScheduledRequest::with_correlation_id`. The ID is preserved through the
 scheduler job, grant, permit and all lifecycle events.
 
-## Durable outbox runtime (Commits 14 and 15)
+## Durable outbox runtime
 
 `OutboundOutbox<S, E>` is a generic runtime over an application-defined
 `OutboxStore` and `OutboxExecutor`. The store owns persistence of an

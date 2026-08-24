@@ -3,6 +3,18 @@ Note that the list of required changes is not fully exhaustive and it may lack s
 
 ## unreleased
 
+### Bot API 10.3
+
+This fork now exposes Telegram Bot API 10.3. The generated send methods use
+`EphemeralMessageParameters` for ephemeral delivery, and message draft methods
+accept `can_stop` and `keep_on_stop` for the native Stop button flow.
+
+New public models cover rich-message buttons and document/expandable-quote/table
+blocks, disabled inline buttons, force-reply markup flags, stopped-generation
+updates, and community-joined service messages. Code that constructs affected
+structs with literals should initialize the new fields; constructors remain the
+preferred option where available.
+
 ## 0.18 -> 0.19
 
 This fork updates the workspace crates together:

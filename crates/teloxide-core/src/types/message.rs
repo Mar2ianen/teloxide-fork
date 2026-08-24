@@ -8,19 +8,19 @@ use url::Url;
 use crate::types::{
     Animation, Audio, BareChatId, BusinessConnectionId, Chat, ChatBackground, ChatBoostAdded,
     ChatId, ChatOwnerChanged, ChatOwnerLeft, ChatShared, Checklist, ChecklistTaskId,
-    ChecklistTasksAdded, ChecklistTasksDone, CommunityChatAdded, CommunityChatRemoved, Contact,
-    Dice, DirectMessagePriceChanged, DirectMessagesTopic, Document, ExternalReplyInfo,
-    ForumTopicClosed, ForumTopicCreated, ForumTopicEdited, ForumTopicReopened, Game,
-    GeneralForumTopicHidden, GeneralForumTopicUnhidden, GiftInfo, Giveaway, GiveawayCompleted,
-    GiveawayCreated, GiveawayWinners, InlineKeyboardMarkup, Invoice, LinkPreviewOptions, LivePhoto,
-    Location, ManagedBotCreated, MaybeInaccessibleMessage, MessageAutoDeleteTimerChanged,
-    MessageEntity, MessageEntityRef, MessageId, MessageOrigin, PaidMediaInfo,
-    PaidMessagePriceChanged, PassportData, PhotoSize, Poll, PollOptionAdded, PollOptionDeleted,
-    ProximityAlertTriggered, RefundedPayment, RichMessage, Sticker, Story, SuccessfulPayment,
-    SuggestedPostApprovalFailed, SuggestedPostApproved, SuggestedPostDeclined, SuggestedPostInfo,
-    SuggestedPostPaid, SuggestedPostRefunded, TextQuote, ThreadId, True, UniqueGiftInfo, User,
-    UsersShared, Venue, Video, VideoChatEnded, VideoChatParticipantsInvited, VideoChatScheduled,
-    VideoChatStarted, VideoNote, Voice, WebAppData, WriteAccessAllowed,
+    ChecklistTasksAdded, ChecklistTasksDone, CommunityChatAdded, CommunityChatJoined,
+    CommunityChatRemoved, Contact, Dice, DirectMessagePriceChanged, DirectMessagesTopic, Document,
+    ExternalReplyInfo, ForumTopicClosed, ForumTopicCreated, ForumTopicEdited, ForumTopicReopened,
+    Game, GeneralForumTopicHidden, GeneralForumTopicUnhidden, GiftInfo, Giveaway,
+    GiveawayCompleted, GiveawayCreated, GiveawayWinners, InlineKeyboardMarkup, Invoice,
+    LinkPreviewOptions, LivePhoto, Location, ManagedBotCreated, MaybeInaccessibleMessage,
+    MessageAutoDeleteTimerChanged, MessageEntity, MessageEntityRef, MessageId, MessageOrigin,
+    PaidMediaInfo, PaidMessagePriceChanged, PassportData, PhotoSize, Poll, PollOptionAdded,
+    PollOptionDeleted, ProximityAlertTriggered, RefundedPayment, RichMessage, Sticker, Story,
+    SuccessfulPayment, SuggestedPostApprovalFailed, SuggestedPostApproved, SuggestedPostDeclined,
+    SuggestedPostInfo, SuggestedPostPaid, SuggestedPostRefunded, TextQuote, ThreadId, True,
+    UniqueGiftInfo, User, UsersShared, Venue, Video, VideoChatEnded, VideoChatParticipantsInvited,
+    VideoChatScheduled, VideoChatStarted, VideoNote, Voice, WebAppData, WriteAccessAllowed,
 };
 
 /// This object represents a message.
@@ -131,6 +131,7 @@ pub enum MessageKind {
     ChecklistTasksDone(MessageChecklistTasksDone),
     ChecklistTasksAdded(MessageChecklistTasksAdded),
     CommunityChatAdded(MessageCommunityChatAdded),
+    CommunityChatJoined(MessageCommunityChatJoined),
     CommunityChatRemoved(MessageCommunityChatRemoved),
     DirectMessagePriceChanged(MessageDirectMessagePriceChanged),
     ForumTopicCreated(MessageForumTopicCreated),
@@ -221,6 +222,11 @@ impl<'de> Deserialize<'de> for MessageKind {
             MessageChecklistTasksAdded
         );
         deserialize_variant!("community_chat_added", CommunityChatAdded, MessageCommunityChatAdded);
+        deserialize_variant!(
+            "community_chat_joined",
+            CommunityChatJoined,
+            MessageCommunityChatJoined
+        );
         deserialize_variant!(
             "community_chat_removed",
             CommunityChatRemoved,
@@ -984,6 +990,13 @@ pub struct MessageCommunityChatAdded {
 }
 
 #[serde_with::skip_serializing_none]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct MessageCommunityChatJoined {
+    pub community_chat_joined: CommunityChatJoined,
+}
+
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct MessageCommunityChatRemoved {
@@ -1269,10 +1282,11 @@ mod getters {
     };
 
     use super::{
-        MediaGroupId, MessageChatBackground, MessageChatBoostAdded, MessageForumTopicClosed,
-        MessageForumTopicCreated, MessageForumTopicEdited, MessageForumTopicReopened,
-        MessageGeneralForumTopicHidden, MessageGeneralForumTopicUnhidden, MessageGiftInfo,
-        MessageGiveaway, MessageGiveawayCompleted, MessageGiveawayCreated, MessageGiveawayWinners,
+        MediaGroupId, MessageChatBackground, MessageChatBoostAdded, MessageCommunityChatJoined,
+        MessageForumTopicClosed, MessageForumTopicCreated, MessageForumTopicEdited,
+        MessageForumTopicReopened, MessageGeneralForumTopicHidden,
+        MessageGeneralForumTopicUnhidden, MessageGiftInfo, MessageGiveaway,
+        MessageGiveawayCompleted, MessageGiveawayCreated, MessageGiveawayWinners,
         MessageMessageAutoDeleteTimerChanged, MessagePaidMessagePriceChanged,
         MessageUniqueGiftInfo, MessageVideoChatEnded, MessageVideoChatScheduled,
         MessageVideoChatStarted, MessageWebAppData, MessageWriteAccessAllowed,
@@ -2101,6 +2115,17 @@ mod getters {
             match &self.kind {
                 CommunityChatRemoved(MessageCommunityChatRemoved { community_chat_removed }) => {
                     Some(community_chat_removed)
+                }
+                _ => None,
+            }
+        }
+
+        /// Returns the community-joined service message payload, if present.
+        #[must_use]
+        pub fn community_chat_joined(&self) -> Option<&types::CommunityChatJoined> {
+            match &self.kind {
+                CommunityChatJoined(MessageCommunityChatJoined { community_chat_joined }) => {
+                    Some(community_chat_joined)
                 }
                 _ => None,
             }

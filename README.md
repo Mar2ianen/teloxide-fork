@@ -5,7 +5,7 @@
     <img src="https://github.com/Mar2ianen/teloxide-fork/actions/workflows/ci.yml/badge.svg?branch=master">
   </a>
   <a href="https://core.telegram.org/bots/api">
-    <img src="https://img.shields.io/badge/API%20coverage-Bot%20API%2010.2%20core-yellowgreen.svg">
+    <img src="https://img.shields.io/badge/API%20coverage-Bot%20API%2010.3%20core-yellowgreen.svg">
   </a>
   <a href="https://t.me/teloxide">
     <img src="https://img.shields.io/badge/support-t.me%2Fteloxide-blueviolet">

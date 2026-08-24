@@ -22,7 +22,8 @@ pub struct InputRichMessage {
     blocks: Option<Vec<InputRichBlock>>,
     html: Option<String>,
     markdown: Option<String>,
-    /// Media referenced by `tg://photo`, `tg://video`, or `tg://audio` links.
+    /// Media referenced by `tg://photo`, `tg://video`, `tg://audio`, or
+    /// `tg://document` links.
     pub media: Option<Vec<InputRichMessageMedia>>,
     /// Show the rich message right-to-left.
     pub is_rtl: Option<bool>,

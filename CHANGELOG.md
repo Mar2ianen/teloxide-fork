@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add integration coverage for 10.3 serialization, update routing and nested rich-document multipart uploads.
 - Enrich `Drafter` with a cloneable `DrafterHandle` for correlating and stopping native draft generations, configurable Telegram native-text/rich backends, and ergonomic Stop-button options.
 - Add backward-compatible builders for native button styles, custom button emojis, disabled rich buttons, rich-button alignment and legacy ephemeral send options.
+- Add `TelegramDrafterPolicy::try_mode_for` for checked native-draft target selection and reject `NativeOnly` for non-private chats.
+- Add structured `DrafterObserver::record_error` diagnostics with retry/delivery classification while keeping raw request errors and preview payloads out of observers.
 
 ### Changed
 

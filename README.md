@@ -141,6 +141,15 @@ Ephemeral sends are edited through the dedicated `edit_ephemeral_message_*`
 methods; ordinary status-preview backends intentionally use regular message
 edits and do not inherit ephemeral parameters.
 
+Native draft constructors accept `UserId`, so a group or channel cannot be
+passed to them as a `ChatId`. When selecting a backend from a known chat, use
+`TelegramDrafterPolicy::try_mode_for(is_private_chat)`: the safe
+`NativeInPrivateStatusInChats` policy falls back to a status preview, while
+`NativeOnly` returns `DraftStartError::UnsupportedTarget` for non-private
+chats. Drafter observers also receive classified failures through
+`DrafterObserver::record_error`; the event contains retry/delivery metadata,
+never the raw request error or preview payload.
+
 ### Release checks for optional features
 
 Changes to `drafter`, `time-rendering` or `rich-text` should be checked with the pinned formatter and with both feature combinations enabled and disabled:

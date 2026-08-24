@@ -216,3 +216,18 @@ impl DraftId {
         }
     }
 }
+
+/// The chat and native draft identifier used to correlate Telegram's
+/// `stopped_message_generation` update with a running drafter.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct DrafterGeneration {
+    pub chat_id: ChatId,
+    pub draft_id: DraftId,
+}
+
+impl DrafterGeneration {
+    #[must_use]
+    pub const fn new(chat_id: ChatId, draft_id: DraftId) -> Self {
+        Self { chat_id, draft_id }
+    }
+}

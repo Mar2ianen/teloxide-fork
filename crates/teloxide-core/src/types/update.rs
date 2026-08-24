@@ -5,8 +5,9 @@ use serde_json::Value;
 use crate::types::{
     BotSubscriptionUpdated, BusinessConnection, BusinessMessagesDeleted, CallbackQuery, Chat,
     ChatBoostRemoved, ChatBoostUpdated, ChatJoinRequest, ChatMemberUpdated, ChosenInlineResult,
-    InlineQuery, ManagedBotUpdated, Message, MessageReactionCountUpdated, MessageReactionUpdated,
-    PaidMediaPurchased, Poll, PollAnswer, PreCheckoutQuery, ShippingQuery, User,
+    InlineQuery, ManagedBotUpdated, Message, MessageGenerationStopped, MessageReactionCountUpdated,
+    MessageReactionUpdated, PaidMediaPurchased, Poll, PollAnswer, PreCheckoutQuery, ShippingQuery,
+    User,
 };
 
 /// This [object] represents an incoming update.
@@ -163,6 +164,9 @@ pub enum UpdateKind {
     /// chat to receive these updates.
     RemovedChatBoost(ChatBoostRemoved),
 
+    /// A user stopped generation of a streamed message draft.
+    StoppedMessageGeneration(MessageGenerationStopped),
+
     /// An error that happened during deserialization.
     ///
     /// This allows `teloxide` to continue working even if telegram adds a new
@@ -210,9 +214,11 @@ impl Update {
             ManagedBot(m) => &m.user,
             Subscription(update) => &update.user,
 
-            MessageReactionCount(_) | DeletedBusinessMessages(_) | Poll(_) | Error(_) => {
-                return None
-            }
+            MessageReactionCount(_)
+            | DeletedBusinessMessages(_)
+            | Poll(_)
+            | StoppedMessageGeneration(_)
+            | Error(_) => return None,
         };
 
         Some(from)
@@ -315,6 +321,7 @@ impl Update {
 
             UpdateKind::MessageReactionCount(_)
             | UpdateKind::DeletedBusinessMessages(_)
+            | UpdateKind::StoppedMessageGeneration(_)
             | UpdateKind::Error(_) => i5(direct_users([None, None])),
         }
     }
@@ -341,6 +348,7 @@ impl Update {
             ChatBoost(b) => &b.chat,
             RemovedChatBoost(b) => &b.chat,
             DeletedBusinessMessages(m) => &m.chat,
+            StoppedMessageGeneration(update) => &update.chat,
 
             InlineQuery(_)
             | BusinessConnection(_)
@@ -459,6 +467,9 @@ impl<'de> Deserialize<'de> for UpdateKind {
                     "removed_chat_boost" => {
                         decode!(ChatBoostRemoved, UpdateKind::RemovedChatBoost)
                     }
+                    "stopped_message_generation" => {
+                        decode!(MessageGenerationStopped, UpdateKind::StoppedMessageGeneration)
+                    }
                     _ => UpdateKind::Error(Value::Object(raw)),
                 };
 
@@ -537,6 +548,9 @@ impl Serialize for UpdateKind {
             UpdateKind::RemovedChatBoost(v) => {
                 s.serialize_newtype_variant(name, 22, "removed_chat_boost", v)
             }
+            UpdateKind::StoppedMessageGeneration(v) => {
+                s.serialize_newtype_variant(name, 26, "stopped_message_generation", v)
+            }
             UpdateKind::Error(v) => v.serialize(s),
         }
     }
@@ -571,6 +585,7 @@ fn is_update_kind_key(key: &str) -> bool {
             | "chat_join_request"
             | "chat_boost"
             | "removed_chat_boost"
+            | "stopped_message_generation"
     )
 }
 

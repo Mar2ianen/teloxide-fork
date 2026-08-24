@@ -88,6 +88,7 @@ impl EventKind for Kind {
             ChatJoinRequest,
             ChatBoost,
             RemovedChatBoost,
+            StoppedMessageGeneration,
         ]
         .into_iter()
         .map(Kind)
@@ -196,6 +197,7 @@ mod tests {
                 | ChatJoinRequest
                 | ChatBoost
                 | RemovedChatBoost
+                | StoppedMessageGeneration
                 | BusinessMessage
                 | BusinessConnection
                 | EditedBusinessMessage

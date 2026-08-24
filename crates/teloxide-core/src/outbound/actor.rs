@@ -28,6 +28,7 @@
 use std::{
     collections::HashMap,
     future::Future,
+    num::NonZeroUsize,
     panic::AssertUnwindSafe,
     pin::Pin,
     sync::{
@@ -352,6 +353,17 @@ impl OutboundQueueHandle {
         self.new_lane(OutboundLaneMode::OrderedStart)
     }
 
+    /// Creates a FIFO lane with bounded concurrent grants. Permit grants are
+    /// ordered, while up to `max_in_flight` requests may remain active until
+    /// completion. A completed permit frees one slot for the next lane head.
+    pub fn bounded_ordered_start_lane(
+        &self,
+        max_in_flight: NonZeroUsize,
+    ) -> OutboundOrderedStartLane {
+        let key = OutboundLaneKey(self.next_lane_id.fetch_add(1, Ordering::Relaxed));
+        OutboundOrderedStartLane { handle: self.clone(), key, max_in_flight }
+    }
+
     fn new_lane(&self, mode: OutboundLaneMode) -> OutboundLane {
         let key = OutboundLaneKey(self.next_lane_id.fetch_add(1, Ordering::Relaxed));
         OutboundLane { handle: self.clone(), key, mode }
@@ -567,6 +579,58 @@ impl OutboundLane {
             metadata,
             Some(self.key),
             Some(self.mode),
+            OutboundEnqueueMode::ReplacePending { user_key },
+            None,
+        )
+    }
+}
+
+/// A FIFO ordering lane with a bounded number of concurrently active
+/// permits. Unlike [`OutboundLane`], completions may arrive in any order.
+#[derive(Clone, Debug)]
+pub struct OutboundOrderedStartLane {
+    handle: OutboundQueueHandle,
+    key: OutboundLaneKey,
+    max_in_flight: NonZeroUsize,
+}
+
+impl OutboundOrderedStartLane {
+    /// Acquires the next permit in this lane's FIFO grant order.
+    pub fn acquire(&self, metadata: OutboundMetadata) -> OutboundAcquire {
+        self.handle.acquire_inner(
+            metadata,
+            Some(self.key),
+            Some(OutboundLaneMode::BoundedOrderedStart(self.max_in_flight)),
+            OutboundEnqueueMode::Fifo,
+            None,
+        )
+    }
+
+    /// Acquires a permit and associates it with an observer correlation id.
+    pub fn acquire_with_correlation(
+        &self,
+        metadata: OutboundMetadata,
+        correlation_id: OutboundCorrelationId,
+    ) -> OutboundAcquire {
+        self.handle.acquire_inner(
+            metadata,
+            Some(self.key),
+            Some(OutboundLaneMode::BoundedOrderedStart(self.max_in_flight)),
+            OutboundEnqueueMode::Fifo,
+            Some(correlation_id),
+        )
+    }
+
+    /// Latest-wins variant for a pending slot in this lane.
+    pub fn acquire_latest_wins(
+        &self,
+        metadata: OutboundMetadata,
+        user_key: u64,
+    ) -> OutboundAcquire {
+        self.handle.acquire_inner(
+            metadata,
+            Some(self.key),
+            Some(OutboundLaneMode::BoundedOrderedStart(self.max_in_flight)),
             OutboundEnqueueMode::ReplacePending { user_key },
             None,
         )
@@ -1310,7 +1374,7 @@ impl OutboundActor {
 #[cfg(test)]
 mod tests {
     use std::{
-        num::NonZeroU32,
+        num::{NonZeroU32, NonZeroUsize},
         sync::{
             atomic::{AtomicBool, AtomicUsize, Ordering},
             Arc, Barrier, Mutex,
@@ -1885,6 +1949,35 @@ mod tests {
         let snapshot = handle.snapshot().await.unwrap();
         assert_eq!(snapshot.in_flight, 1);
         second.complete(OutboundCompletion::Success);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn bounded_ordered_start_lane_grants_fifo_up_to_bound() {
+        let queue = OutboundQueue::new_spawn(settings()).unwrap();
+        let handle = queue.handle();
+        let lane = handle.bounded_ordered_start_lane(NonZeroUsize::new(2).unwrap());
+
+        let mut first = lane.acquire(metadata(OutboundPriority::NORMAL));
+        let mut second = lane.acquire(metadata(OutboundPriority::NORMAL));
+        let mut third = Box::pin(lane.acquire(metadata(OutboundPriority::NORMAL)));
+        let first =
+            tokio::time::timeout(Duration::from_secs(1), &mut first).await.unwrap().unwrap();
+        let second =
+            tokio::time::timeout(Duration::from_secs(1), &mut second).await.unwrap().unwrap();
+        tokio::task::yield_now().await;
+        assert!(futures::poll!(third.as_mut()).is_pending());
+        assert_eq!(handle.snapshot().await.unwrap().in_flight, 2);
+
+        // Completion order is independent of FIFO grant order: releasing the
+        // second permit admits the third lane head without waiting for the
+        // first request.
+        second.complete(OutboundCompletion::Success);
+        let third = tokio::time::timeout(Duration::from_secs(1), third).await.unwrap().unwrap();
+        assert_eq!(handle.snapshot().await.unwrap().in_flight, 2);
+
+        first.complete(OutboundCompletion::Success);
+        third.complete(OutboundCompletion::Success);
+        assert_eq!(handle.snapshot().await.unwrap().in_flight, 0);
     }
 
     #[tokio::test(start_paused = true)]

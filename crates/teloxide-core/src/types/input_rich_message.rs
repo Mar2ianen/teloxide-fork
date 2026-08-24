@@ -1,7 +1,7 @@
 use crate::types::{
-    InputFile, InputFileLike, InputMediaAnimation, InputMediaAudio, InputMediaPhoto,
-    InputMediaVideo, Location, MessageEntity, ParseMode, RichBlockCaption, RichBlockTableCell,
-    RichText,
+    InputFile, InputFileLike, InputMediaAnimation, InputMediaAudio, InputMediaDocument,
+    InputMediaPhoto, InputMediaVideo, Location, MessageEntity, ParseMode, RichBlockCaption,
+    RichBlockTableCell, RichMessageButton, RichText,
 };
 use serde::Serialize;
 
@@ -22,7 +22,8 @@ pub struct InputRichMessage {
     blocks: Option<Vec<InputRichBlock>>,
     html: Option<String>,
     markdown: Option<String>,
-    /// Media referenced by `tg://photo`, `tg://video`, or `tg://audio` links.
+    /// Media referenced by `tg://photo`, `tg://video`, `tg://audio`, or
+    /// `tg://document` links.
     pub media: Option<Vec<InputRichMessageMedia>>,
     /// Show the rich message right-to-left.
     pub is_rtl: Option<bool>,
@@ -128,7 +129,8 @@ impl InputFileLike for InputRichMessage {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichMessageMedia {
-    /// Identifier used by a `tg://photo`, `tg://video`, or `tg://audio` link.
+    /// Identifier used by a `tg://photo`, `tg://video`, `tg://audio`, or
+    /// `tg://document` link.
     pub id: String,
     /// The referenced media.
     pub media: InputRichMessageMediaContent,
@@ -155,6 +157,7 @@ impl InputRichMessageMedia {
 pub enum InputRichMessageMediaContent {
     Animation(InputMediaAnimation),
     Audio(InputMediaAudio),
+    Document(InputMediaDocument),
     Photo(InputMediaPhoto),
     Video(InputMediaVideo),
     VoiceNote(InputMediaVoiceNote),
@@ -166,6 +169,10 @@ impl InputRichMessageMediaContent {
         match self {
             Self::Photo(media) => files.push(&media.media),
             Self::Audio(media) => {
+                files.push(&media.media);
+                files.extend(media.thumbnail.iter());
+            }
+            Self::Document(media) => {
                 files.push(&media.media);
                 files.extend(media.thumbnail.iter());
             }
@@ -188,6 +195,10 @@ impl InputRichMessageMediaContent {
         match self {
             Self::Photo(media) => files.push(&mut media.media),
             Self::Audio(media) => {
+                files.push(&mut media.media);
+                files.extend(media.thumbnail.iter_mut());
+            }
+            Self::Document(media) => {
                 files.push(&mut media.media);
                 files.extend(media.thumbnail.iter_mut());
             }
@@ -268,10 +279,13 @@ pub enum InputRichBlock {
     Anchor(InputRichBlockAnchor),
     List(InputRichBlockList),
     Blockquote(InputRichBlockBlockQuotation),
+    ExpandableBlockquote(InputRichBlockExpandableBlockQuotation),
     Pullquote(InputRichBlockPullQuotation),
     Collage(InputRichBlockCollage),
     Slideshow(InputRichBlockSlideshow),
     Table(InputRichBlockTable),
+    Buttons(InputRichBlockButtons),
+    Document(InputRichBlockDocument),
     Details(InputRichBlockDetails),
     Map(InputRichBlockMap),
     Animation(InputRichBlockAnimation),
@@ -288,9 +302,12 @@ impl InputFileLike for InputRichBlock {
         match self {
             Self::List(value) => value.items.copy_into(into),
             Self::Blockquote(value) => value.blocks.copy_into(into),
+            Self::ExpandableBlockquote(_) => {}
             Self::Collage(value) => value.blocks.copy_into(into),
             Self::Slideshow(value) => value.blocks.copy_into(into),
             Self::Details(value) => value.blocks.copy_into(into),
+            Self::Buttons(_) => {}
+            Self::Document(value) => value.document.copy_into(into),
             Self::Animation(value) => value.animation.copy_into(into),
             Self::Audio(value) => value.audio.copy_into(into),
             Self::Photo(value) => value.photo.copy_into(into),
@@ -314,9 +331,12 @@ impl InputFileLike for InputRichBlock {
         match self {
             Self::List(value) => value.items.move_into(into),
             Self::Blockquote(value) => value.blocks.move_into(into),
+            Self::ExpandableBlockquote(_) => {}
             Self::Collage(value) => value.blocks.move_into(into),
             Self::Slideshow(value) => value.blocks.move_into(into),
             Self::Details(value) => value.blocks.move_into(into),
+            Self::Buttons(_) => {}
+            Self::Document(value) => value.document.move_into(into),
             Self::Animation(value) => value.animation.move_into(into),
             Self::Audio(value) => value.audio.move_into(into),
             Self::Photo(value) => value.photo.move_into(into),
@@ -417,6 +437,13 @@ pub struct InputRichBlockBlockQuotation {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockExpandableBlockQuotation {
+    pub text: RichText,
+    pub credit: Option<RichText>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockPullQuotation {
     pub text: RichText,
     pub credit: Option<RichText>,
@@ -442,7 +469,36 @@ pub struct InputRichBlockTable {
     pub cells: Vec<Vec<RichBlockTableCell>>,
     pub is_bordered: Option<bool>,
     pub is_striped: Option<bool>,
+    pub is_compact: Option<bool>,
     pub caption: Option<RichText>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockButtons {
+    pub buttons: Vec<RichMessageButton>,
+    pub align: Option<String>,
+}
+
+impl InputRichBlockButtons {
+    /// Creates a rich-message buttons block.
+    pub fn new(buttons: impl IntoIterator<Item = RichMessageButton>) -> Self {
+        Self { buttons: buttons.into_iter().collect(), align: None }
+    }
+
+    /// Sets the native alignment for the buttons block.
+    #[must_use]
+    pub fn align(mut self, align: impl Into<String>) -> Self {
+        self.align = Some(align.into());
+        self
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockDocument {
+    pub document: InputMediaDocument,
+    pub caption: Option<RichBlockCaption>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -597,5 +653,33 @@ mod tests {
         assert_eq!(value["id"], "voice");
         assert_eq!(value["media"]["type"], "voice_note");
         assert_eq!(value["media"]["media"], "voice-file");
+    }
+
+    #[test]
+    fn document_media_collects_media_and_thumbnail_files() {
+        let media = InputRichMessageMedia::new(
+            "document",
+            InputRichMessageMediaContent::Document(
+                InputMediaDocument::new(InputFile::memory("document"))
+                    .thumbnail(InputFile::memory("thumbnail")),
+            ),
+        );
+        let message =
+            InputRichMessage::html(r#"<img src="tg://document?id=document">"#).media([media]);
+        let mut files = Vec::new();
+        message.copy_into(&mut |file| files.push(file));
+        assert_eq!(files.len(), 2);
+    }
+
+    #[test]
+    fn message_generation_stopped_accepts_numeric_and_string_draft_ids() {
+        let chat = serde_json::json!({"id": 7, "type": "private", "first_name": "User"});
+        for draft_id in [serde_json::json!(42), serde_json::json!("42")] {
+            let value = serde_json::from_value::<crate::types::MessageGenerationStopped>(
+                serde_json::json!({"chat": chat.clone(), "draft_id": draft_id}),
+            )
+            .unwrap();
+            assert_eq!(value.draft_id, 42);
+        }
     }
 }

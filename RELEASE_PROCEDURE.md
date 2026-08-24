@@ -18,9 +18,20 @@ from a feature branch or from a worktree that is ahead of `origin/next`.
 5. Open a release pull request against `master` and wait for every required
    status check.
 
+## Tagging
+
+After the release pull request has merged, create immutable annotated tags on
+the exact merge commit:
+
+```bash
+GIT_EDITOR=true git tag -a v0.20.0 <release-commit> -m "Release teloxide 0.20.0"
+GIT_EDITOR=true git tag -a core-v0.16.0 <release-commit> -m "Release teloxide-core 0.16.0"
+git push origin v0.20.0 core-v0.16.0
+```
+
 ## Publishing
 
-Publish in dependency order after the release pull request has merged:
+Publish only from the tagged release commit, in dependency order:
 
 ```bash
 cargo publish --package teloxide-core
@@ -31,14 +42,6 @@ Use `--dry-run` first. The `teloxide` manifest must contain versioned path
 dependencies for the released `teloxide-core` and `teloxide-macros` packages.
 Wait for each dependency to become available on crates.io before publishing the
 next package.
-
-Create immutable annotated tags on the exact release commit:
-
-```bash
-GIT_EDITOR=true git tag -a v0.20.0 <release-commit> -m "Release teloxide 0.20.0"
-GIT_EDITOR=true git tag -a core-v0.16.0 <release-commit> -m "Release teloxide-core 0.16.0"
-git push origin v0.20.0 core-v0.16.0
-```
 
 Publish the GitHub release with the root changelog entry and link the
 corresponding crates.io versions. Keep the previous release available for

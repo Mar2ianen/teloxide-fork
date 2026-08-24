@@ -1,11 +1,11 @@
 //! Core part of the [`teloxide`] library.
 //!
 //! This library provides tools for making requests to the [Telegram Bot API]
-//! (Currently, version `10.0` is supported) with ease. The library is fully
+//! (Currently, version `10.3` is supported) with ease. The library is fully
 //! asynchronous and built using [`tokio`].
 //!
 //!```toml
-//! teloxide-core = "0.14.0"
+//! teloxide-core = "0.16.0"
 //! ```
 //! _Compiler support: requires rustc 1.85+_.
 //!

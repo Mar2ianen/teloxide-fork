@@ -18,8 +18,8 @@
 </div>
 
 This repository is a maintained fork of [`teloxide`](https://github.com/teloxide/teloxide).
-The regular Telegram framework API remains compatible with the upstream `0.18.0`
-line; fork-specific APIs are opt-in features documented below.
+The fork release line is `0.19.0`; fork-specific runtime layers remain opt-in
+features documented below.
 
 ## Highlights
 
@@ -43,9 +43,9 @@ line; fork-specific APIs are opt-in features documented below.
 
 ## Optional runtime features
 
-This fork includes two opt-in application layers that stay outside the default Telegram transport:
+This fork includes opt-in application layers that stay outside the default Telegram transport:
 
-- `drafter` provides asynchronous latest-wins preview delivery, shared rate limiting, native-draft and edit-in-place backends, segment commits, finalization, abort cleanup and delivery certainty
+- `drafter` provides asynchronous latest-wins preview delivery, shared rate limiting, native-draft and edit-in-place backends, segment commits, finalization, abort cleanup, delivery certainty and update-driven Stop control
 - `rich-text` provides the shared semantic Rich Text pipeline: HTML, developer Markdown and LLM Markdown frontends with bound links, custom emoji and time normalization
 - `time-rendering` is a feature-level compatibility alias that also enables the Rich Text pipeline; the former formatter API was replaced by the shared semantic API
 - the outbound scheduler is available through `OutboundQueue` and `Bot::outbound(queue)`; it is opt-in and does not change ordinary `Bot` request behavior
@@ -94,6 +94,52 @@ shared semantic API. For the full public API and feature matrix see
 [`crates/teloxide/src/features.md`](crates/teloxide/src/features.md).
 The implementation-specific delivery contract is documented in the Drafter
 module rustdoc and the time renderer API docs.
+
+### Telegram Bot API 10.3
+
+The fork exposes the Bot API 10.3 surface in `teloxide-core`, including rich
+message buttons/documents, expandable quotations, compact tables, ephemeral
+message editing, native draft Stop controls, disabled buttons and the
+`stopped_message_generation` update. Existing inline-button code can opt into
+native styles and custom emojis with builders; rich buttons can be constructed
+with `RichMessageButton` and placed with `InputRichBlockButtons::align`.
+
+For native streaming drafts, enable `drafter` and configure the Stop lifecycle
+through the high-level facade:
+
+```rust,no_run
+use teloxide::{
+    drafter::{
+        DraftConfig, InProcessRateLimiter, TelegramDraftOptions, TelegramDrafter,
+        TelegramSendOptions,
+    },
+    types::UserId,
+    Bot,
+};
+
+async fn start_draft(bot: Bot, user_id: UserId) -> Result<(), Box<dyn std::error::Error>> {
+    let (drafter, sink) = TelegramDrafter::native_text_with_options(
+        bot,
+        user_id,
+        DraftConfig::default(),
+        InProcessRateLimiter::default(),
+        TelegramSendOptions::default(),
+        TelegramDraftOptions::default()
+            .stop_button()
+            .preserve_on_stop(),
+    )?;
+    let _handle = drafter.handle();
+    sink.update("streaming preview".to_owned())?;
+    Ok(())
+}
+```
+
+Match a `MessageGenerationStopped` update with the handle and call
+`handle.stop()` to run the normal drafter cleanup. See
+[`MIGRATION_GUIDE.md`](MIGRATION_GUIDE.md) for the full update-handler example.
+Ephemeral sends are edited through the dedicated `edit_ephemeral_message_*`
+methods; ordinary status-preview backends intentionally use regular message
+edits and do not inherit ephemeral parameters.
 
 ### Release checks for optional features
 
@@ -152,7 +198,7 @@ The fork-only features are not supplied by the upstream crates.io release. Pin a
 full commit when consuming them from an application:
 
 ```toml
-teloxide = { git = "https://github.com/Mar2ianen/teloxide-fork", rev = "7efc1a024cc9acee64ff1f497f94151e2ca697c5", features = ["macros", "drafter", "rich-text"] }
+teloxide = { git = "https://github.com/Mar2ianen/teloxide-fork", rev = "85c23bfaa59d1d9b927b95d28e63575813718faf", features = ["macros", "drafter", "rich-text"] }
 ```
 
 The `rev` above is an example of a full fork revision, not a floating branch;

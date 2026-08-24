@@ -344,9 +344,7 @@ fn multipart_input_file_fields(m: &Method) -> Option<Vec<&str>> {
     let mut fields: Vec<_> =
         m.params.iter().filter(|&p| ty_is_multiparty(&p.ty)).map(|p| &*p.name).collect();
 
-    if matches!(m.names.2.as_str(), "send_rich_message" | "edit_message_text") {
-        fields.push("rich_message");
-    }
+    fields.extend(m.multipart.iter().map(String::as_str));
 
     if fields.is_empty() {
         None

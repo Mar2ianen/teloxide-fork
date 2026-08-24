@@ -41,6 +41,8 @@ pub struct Method {
     pub tg_category: String,
     #[serde(default)]
     pub notes: Vec<Doc>,
+    #[serde(default)]
+    pub multipart: Vec<String>,
     pub params: Vec<Param>,
     #[serde(default)]
     pub sibling: Option<String>,

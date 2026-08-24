@@ -4099,6 +4099,7 @@ Schema(
             doc: Doc(md: "Use this method to send answers to an inline query. On success, _True_ is returned. No more than **50** results per query are allowed."),
             tg_doc: "https://core.telegram.org/bots/api#answerinlinequery",
             tg_category: "Inline Mode",
+            multipart: ["results"],
             params: [
                 Param(
                     name: "inline_query_id",
@@ -4141,6 +4142,7 @@ Schema(
             ),
             tg_doc: "https://core.telegram.org/bots/api#answerwebappquery",
             tg_category: "Inline Mode",
+            multipart: ["result"],
             params: [
                 Param(
                     name: "web_app_query_id",
@@ -4163,6 +4165,7 @@ Schema(
             ),
             tg_doc: "https://core.telegram.org/bots/api#savepreparedinlinemessage",
             tg_category: "Inline Mode",
+            multipart: ["result"],
             params: [
                 Param(
                     name: "user_id",
@@ -4206,6 +4209,7 @@ Schema(
             tg_doc: "https://core.telegram.org/bots/api#editmessagetext",
             tg_category: "Updating messages",
             sibling: Some("editMessageTextInline"),
+            multipart: ["rich_message"],
             params: [
                 Param(
                     name: "chat_id",
@@ -6569,6 +6573,7 @@ Schema(
             doc: Doc(md: "Use this method to reply to a received guest message. On success, a [SentGuestMessage] object is returned.", md_links: {"SentGuestMessage": "https://core.telegram.org/bots/api#sentguestmessage"}),
             tg_doc: "https://core.telegram.org/bots/api#answerguestquery",
             tg_category: "Available methods",
+            multipart: ["result"],
             params: [
                 Param(name: "guest_query_id", ty: String, descr: Doc(md: "Unique identifier for the query to be answered")),
                 Param(name: "result", ty: RawTy("InlineQueryResult"), descr: Doc(md: "An object describing the message to be sent")),
@@ -6837,6 +6842,7 @@ Schema(
             doc: Doc(md: "Use this method to send rich messages. On success, the sent [Message] is returned.", md_links: {"Message": "https://core.telegram.org/bots/api#message"}),
             tg_doc: "https://core.telegram.org/bots/api#sendrichmessage",
             tg_category: "Available methods",
+            multipart: ["rich_message"],
             params: [
                 Param(name: "business_connection_id", ty: Option(RawTy("BusinessConnectionId")), descr: Doc(md: "Unique identifier of the business connection on behalf of which the message will be sent")),
                 Param(name: "chat_id", ty: RawTy("Recipient"), descr: Doc(md: "Unique identifier for the target chat or username")),

@@ -5,10 +5,11 @@ use serde::Serialize;
 use crate::types::{InlineQueryResult, SentWebAppMessage};
 
 impl_payload! {
+    @[multipart = result]
     /// Use this method to set the result of an interaction with a [Web App] and send a corresponding message on behalf of the user to the chat from which the query originated.
     ///
     /// [Web App]: https://core.telegram.org/bots/webapps
-    #[derive(Debug, PartialEq, Clone, Serialize)]
+    #[derive(Debug, Clone, Serialize)]
     pub AnswerWebAppQuery (AnswerWebAppQuerySetters) => SentWebAppMessage {
         required {
             /// Unique identifier for the query to be answered

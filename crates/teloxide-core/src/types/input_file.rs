@@ -23,6 +23,10 @@ use crate::types::{self, InputSticker};
 
 /// This object represents the contents of a file to be uploaded.
 ///
+/// Equality compares the file source and optional filename. Multipart
+/// attachment ids are deliberately ignored; reader-backed files compare by
+/// shared reader identity.
+///
 /// [The official docs](https://core.telegram.org/bots/api#inputfile).
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
@@ -43,6 +47,22 @@ enum InnerFile {
 }
 
 use InnerFile::*;
+
+impl PartialEq for InputFile {
+    fn eq(&self, other: &Self) -> bool {
+        self.file_name == other.file_name
+            && match (&self.inner, &other.inner) {
+                (Read(left), Read(right)) => Arc::ptr_eq(&left.inner, &right.inner),
+                (File(left), File(right)) => left == right,
+                (Bytes(left), Bytes(right)) => left == right,
+                (Url(left), Url(right)) => left == right,
+                (FileId(left), FileId(right)) => left == right,
+                _ => false,
+            }
+    }
+}
+
+impl Eq for InputFile {}
 
 impl InputFile {
     /// Creates an `InputFile` from an url.
@@ -417,6 +437,23 @@ where
     fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
         if let Some(this) = self {
             this.move_into(into)
+        }
+    }
+}
+
+impl<T> InputFileLike for Vec<T>
+where
+    T: InputFileLike,
+{
+    fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
+        for value in self {
+            value.copy_into(into);
+        }
+    }
+
+    fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
+        for value in self {
+            value.move_into(into);
         }
     }
 }

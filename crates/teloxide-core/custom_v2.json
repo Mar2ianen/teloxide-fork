@@ -7816,7 +7816,7 @@
           }
         }
       ],
-      "maybe_multipart": false,
+      "maybe_multipart": true,
       "return_type": {
         "type": "any_of",
         "any_of": [
@@ -9367,7 +9367,7 @@
           }
         }
       ],
-      "maybe_multipart": false,
+      "maybe_multipart": true,
       "return_type": {
         "type": "bool",
         "default": true
@@ -9397,7 +9397,7 @@
           }
         }
       ],
-      "maybe_multipart": false,
+      "maybe_multipart": true,
       "return_type": {
         "type": "reference",
         "reference": "SentWebAppMessage"
@@ -9459,7 +9459,7 @@
           }
         }
       ],
-      "maybe_multipart": false,
+      "maybe_multipart": true,
       "return_type": {
         "type": "reference",
         "reference": "PreparedInlineMessage"
@@ -11392,7 +11392,7 @@
       ],
       "description": "Use this method to reply to a received guest message. On success, a [`SentGuestMessage`] object is returned.",
       "documentation_link": "https://core.telegram.org/bots/api#answerguestquery",
-      "maybe_multipart": false,
+      "maybe_multipart": true,
       "name": "answerGuestQuery",
       "return_type": {
         "reference": "SentGuestMessage",

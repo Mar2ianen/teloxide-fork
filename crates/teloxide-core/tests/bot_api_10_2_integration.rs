@@ -73,6 +73,14 @@ fn join_request_keeps_query_id_needed_by_query_methods() {
 }
 
 #[test]
+fn ordinary_command_omits_absent_ephemeral_flag() {
+    assert_eq!(
+        serde_json::to_value(BotCommand::new("help", "Help")).unwrap(),
+        serde_json::json!({"command": "help", "description": "Help"})
+    );
+}
+
+#[test]
 fn ephemeral_command_flag_serializes() {
     let command = BotCommand::new("private", "Private reply").is_ephemeral(true);
     assert_eq!(
@@ -145,4 +153,18 @@ fn subscription_update_is_routed_and_allowed() {
         serde_json::to_value(AllowedUpdate::Subscription).unwrap(),
         serde_json::json!("subscription")
     );
+
+    let future: Update = serde_json::from_value(serde_json::json!({
+        "update_id": 2,
+        "subscription": {
+            "user": {"id": 8, "is_bot": false, "first_name": "subscriber"},
+            "invoice_payload": "sub-43",
+            "state": "paused"
+        }
+    }))
+    .unwrap();
+    let UpdateKind::Subscription(subscription) = future.kind else {
+        panic!("expected subscription update");
+    };
+    assert_eq!(subscription.state, BotSubscriptionState::Unknown("paused".to_owned()));
 }

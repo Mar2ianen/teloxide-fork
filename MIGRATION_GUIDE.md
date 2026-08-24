@@ -79,6 +79,21 @@ Direct uploads nested in rich draft documents are rejected before transport;
 the validation error path identifies `rich_message.blocks[N].document.media`
 or `.document.thumbnail` precisely.
 
+### Checked drafter targets and error diagnostics
+
+Native Telegram draft backends accept `UserId` rather than a general
+`ChatId`, which keeps group and channel identifiers out of their constructors.
+If an application selects a policy after inspecting a Telegram chat, call
+`TelegramDrafterPolicy::try_mode_for(is_private_chat)`. It returns
+`DraftStartError::UnsupportedTarget` for `NativeOnly` on non-private chats;
+`NativeInPrivateStatusInChats` continues to select the status-preview fallback.
+
+Custom drafter observers can override `DrafterObserver::record_error` to
+consume `DrafterErrorEvent` with its `DrafterErrorClass` and
+`DeliveryCertainty`. Existing observers remain source-compatible because the
+hook defaults to the ordinary lifecycle `record` callback. Raw Telegram
+errors and preview payloads are not exposed by this diagnostic event.
+
 ## 0.18 -> 0.19
 
 This fork updates the workspace crates together:

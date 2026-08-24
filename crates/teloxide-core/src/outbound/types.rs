@@ -1,7 +1,7 @@
 //! Public types of the deterministic outbound scheduling model.
 
 use std::{
-    num::NonZeroU32,
+    num::{NonZeroU32, NonZeroUsize},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -102,9 +102,8 @@ impl OutboundChatKey {
     }
 }
 
-/// Opaque ordering-lane identifier: at most one in-flight request per lane,
-/// and the lane is served strictly in enqueue order. Allocated by the
-/// queue handle; callers never construct one.
+/// Opaque ordering-lane identifier. Every lane is served strictly in enqueue
+/// order; its mode controls how many granted requests may remain active.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct OutboundLaneKey(pub(crate) u64);
 
@@ -114,11 +113,22 @@ pub(crate) struct OutboundLaneKey(pub(crate) u64);
 /// completes. [`OutboundLaneMode::OrderedStart`] releases the lane when the
 /// caller explicitly confirms that the request has started, allowing later
 /// requests to start in enqueue order while earlier requests are still
-/// running.
+/// running. [`OutboundLaneMode::BoundedOrderedStart`] grants in the same FIFO
+/// order, but keeps a bounded number of permits active until completion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutboundLaneMode {
     Serial,
     OrderedStart,
+    BoundedOrderedStart(NonZeroUsize),
+}
+
+impl OutboundLaneMode {
+    pub(crate) fn has_capacity(self, in_flight: usize) -> bool {
+        match self {
+            Self::Serial | Self::OrderedStart => in_flight == 0,
+            Self::BoundedOrderedStart(max_in_flight) => in_flight < max_in_flight.get(),
+        }
+    }
 }
 
 /// Request class (message send, preview, chat action, ...). Part of

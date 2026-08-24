@@ -18,6 +18,36 @@ pub enum InputMedia {
     LivePhoto(InputMediaLivePhoto),
 }
 
+impl InputFileLike for InputMedia {
+    fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
+        match self {
+            Self::Photo(media) => media.copy_into(into),
+            Self::Video(media) => media.copy_into(into),
+            Self::Animation(media) => media.copy_into(into),
+            Self::Audio(media) => media.copy_into(into),
+            Self::Document(media) => media.copy_into(into),
+            Self::LivePhoto(media) => {
+                media.media.copy_into(into);
+                media.photo.copy_into(into);
+            }
+        }
+    }
+
+    fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
+        match self {
+            Self::Photo(media) => media.move_into(into),
+            Self::Video(media) => media.move_into(into),
+            Self::Animation(media) => media.move_into(into),
+            Self::Audio(media) => media.move_into(into),
+            Self::Document(media) => media.move_into(into),
+            Self::LivePhoto(media) => {
+                media.media.move_into(into);
+                media.photo.move_into(into);
+            }
+        }
+    }
+}
+
 impl InputFileLike for InputMediaPhoto {
     fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
         self.media.copy_into(into);
@@ -55,6 +85,18 @@ impl InputFileLike for InputMediaAnimation {
 }
 
 impl InputFileLike for InputMediaAudio {
+    fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
+        self.media.copy_into(into);
+        self.thumbnail.copy_into(into);
+    }
+
+    fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
+        self.media.move_into(into);
+        self.thumbnail.move_into(into);
+    }
+}
+
+impl InputFileLike for InputMediaDocument {
     fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
         self.media.copy_into(into);
         self.thumbnail.copy_into(into);

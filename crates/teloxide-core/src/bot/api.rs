@@ -316,7 +316,7 @@ impl Requester for Bot {
         )
     }
 
-    type SendPoll = JsonRequest<payloads::SendPoll>;
+    type SendPoll = MultipartRequest<payloads::SendPoll>;
 
     fn send_poll<C, Q, O>(&self, chat_id: C, question: Q, options: O) -> Self::SendPoll
     where

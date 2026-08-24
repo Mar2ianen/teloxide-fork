@@ -814,18 +814,14 @@ pub(crate) fn validate_payload_field<T: 'static>(
     if let Some(markup) = value.downcast_ref::<crate::types::InlineKeyboardMarkup>() {
         return validate_inline_keyboard_markup(markup, field);
     }
-    if let Some(markup) = value.downcast_ref::<Option<crate::types::InlineKeyboardMarkup>>() {
-        if let Some(markup) = markup {
-            return validate_inline_keyboard_markup(markup, field);
-        }
+    if let Some(Some(markup)) = value.downcast_ref::<Option<crate::types::InlineKeyboardMarkup>>() {
+        return validate_inline_keyboard_markup(markup, field);
     }
     if let Some(markup) = value.downcast_ref::<crate::types::ReplyMarkup>() {
         return validate_reply_markup(markup, field);
     }
-    if let Some(markup) = value.downcast_ref::<Option<crate::types::ReplyMarkup>>() {
-        if let Some(markup) = markup {
-            return validate_reply_markup(markup, field);
-        }
+    if let Some(Some(markup)) = value.downcast_ref::<Option<crate::types::ReplyMarkup>>() {
+        return validate_reply_markup(markup, field);
     }
     Ok(())
 }

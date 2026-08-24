@@ -11,8 +11,9 @@
 //! records the penalty, retry stays the policy of the calling layer.
 //!
 //! [`Outbound`] wraps any [`Requester`] so that every method returns a
-//! [`ScheduledRequest`]; [`ScheduledRequest::on_lane`] attaches an explicit
-//! ordering lane whose mode is selected when the lane is created. The
+//! [`ScheduledRequest`]; [`ScheduledRequest::on_lane`] and
+//! [`ScheduledRequest::on_ordered_start_lane`] attach explicit ordering lanes
+//! whose mode is selected when the lane is created. The
 //! classification (`OutboundPayload`) is generated from
 //! the Bot API schema for every payload, so the hint always reflects the
 //! payload that is actually sent.
@@ -24,9 +25,9 @@ use url::Url;
 use crate::{
     errors::AsResponseParameters,
     outbound::{
-        OutboundAcquireError, OutboundClass, OutboundCompletion, OutboundHint, OutboundLane,
-        OutboundMetadata, OutboundOverrides, OutboundPayload, OutboundPriority, OutboundQueue,
-        OutboundScope,
+        OutboundAcquire, OutboundAcquireError, OutboundClass, OutboundCompletion, OutboundHint,
+        OutboundLane, OutboundMetadata, OutboundOrderedStartLane, OutboundOverrides,
+        OutboundPayload, OutboundPriority, OutboundQueue, OutboundScope,
     },
     requests::{HasPayload, Output, Payload, Request, Requester},
     types::*,
@@ -129,11 +130,39 @@ impl<E: AsResponseParameters> AsResponseParameters for OutboundRequestError<E> {
 /// `request.send_ref()` only AFTER the grant — so any side effect of
 /// `Request::send_ref` (deadline capture, resource opening, ...) is
 /// deferred past admission.
+#[derive(Clone)]
+enum ScheduledLane {
+    Serial(OutboundLane),
+    BoundedOrderedStart(OutboundOrderedStartLane),
+}
+
+impl ScheduledLane {
+    fn acquire(&self, metadata: OutboundMetadata) -> OutboundAcquire {
+        match self {
+            Self::Serial(lane) => lane.acquire(metadata),
+            Self::BoundedOrderedStart(lane) => lane.acquire(metadata),
+        }
+    }
+
+    fn acquire_with_correlation(
+        &self,
+        metadata: OutboundMetadata,
+        correlation_id: crate::outbound::OutboundCorrelationId,
+    ) -> OutboundAcquire {
+        match self {
+            Self::Serial(lane) => lane.acquire_with_correlation(metadata, correlation_id),
+            Self::BoundedOrderedStart(lane) => {
+                lane.acquire_with_correlation(metadata, correlation_id)
+            }
+        }
+    }
+}
+
 #[must_use = "Scheduled requests are lazy and do nothing unless sent or awaited"]
 pub struct ScheduledRequest<Req: HasPayload> {
     request: Req,
     queue: OutboundQueue,
-    lane: Option<OutboundLane>,
+    lane: Option<ScheduledLane>,
     overrides: OutboundOverrides,
     correlation_id: Option<crate::outbound::OutboundCorrelationId>,
 }
@@ -169,7 +198,15 @@ impl<Req: HasPayload> ScheduledRequest<Req> {
     /// the next request waits for completion or only for
     /// [`crate::outbound::OutboundPermit::start`].
     pub fn on_lane(mut self, lane: &OutboundLane) -> Self {
-        self.lane = Some(lane.clone());
+        self.lane = Some(ScheduledLane::Serial(lane.clone()));
+        self
+    }
+
+    /// Attaches a bounded concurrent ordering lane. Permit grants remain in
+    /// FIFO order, while up to the lane's configured bound may be active at
+    /// once; completion frees the next slot.
+    pub fn on_ordered_start_lane(mut self, lane: &OutboundOrderedStartLane) -> Self {
+        self.lane = Some(ScheduledLane::BoundedOrderedStart(lane.clone()));
         self
     }
 
@@ -323,7 +360,9 @@ req_future! {
             // metadata, so the policy copy is kept separately.
             let policy_metadata = metadata.clone();
             let acquire = match (&lane, correlation_id) {
-                (Some(lane), Some(correlation_id)) => lane.acquire_with_correlation(metadata, correlation_id),
+                (Some(lane), Some(correlation_id)) => {
+                    lane.acquire_with_correlation(metadata, correlation_id)
+                }
                 (Some(lane), None) => lane.acquire(metadata),
                 (None, Some(correlation_id)) => queue.handle().acquire_with_correlation(metadata, correlation_id),
                 (None, None) => queue.handle().acquire(metadata),
@@ -377,7 +416,7 @@ req_future! {
 struct SendRefPlan<U: Request> {
     request: U,
     queue: OutboundQueue,
-    lane: Option<OutboundLane>,
+    lane: Option<ScheduledLane>,
     metadata: OutboundMetadata,
     correlation_id: Option<crate::outbound::OutboundCorrelationId>,
 }
@@ -387,7 +426,9 @@ req_future! {
         async move {
             let policy_metadata = it.metadata.clone();
             let acquire = match (&it.lane, it.correlation_id) {
-                (Some(lane), Some(correlation_id)) => lane.acquire_with_correlation(it.metadata, correlation_id),
+                (Some(lane), Some(correlation_id)) => {
+                    lane.acquire_with_correlation(it.metadata, correlation_id)
+                }
                 (Some(lane), None) => lane.acquire(it.metadata),
                 (None, Some(correlation_id)) => it.queue.handle().acquire_with_correlation(it.metadata, correlation_id),
                 (None, None) => it.queue.handle().acquire(it.metadata),

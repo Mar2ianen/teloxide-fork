@@ -12,7 +12,7 @@
     <img src="https://img.shields.io/badge/license-MIT-blue.svg">
   </a>
   <a href="https://core.telegram.org/bots/api">
-    <img src="https://img.shields.io/badge/API%20coverage-Bot%20API%2010.0%20core-yellowgreen.svg">
+    <img src="https://img.shields.io/badge/API%20coverage-Bot%20API%2010.3%20core-yellowgreen.svg">
   </a>
   <a href="https://crates.io/crates/teloxide_core">
     <img src="https://img.shields.io/crates/v/teloxide_core.svg">
@@ -25,9 +25,16 @@
 </div>
 
 ```toml
-teloxide-core = "0.15.0"
+teloxide-core = "0.16.0"
 ```
 _Compiler support: requires rustc 1.85+_.
+
+The current development line exposes Telegram Bot API 10.3, including rich-message
+buttons and document blocks, expandable quotations, compact tables, ephemeral
+message parameters and editing methods, native draft Stop controls, disabled
+buttons, force-reply flags, stopped-generation updates and new service
+messages. See the repository's
+[`MIGRATION_GUIDE.md`](../../MIGRATION_GUIDE.md) for upgrade notes.
 
 [`teloxide`]: https://docs.rs/teloxide
 [Telegram Bot API]: https://core.telegram.org/bots/api

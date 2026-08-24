@@ -120,6 +120,9 @@ struct LaneState {
     pending: BTreeSet<(u64, JobId)>,
     mode: OutboundLaneMode,
     in_flight: Option<JobId>,
+    /// Active permit count for bounded concurrent lanes. Serial and
+    /// explicit-start lanes use `in_flight` as their lock owner.
+    in_flight_count: usize,
     /// Order counter of the next enqueued job; wraps after 2^64 enqueues
     /// to this lane (unobservable in practice).
     next_order: u64,
@@ -138,6 +141,22 @@ struct LaneState {
     /// The effective priority of the freshest candidate entry for this
     /// lane; entries with a lower effective are stale and skipped on pop.
     candidate_effective: u8,
+}
+
+impl LaneState {
+    fn has_capacity(&self) -> bool {
+        self.mode.has_capacity(self.in_flight_count)
+    }
+
+    fn is_idle(&self) -> bool {
+        self.pending.is_empty()
+            && match self.mode {
+                OutboundLaneMode::BoundedOrderedStart(_) => self.in_flight_count == 0,
+                OutboundLaneMode::Serial | OutboundLaneMode::OrderedStart => {
+                    self.in_flight.is_none()
+                }
+            }
+    }
 }
 
 struct DelayedJob {
@@ -977,11 +996,7 @@ impl SchedulerState {
                                     lane_state.in_candidate_heap = false;
                                     lane_state.candidate_effective = 0;
                                 }
-                                if self
-                                    .lanes
-                                    .get(&lane)
-                                    .is_some_and(|l| l.pending.is_empty() && l.in_flight.is_none())
-                                {
+                                if self.lanes.get(&lane).is_some_and(LaneState::is_idle) {
                                     self.lanes.remove(&lane);
                                 }
                             }
@@ -1265,7 +1280,7 @@ impl SchedulerState {
     fn push_lane_head_candidate(&mut self, lane: OutboundLaneKey, now: Instant) {
         let (head_id, delayed, already_queued) = {
             let Some(lane_state) = self.lanes.get_mut(&lane) else { return };
-            if lane_state.in_flight.is_some() {
+            if !lane_state.has_capacity() {
                 return;
             }
             if lane_state.in_blocked_heap {
@@ -1330,6 +1345,7 @@ impl SchedulerState {
             pending: BTreeSet::new(),
             mode,
             in_flight: None,
+            in_flight_count: 0,
             next_order: 0,
             stale: 0,
             in_candidate_heap: false,
@@ -1843,7 +1859,7 @@ impl SchedulerState {
                             continue;
                         }
                         lane_state.in_candidate_heap = false;
-                        if lane_state.in_flight.is_some() {
+                        if !lane_state.has_capacity() {
                             continue;
                         }
                         while let Some(&(_, job_id)) = lane_state.pending.first() {
@@ -1876,11 +1892,7 @@ impl SchedulerState {
                     let Some((job_id, weight, scope)) = outcome.0 else {
                         // no grantable head: drop the lane if it is empty
                         // and free
-                        if self
-                            .lanes
-                            .get(&lane)
-                            .is_some_and(|l| l.pending.is_empty() && l.in_flight.is_none())
-                        {
+                        if self.lanes.get(&lane).is_some_and(LaneState::is_idle) {
                             self.lanes.remove(&lane);
                         }
                         continue;
@@ -2030,8 +2042,13 @@ impl SchedulerState {
             let head =
                 lane_state.pending.pop_first().expect("the lane head is queued when granted");
             debug_assert_eq!(head.1, candidate.job, "only the lane head is granted");
-            debug_assert!(lane_state.in_flight.is_none(), "a lane is admitted only when free");
-            lane_state.in_flight = Some(candidate.job);
+            if matches!(lane_state.mode, OutboundLaneMode::BoundedOrderedStart(_)) {
+                debug_assert!(lane_state.has_capacity(), "bounded lane is at capacity");
+            } else {
+                debug_assert!(lane_state.in_flight.is_none(), "a lane is admitted only when free");
+                lane_state.in_flight = Some(candidate.job);
+            }
+            lane_state.in_flight_count += 1;
         }
         self.global_windows.consume(now, job.meta.weight.get(), candidate.job);
         if let Some(windows) = self.class_global_windows.get_mut(&job.meta.class) {
@@ -2060,6 +2077,16 @@ impl SchedulerState {
                 weight: job.meta.weight.get(),
             },
         );
+        if let Some(lane) = job.meta.lane {
+            let should_rearm = self.lanes.get(&lane).is_some_and(|state| {
+                matches!(state.mode, OutboundLaneMode::BoundedOrderedStart(_))
+                    && state.has_capacity()
+                    && !state.pending.is_empty()
+            });
+            if should_rearm {
+                self.push_lane_head_candidate(lane, now);
+            }
+        }
     }
 
     /// Confirms that an ordered-start job has begun executing. This releases
@@ -2074,6 +2101,7 @@ impl SchedulerState {
                 return false;
             }
             state.in_flight = None;
+            state.in_flight_count = 0;
             true
         });
         if !release {
@@ -2105,10 +2133,18 @@ impl SchedulerState {
         let refund = matches!(&completion, OutboundCompletion::NoRequest);
         if let Some(lane) = in_flight.lane {
             let released = self.lanes.get_mut(&lane).is_some_and(|state| {
-                if state.in_flight != Some(job) {
-                    return false;
+                if matches!(state.mode, OutboundLaneMode::BoundedOrderedStart(_)) {
+                    if state.in_flight_count == 0 {
+                        return false;
+                    }
+                    state.in_flight_count -= 1;
+                } else {
+                    if state.in_flight != Some(job) {
+                        return false;
+                    }
+                    state.in_flight = None;
+                    state.in_flight_count = 0;
                 }
-                state.in_flight = None;
                 true
             });
             if released {
@@ -2116,14 +2152,10 @@ impl SchedulerState {
                     self.lanes.get(&lane).is_some_and(|state| !state.pending.is_empty());
                 if has_pending {
                     self.push_lane_head_candidate(lane, now);
-                } else {
+                } else if self.lanes.get(&lane).is_some_and(LaneState::is_idle) {
                     self.lanes.remove(&lane);
                 }
-            } else if self
-                .lanes
-                .get(&lane)
-                .is_some_and(|state| state.in_flight.is_none() && state.pending.is_empty())
-            {
+            } else if self.lanes.get(&lane).is_some_and(LaneState::is_idle) {
                 // OrderedStart may have released the lane before this
                 // completion; no future enqueue needs this empty state.
                 self.lanes.remove(&lane);
@@ -4218,6 +4250,7 @@ mod tests {
                 pending: BTreeSet::new(),
                 mode: OutboundLaneMode::Serial,
                 in_flight: None,
+                in_flight_count: 0,
                 next_order: u64::MAX - 1,
                 stale: 0,
                 in_candidate_heap: false,

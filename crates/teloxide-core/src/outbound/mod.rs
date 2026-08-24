@@ -15,7 +15,8 @@ mod scheduler;
 mod types;
 
 pub use actor::{
-    OutboundAcquire, OutboundLane, OutboundPermit, OutboundQueue, OutboundQueueHandle,
+    OutboundAcquire, OutboundLane, OutboundOrderedStartLane, OutboundPermit, OutboundQueue,
+    OutboundQueueHandle,
 };
 pub use adaptor::{class, Outbound, OutboundRequestError, ScheduledRequest};
 pub use observability::{NoopOutboundObserver, OutboundEvent, OutboundEventKind, OutboundObserver};

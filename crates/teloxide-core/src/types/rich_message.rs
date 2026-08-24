@@ -1,7 +1,10 @@
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
-use crate::types::{Animation, Audio, Location, PhotoSize, User, Video, Voice};
+use crate::types::{
+    Animation, Audio, CopyTextButton, DisabledButton, Document, Location, LoginUrl, PhotoSize,
+    SwitchInlineQueryChosenChat, User, Video, Voice, WebAppInfo,
+};
 
 /// A rich-formatted message returned by Telegram.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -9,6 +12,71 @@ use crate::types::{Animation, Audio, Location, PhotoSize, User, Video, Voice};
 pub struct RichMessage {
     pub blocks: Vec<RichBlock>,
     pub is_rtl: Option<bool>,
+}
+
+/// A button embedded in a rich message.
+#[serde_with::skip_serializing_none]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct RichMessageButton {
+    pub text: RichText,
+    pub style: Option<String>,
+    pub url: Option<String>,
+    pub callback_data: Option<String>,
+    pub web_app: Option<WebAppInfo>,
+    pub login_url: Option<LoginUrl>,
+    pub switch_inline_query: Option<String>,
+    pub switch_inline_query_current_chat: Option<String>,
+    pub switch_inline_query_chosen_chat: Option<SwitchInlineQueryChosenChat>,
+    pub copy_text: Option<CopyTextButton>,
+    pub disabled: Option<DisabledButton>,
+}
+
+impl RichMessageButton {
+    /// Creates a rich-message button without an action.
+    pub fn new(text: impl Into<RichText>) -> Self {
+        Self {
+            text: text.into(),
+            style: None,
+            url: None,
+            callback_data: None,
+            web_app: None,
+            login_url: None,
+            switch_inline_query: None,
+            switch_inline_query_current_chat: None,
+            switch_inline_query_chosen_chat: None,
+            copy_text: None,
+            disabled: None,
+        }
+    }
+
+    /// Creates a rich-message callback button.
+    pub fn callback(text: impl Into<RichText>, callback_data: impl Into<String>) -> Self {
+        let mut button = Self::new(text);
+        button.callback_data = Some(callback_data.into());
+        button
+    }
+
+    /// Creates a rich-message URL button.
+    pub fn url(text: impl Into<RichText>, url: impl Into<String>) -> Self {
+        let mut button = Self::new(text);
+        button.url = Some(url.into());
+        button
+    }
+
+    /// Creates a disabled rich-message button.
+    pub fn disabled(text: impl Into<RichText>) -> Self {
+        let mut button = Self::new(text);
+        button.disabled = Some(DisabledButton {});
+        button
+    }
+
+    /// Sets the native button style introduced by Bot API 10.3.
+    #[must_use]
+    pub fn style(mut self, style: impl Into<String>) -> Self {
+        self.style = Some(style.into());
+        self
+    }
 }
 
 /// Rich-formatted inline text.
@@ -93,6 +161,7 @@ pub enum RichTextObject {
     Hashtag(RichTextHashtag),
     Cashtag(RichTextCashtag),
     BotCommand(RichTextBotCommand),
+    Button(RichTextButton),
     Anchor(RichTextAnchor),
     AnchorLink(RichTextAnchorLink),
     Reference(RichTextReference),
@@ -125,6 +194,7 @@ fn is_known_rich_text_type(type_name: &str) -> bool {
             | "hashtag"
             | "cashtag"
             | "bot_command"
+            | "button"
             | "anchor"
             | "anchor_link"
             | "reference"
@@ -176,6 +246,7 @@ enum KnownRichTextObject {
     Hashtag(RichTextHashtag),
     Cashtag(RichTextCashtag),
     BotCommand(RichTextBotCommand),
+    Button(RichTextButton),
     Anchor(RichTextAnchor),
     AnchorLink(RichTextAnchorLink),
     Reference(RichTextReference),
@@ -208,6 +279,7 @@ impl From<KnownRichTextObject> for RichTextObject {
             KnownRichTextObject::Hashtag(value) => Self::Hashtag(value),
             KnownRichTextObject::Cashtag(value) => Self::Cashtag(value),
             KnownRichTextObject::BotCommand(value) => Self::BotCommand(value),
+            KnownRichTextObject::Button(value) => Self::Button(value),
             KnownRichTextObject::Anchor(value) => Self::Anchor(value),
             KnownRichTextObject::AnchorLink(value) => Self::AnchorLink(value),
             KnownRichTextObject::Reference(value) => Self::Reference(value),
@@ -276,6 +348,7 @@ impl Serialize for RichTextObject {
             Self::Hashtag(value) => serialize_rich_text_object(serializer, "hashtag", value),
             Self::Cashtag(value) => serialize_rich_text_object(serializer, "cashtag", value),
             Self::BotCommand(value) => serialize_rich_text_object(serializer, "bot_command", value),
+            Self::Button(value) => serialize_rich_text_object(serializer, "button", value),
             Self::Anchor(value) => serialize_rich_text_object(serializer, "anchor", value),
             Self::AnchorLink(value) => serialize_rich_text_object(serializer, "anchor_link", value),
             Self::Reference(value) => serialize_rich_text_object(serializer, "reference", value),
@@ -382,6 +455,14 @@ rich_text_link!(RichTextMention, Mention, username);
 rich_text_link!(RichTextHashtag, Hashtag, hashtag);
 rich_text_link!(RichTextCashtag, Cashtag, cashtag);
 rich_text_link!(RichTextBotCommand, BotCommand, bot_command);
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct RichTextButton {
+    pub button: Box<RichMessageButton>,
+}
+rich_text_from!(RichTextButton, Button);
+
 rich_text_link!(RichTextAnchorLink, AnchorLink, anchor_name);
 rich_text_link!(RichTextReference, Reference, name);
 rich_text_link!(RichTextReferenceLink, ReferenceLink, reference_name);
@@ -469,10 +550,13 @@ impl<'de> Deserialize<'de> for RichBlock {
             | "anchor"
             | "list"
             | "blockquote"
+            | "expandable_blockquote"
             | "pullquote"
             | "collage"
             | "slideshow"
             | "table"
+            | "buttons"
+            | "document"
             | "details"
             | "map"
             | "animation"
@@ -508,10 +592,13 @@ pub enum RichBlockKind {
     Anchor(RichBlockAnchor),
     List(RichBlockList),
     Blockquote(RichBlockBlockQuotation),
+    ExpandableBlockquote(RichBlockExpandableBlockQuotation),
     Pullquote(RichBlockPullQuotation),
     Collage(RichBlockCollage),
     Slideshow(RichBlockSlideshow),
     Table(RichBlockTable),
+    Buttons(RichBlockButtons),
+    Document(RichBlockDocument),
     Details(RichBlockDetails),
     Map(RichBlockMap),
     Animation(RichBlockAnimation),
@@ -581,6 +668,13 @@ pub struct RichBlockBlockQuotation {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct RichBlockExpandableBlockQuotation {
+    pub text: RichText,
+    pub credit: Option<RichText>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct RichBlockPullQuotation {
     pub text: RichText,
     pub credit: Option<RichText>,
@@ -606,7 +700,22 @@ pub struct RichBlockTable {
     pub cells: Vec<Vec<RichBlockTableCell>>,
     pub is_bordered: Option<bool>,
     pub is_striped: Option<bool>,
+    pub is_compact: Option<bool>,
     pub caption: Option<RichText>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct RichBlockButtons {
+    pub buttons: Vec<RichMessageButton>,
+    pub align: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct RichBlockDocument {
+    pub document: Document,
+    pub caption: Option<RichBlockCaption>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

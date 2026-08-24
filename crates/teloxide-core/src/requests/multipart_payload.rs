@@ -126,12 +126,13 @@ mod tests {
         requests::{MultipartPayload, MultipartRequest, Requester},
         types::{
             BusinessConnectionId, ChatId, InlineQueryId, InlineQueryResult,
-            InlineQueryResultArticle, InputFile, InputMediaAnimation, InputMediaLivePhoto,
-            InputMediaPhoto, InputMediaSticker, InputMediaVideo, InputMessageContent,
-            InputMessageContentText, InputPollMedia, InputPollOption, InputPollOptionMedia,
-            InputRichBlock, InputRichBlockPhoto, InputRichMessage, InputRichMessageContent,
-            InputRichMessageMedia, InputRichMessageMediaContent, InputStoryContent,
-            InputStoryContentPhoto, InputStoryContentVideo, Seconds, StoryId, UserId,
+            InlineQueryResultArticle, InputFile, InputMediaAnimation, InputMediaDocument,
+            InputMediaLivePhoto, InputMediaPhoto, InputMediaSticker, InputMediaVideo,
+            InputMessageContent, InputMessageContentText, InputPollMedia, InputPollOption,
+            InputPollOptionMedia, InputRichBlock, InputRichBlockPhoto, InputRichMessage,
+            InputRichMessageContent, InputRichMessageMedia, InputRichMessageMediaContent,
+            InputStoryContent, InputStoryContentPhoto, InputStoryContentVideo, Seconds, StoryId,
+            UserId,
         },
         Bot,
     };
@@ -317,6 +318,27 @@ mod tests {
         let mut moved = 0;
         payload.move_files(&mut |_| moved += 1);
         assert_eq!(moved, 1);
+
+        assert_multipart(Bot::new("token").send_rich_message(ChatId(1), rich));
+    }
+
+    #[test]
+    fn send_rich_message_collects_top_level_document_attachments() {
+        fn assert_multipart(_: MultipartRequest<SendRichMessage>) {}
+
+        let rich = InputRichMessage::html(r#"<img src="tg://document?id=file">"#).media([
+            InputRichMessageMedia::new(
+                "file",
+                InputRichMessageMediaContent::Document(
+                    InputMediaDocument::new(file()).thumbnail(file()),
+                ),
+            ),
+        ]);
+        let payload = SendRichMessage::new(ChatId(1), rich.clone());
+
+        let mut copied = 0;
+        payload.copy_files(&mut |_| copied += 1);
+        assert_eq!(copied, 2);
 
         assert_multipart(Bot::new("token").send_rich_message(ChatId(1), rich));
     }

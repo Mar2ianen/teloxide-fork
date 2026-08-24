@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## unreleased
 
+## 0.16.0 - 2026-08-24
+
+### Added
+
+- Support for Telegram Bot API 10.3, including rich-message button/document blocks, expandable quotations, compact tables, ephemeral message parameters, draft Stop-button controls, disabled inline buttons, force-reply markup flags and new service/update types.
+- Add schema/codegen and integration coverage for the 10.3 request and type surface.
+- Add ergonomic builders for existing inline buttons and new rich-message buttons, including native styles, custom emojis, disabled buttons and rich-button alignment.
+- Report exact nested validation paths for direct uploads in rich draft documents.
+- Add bounded ordered-start scheduler lanes with FIFO admission and completion-driven rearming.
+
+### Changed
+
+- Make `edit_ephemeral_message_text` accept optional `text` and `rich_message` fields, requiring at least one before dispatch.
+- Treat `ChatAdministratorRights::can_send_welcome_messages` as a defaulted boolean, matching `ChatMemberAdministrator`.
+- Validate nested rich-text buttons, button labels, inline-button styles, rich-media link identifiers and draft file sources before transport.
+
 ## 0.15.0 - 2026-08-14
 
 ### Added
@@ -21,8 +37,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Add live photo, managed bot, gift background, poll media, poll option change, profile audio and video quality types
   - Add TBA 9.3 through 10.0 fields to users, messages, polls, chats, gifts, keyboards, chat members, media and related service-message types [**BC**]
 
-
-### Changed
 
 - Raise MSRV from Rust 1.82 to 1.85.
 

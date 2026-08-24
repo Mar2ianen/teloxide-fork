@@ -1,9 +1,4 @@
-//! Types of the deterministic outbound scheduling model.
-//!
-//! Commit 1 kept these internal; Commit 2 lands the actor, the handle and
-//! the completion-aware permit on top of the pure `SchedulerState`, so the
-//! caller-facing types become public. The naming and shape are still
-//! expected to be refined during the architectural review of each commit.
+//! Public types of the deterministic outbound scheduling model.
 
 use std::{
     num::NonZeroU32,
@@ -107,7 +102,7 @@ impl OutboundChatKey {
     }
 }
 
-/// Draft ordering-lane identifier: at most one in-flight request per lane,
+/// Opaque ordering-lane identifier: at most one in-flight request per lane,
 /// and the lane is served strictly in enqueue order. Allocated by the
 /// queue handle; callers never construct one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -126,7 +121,7 @@ pub enum OutboundLaneMode {
     OrderedStart,
 }
 
-/// Draft request class (message send, preview, chat action, ...). Part of
+/// Request class (message send, preview, chat action, ...). Part of
 /// the request metadata so that latest-wins slots can never be spoofed with
 /// different semantics.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -142,7 +137,7 @@ impl OutboundClass {
     }
 }
 
-/// Draft opaque identity of a job inside the scheduler.
+/// Opaque identity of a job inside the scheduler.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct JobId(pub(crate) u64);
 
@@ -174,7 +169,7 @@ pub trait OutboundPayload {
 pub struct OutboundHint {
     /// The chat (or user) identity the request applies to.
     pub scope: OutboundScope,
-    /// Draft request class (message send, mutation, chat action, ...).
+    /// Request class (message send, mutation, chat action, ...).
     pub class: OutboundClass,
     /// Base priority; callers may override it per request.
     pub priority: OutboundPriority,
@@ -218,9 +213,7 @@ pub struct OutboundOverrides {
 
 /// Stable user-provided correlation id carried by an acquire.
 ///
-/// Draft placeholder: `OutboundMetadata` does not carry it yet — it will
-/// return together with the observability commit (snapshot/observer
-/// events), until then the id would be silently discarded.
+/// Stable caller-provided identity carried through scheduler lifecycle events.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct OutboundCorrelationId(u64);
 
@@ -308,6 +301,33 @@ pub enum SchedulerConfigError {
     /// for one kind of chats; global windows must apply to every chat.
     KindSpecificGlobalWindow,
 }
+
+impl std::fmt::Display for SchedulerConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ZeroWindowCapacity => {
+                f.write_str("zero-capacity windows are reserved for runtime pauses")
+            }
+            Self::ZeroWindowDuration => {
+                f.write_str("outbound windows must have a positive duration")
+            }
+            Self::ZeroAgingQuantum => f.write_str("outbound aging quantum must be positive"),
+            Self::AgingCannotReachHighest { max_boost } => {
+                write!(f, "outbound aging max_boost {max_boost} cannot reach the highest priority")
+            }
+            Self::ZeroQueueCapacity => f.write_str("outbound queue capacity must be positive"),
+            Self::PendingWeightExceedsWindow { scope, weight, capacity } => write!(
+                f,
+                "pending outbound weight {weight} for {scope:?} exceeds window capacity {capacity}"
+            ),
+            Self::KindSpecificGlobalWindow => {
+                f.write_str("global outbound windows cannot filter by chat kind")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SchedulerConfigError {}
 
 /// One granted job handed to the caller.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -503,6 +523,24 @@ pub enum OutboundSetLimitsError {
     Closed,
     /// The limits are invalid; the previous limits stay in effect.
     Invalid(SchedulerConfigError),
+}
+
+impl std::fmt::Display for OutboundSetLimitsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Closed => f.write_str("the outbound queue is shut down or dead"),
+            Self::Invalid(error) => write!(f, "invalid outbound queue limits: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for OutboundSetLimitsError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Closed => None,
+            Self::Invalid(error) => Some(error),
+        }
+    }
 }
 
 impl std::fmt::Display for OutboundAcquireError {

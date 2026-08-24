@@ -1,6 +1,6 @@
 [package]
 name = "teloxide"
-version = "0.18.0"
+version = "0.19.0"
 description = "An elegant Telegram bots framework for Rust"
 
 rust-version.workspace = true
@@ -94,9 +94,9 @@ full = [
 ]
 
 [dependencies]
-# replace me by the actual version when release, and return path when it's time to make 0-day fixes
-teloxide-core = { path = "../teloxide-core", default-features = false }
-teloxide-macros = { path = "../teloxide-macros", optional = true }
+# Keep workspace paths for local builds and versions for crates.io publishing.
+teloxide-core = { path = "../teloxide-core", version = "0.15.0", default-features = false }
+teloxide-macros = { path = "../teloxide-macros", version = "0.11.1", optional = true }
 
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }

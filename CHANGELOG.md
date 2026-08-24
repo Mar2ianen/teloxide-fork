@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add backward-compatible builders for native button styles, custom button emojis, disabled rich buttons, rich-button alignment and legacy ephemeral send options.
 - Add `TelegramDrafterPolicy::try_mode_for` for checked native-draft target selection and reject `NativeOnly` for non-private chats.
 - Add structured `DrafterObserver::record_error` diagnostics with retry/delivery classification while keeping raw request errors and preview payloads out of observers.
+- Add the bounded `OutboundOrderedStartLane` scheduler mode and document its FIFO admission/completion contract.
 
 ### Changed
 
@@ -22,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Rich-document draft validation now reports exact nested paths for direct document and thumbnail uploads.
+- Validate rich-message button actions, styles, callback-data byte limits, button counts and alignment before dispatch.
+- Keep rich document media multipart-aware, allow rich-only ephemeral text edits, and accept numeric or string draft IDs in stopped-generation updates.
+- Clear native drafter generations on every terminal worker path so stopped handles cannot match stale updates.
 
 ## 0.19.0 - 2026-08-14
 

@@ -330,6 +330,11 @@ where
     L: DrafterRateLimiter,
 {
     async fn run(mut self) {
+        self.run_loop().await;
+        *self.generation.lock().expect("drafter generation mutex poisoned") = None;
+    }
+
+    async fn run_loop(&mut self) {
         loop {
             match self.run_due_preview().await {
                 PreviewRunResult::Continue => continue,
@@ -1947,7 +1952,9 @@ where
         if self.commands.send(Command::Abort { reply }).await.is_err() {
             return Err(super::DraftAbortError::WorkerStopped);
         }
-        receiver.await.map_err(|_| super::DraftAbortError::WorkerStopped)?
+        let result = receiver.await.map_err(|_| super::DraftAbortError::WorkerStopped)?;
+        *self.generation.lock().expect("drafter generation mutex poisoned") = None;
+        result
     }
 }
 
@@ -2151,6 +2158,7 @@ where
 {
     fn drop(&mut self) {
         self.source.close();
+        *self.generation.lock().expect("drafter generation mutex poisoned") = None;
         if let Some(worker) = self.worker.take() {
             worker.abort();
         }

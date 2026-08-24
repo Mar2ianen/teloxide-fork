@@ -6747,15 +6747,16 @@ Schema(
         ),
         Method(
             names: ("editEphemeralMessageText", "EditEphemeralMessageText", "edit_ephemeral_message_text"),
+            validation: Some("crate::requests::validation::validate_edit_ephemeral_message_text"),
             return_ty: True,
-            doc: Doc(md: "Use this method to edit an ephemeral text message. Returns _True_ on success."),
+            doc: Doc(md: "Use this method to edit an ephemeral text or rich message. Returns _True_ on success."),
             tg_doc: "https://core.telegram.org/bots/api#editephemeralmessagetext",
             tg_category: "Updating messages",
             params: [
                 Param(name: "chat_id", ty: RawTy("Recipient"), descr: Doc(md: "Unique identifier for the target chat or username of the target supergroup")),
                 Param(name: "receiver_user_id", ty: RawTy("UserId"), descr: Doc(md: "Identifier of the user who received the message")),
                 Param(name: "ephemeral_message_id", ty: i32, descr: Doc(md: "Identifier of the ephemeral message to edit")),
-                Param(name: "text", ty: String, descr: Doc(md: "New text of the message, 1-4096 characters after entity parsing")),
+                Param(name: "text", ty: Option(String), descr: Doc(md: "New text of the message, 1-4096 characters after entity parsing; required if rich_message isn't specified")),
                 Param(name: "rich_message", ty: Option(RawTy("InputRichMessage")), descr: Doc(md: "New rich message content")),
                 Param(name: "parse_mode", ty: Option(RawTy("ParseMode")), descr: Doc(md: "Mode for parsing entities in the message text")),
                 Param(name: "entities", ty: Option(ArrayOf(RawTy("MessageEntity"))), descr: Doc(md: "List of special entities that appear in message text")),

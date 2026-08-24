@@ -78,12 +78,36 @@ impl fmt::Display for RequestFieldPath {
 pub enum InvalidValueReason {
     /// The value must not be zero.
     MustBeNonZero,
+    /// The value must be within an inclusive range.
+    MustBeInRange { min: usize, max: usize },
+    /// The value must contain a byte length within an inclusive range.
+    MustHaveByteLength { min: usize, max: usize },
+    /// Exactly one action field must be present.
+    MustHaveExactlyOneAction,
+    /// The value must be one of the listed values.
+    MustBeOneOf(&'static [&'static str]),
+    /// The button must use callback data as its action.
+    MustBeCallbackButton,
+    /// At least one of the alternative fields must be present.
+    MustHaveTextOrRichMessage,
 }
 
 impl fmt::Display for InvalidValueReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MustBeNonZero => f.write_str("must be non-zero"),
+            Self::MustBeInRange { min, max } => write!(f, "must be in range {min}..={max}"),
+            Self::MustHaveByteLength { min, max } => {
+                write!(f, "must contain {min}..={max} bytes")
+            }
+            Self::MustHaveExactlyOneAction => {
+                f.write_str("exactly one button action must be specified")
+            }
+            Self::MustBeOneOf(values) => write!(f, "must be one of {}", values.join(", ")),
+            Self::MustBeCallbackButton => f.write_str("must be a callback button"),
+            Self::MustHaveTextOrRichMessage => {
+                f.write_str("text or rich_message must be specified")
+            }
         }
     }
 }
@@ -324,6 +348,7 @@ fn validate_block(
             validate_voice_note(&value.voice_note, context, path)?;
             path.pop();
         }
+        InputRichBlock::Buttons(value) => validate_buttons(value, path)?,
         InputRichBlock::Thinking(_) if context != RichMessageContext::Draft => {
             return Err(RequestValidationError::UnsupportedInContext {
                 path: path.clone(),
@@ -340,7 +365,6 @@ fn validate_block(
         | InputRichBlock::ExpandableBlockquote(_)
         | InputRichBlock::Pullquote(_)
         | InputRichBlock::Table(_)
-        | InputRichBlock::Buttons(_)
         | InputRichBlock::Map(_)
         | InputRichBlock::Thinking(_) => {}
     }
@@ -358,6 +382,7 @@ fn validate_rich_media_content(
     match media {
         InputRichMessageMediaContent::Animation(value) => validate_animation(value, context, path),
         InputRichMessageMediaContent::Audio(value) => validate_audio(value, context, path),
+        InputRichMessageMediaContent::Document(value) => validate_document(value, context, path),
         InputRichMessageMediaContent::Photo(value) => validate_photo(value, context, path),
         InputRichMessageMediaContent::Video(value) => validate_video(value, context, path),
         InputRichMessageMediaContent::VoiceNote(value) => validate_voice_note(value, context, path),
@@ -378,6 +403,18 @@ fn validate_animation(
 
 fn validate_audio(
     media: &crate::types::InputMediaAudio,
+    context: RichMessageContext,
+    path: &RequestFieldPath,
+) -> Result<(), RequestValidationError> {
+    let mut path = path.clone();
+    path.push_field("media");
+    validate_file(&media.media, context, &path)?;
+    path.pop();
+    validate_optional_file(media.thumbnail.as_ref(), context, &mut path, "thumbnail")
+}
+
+fn validate_document(
+    media: &crate::types::InputMediaDocument,
     context: RichMessageContext,
     path: &RequestFieldPath,
 ) -> Result<(), RequestValidationError> {
@@ -475,6 +512,23 @@ pub(crate) fn validate_send_rich_message_draft(
     validate_rich_message_at(&payload.rich_message, RichMessageContext::Draft, &mut path)
 }
 
+pub(crate) fn validate_edit_ephemeral_message_text(
+    payload: &crate::payloads::EditEphemeralMessageText,
+) -> Result<(), RequestValidationError> {
+    if payload.text.is_none() && payload.rich_message.is_none() {
+        return Err(RequestValidationError::InvalidValue {
+            path: RequestFieldPath::new(),
+            reason: InvalidValueReason::MustHaveTextOrRichMessage,
+        });
+    }
+
+    if let Some(rich_message) = &payload.rich_message {
+        let mut path = RequestFieldPath::field("rich_message");
+        validate_rich_message_at(rich_message, RichMessageContext::Edit, &mut path)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_edit_message_text(
     payload: &crate::payloads::EditMessageText,
 ) -> Result<(), RequestValidationError> {
@@ -489,6 +543,101 @@ pub(crate) fn validate_edit_message_text_inline(
     let Some(rich_message) = &payload.rich_message else { return Ok(()) };
     let mut path = RequestFieldPath::field("rich_message");
     validate_rich_message_at(rich_message, RichMessageContext::EditInline, &mut path)
+}
+
+const BUTTON_STYLES: &[&str] = &["danger", "success", "primary", "link"];
+const BUTTON_ALIGNS: &[&str] = &["left", "center", "right"];
+
+fn validate_buttons(
+    value: &crate::types::InputRichBlockButtons,
+    path: &RequestFieldPath,
+) -> Result<(), RequestValidationError> {
+    let mut buttons_path = path.clone();
+    buttons_path.push_field("buttons");
+    if !(1..=8).contains(&value.buttons.len()) {
+        let mut field_path = buttons_path.clone();
+        field_path.push_field("buttons");
+        return Err(RequestValidationError::InvalidValue {
+            path: field_path,
+            reason: InvalidValueReason::MustBeInRange { min: 1, max: 8 },
+        });
+    }
+
+    if let Some(align) = &value.align {
+        if !BUTTON_ALIGNS.contains(&align.as_str()) {
+            let mut field_path = path.clone();
+            field_path.push_field("align");
+            return Err(RequestValidationError::InvalidValue {
+                path: field_path,
+                reason: InvalidValueReason::MustBeOneOf(BUTTON_ALIGNS),
+            });
+        }
+    }
+
+    for (index, button) in value.buttons.iter().enumerate() {
+        let mut button_path = buttons_path.clone();
+        button_path.push_index(index);
+        validate_button(button, &button_path)?;
+    }
+    Ok(())
+}
+
+fn validate_button(
+    button: &crate::types::RichMessageButton,
+    path: &RequestFieldPath,
+) -> Result<(), RequestValidationError> {
+    let action_count = [
+        button.url.is_some(),
+        button.callback_data.is_some(),
+        button.web_app.is_some(),
+        button.login_url.is_some(),
+        button.switch_inline_query.is_some(),
+        button.switch_inline_query_current_chat.is_some(),
+        button.switch_inline_query_chosen_chat.is_some(),
+        button.copy_text.is_some(),
+        button.disabled.is_some(),
+    ]
+    .into_iter()
+    .filter(|present| *present)
+    .count();
+    if action_count != 1 {
+        return Err(RequestValidationError::InvalidValue {
+            path: path.clone(),
+            reason: InvalidValueReason::MustHaveExactlyOneAction,
+        });
+    }
+
+    if let Some(style) = &button.style {
+        if !BUTTON_STYLES.contains(&style.as_str()) {
+            let mut field_path = path.clone();
+            field_path.push_field("style");
+            return Err(RequestValidationError::InvalidValue {
+                path: field_path,
+                reason: InvalidValueReason::MustBeOneOf(BUTTON_STYLES),
+            });
+        }
+        if style == "link" && button.callback_data.is_none() {
+            let mut field_path = path.clone();
+            field_path.push_field("style");
+            return Err(RequestValidationError::InvalidValue {
+                path: field_path,
+                reason: InvalidValueReason::MustBeCallbackButton,
+            });
+        }
+    }
+
+    if let Some(callback_data) = &button.callback_data {
+        let length = callback_data.len();
+        if !(1..=64).contains(&length) {
+            let mut field_path = path.clone();
+            field_path.push_field("callback_data");
+            return Err(RequestValidationError::InvalidValue {
+                path: field_path,
+                reason: InvalidValueReason::MustHaveByteLength { min: 1, max: 64 },
+            });
+        }
+    }
+    Ok(())
 }
 
 fn validate_inline_result_at(
@@ -551,20 +700,20 @@ mod tests {
     use super::*;
     use crate::{
         payloads::{
-            AnswerGuestQuery, AnswerInlineQuery, AnswerWebAppQuery, EditMessageText,
-            EditMessageTextInline, SavePreparedInlineMessage, SendMessageDraft, SendRichMessage,
-            SendRichMessageDraft,
+            AnswerGuestQuery, AnswerInlineQuery, AnswerWebAppQuery, EditEphemeralMessageText,
+            EditEphemeralMessageTextSetters, EditMessageText, EditMessageTextInline,
+            SavePreparedInlineMessage, SendMessageDraft, SendRichMessage, SendRichMessageDraft,
         },
         requests::{Payload, Request, Requester},
         types::{
             FileId, InlineQueryId, InlineQueryResult, InlineQueryResultArticle, InputFile,
             InputMediaDocument, InputMediaPhoto, InputMediaVideo, InputMediaVoiceNote,
             InputMessageContent, InputRichBlock, InputRichBlockBlockQuotation,
-            InputRichBlockDetails, InputRichBlockDocument, InputRichBlockList,
-            InputRichBlockListItem, InputRichBlockPhoto, InputRichBlockThinking,
-            InputRichBlockVideo, InputRichBlockVoiceNote, InputRichMessage,
-            InputRichMessageContent, InputRichMessageMedia, InputRichMessageMediaContent, RichText,
-            UserId,
+            InputRichBlockButtons, InputRichBlockDetails, InputRichBlockDocument,
+            InputRichBlockList, InputRichBlockListItem, InputRichBlockPhoto,
+            InputRichBlockThinking, InputRichBlockVideo, InputRichBlockVoiceNote, InputRichMessage,
+            InputRichMessageContent, InputRichMessageMedia, InputRichMessageMediaContent,
+            RichMessageButton, RichText, UserId,
         },
         Bot,
     };
@@ -602,6 +751,79 @@ mod tests {
     fn send_message_draft_accepts_non_zero_draft_id() {
         let payload = SendMessageDraft::new(UserId(1), -1);
         assert_eq!(Validate::validate(&payload), Ok(()));
+    }
+
+    #[test]
+    fn rich_buttons_require_one_action_and_validate_limits() {
+        let no_action =
+            InputRichMessage::blocks([InputRichBlock::Buttons(InputRichBlockButtons::new([
+                RichMessageButton::new("button"),
+            ]))]);
+        assert!(matches!(
+            no_action.validate_with(&RichMessageContext::Send),
+            Err(RequestValidationError::InvalidValue {
+                reason: InvalidValueReason::MustHaveExactlyOneAction,
+                ..
+            })
+        ));
+
+        let invalid_align = InputRichMessage::blocks([InputRichBlock::Buttons(
+            InputRichBlockButtons::new([RichMessageButton::callback("button", "callback")])
+                .align("diagonal"),
+        )]);
+        assert!(matches!(
+            invalid_align.validate_with(&RichMessageContext::Send),
+            Err(RequestValidationError::InvalidValue {
+                reason: InvalidValueReason::MustBeOneOf(_),
+                ..
+            })
+        ));
+
+        let invalid_callback =
+            InputRichMessage::blocks([InputRichBlock::Buttons(InputRichBlockButtons::new([
+                RichMessageButton::callback("button", "x".repeat(65)),
+            ]))]);
+        assert!(matches!(
+            invalid_callback.validate_with(&RichMessageContext::Send),
+            Err(RequestValidationError::InvalidValue {
+                reason: InvalidValueReason::MustHaveByteLength { .. },
+                ..
+            })
+        ));
+
+        let too_many =
+            InputRichMessage::blocks([InputRichBlock::Buttons(InputRichBlockButtons::new(
+                (0..9).map(|index| RichMessageButton::callback("button", index.to_string())),
+            ))]);
+        assert!(matches!(
+            too_many.validate_with(&RichMessageContext::Send),
+            Err(RequestValidationError::InvalidValue {
+                reason: InvalidValueReason::MustBeInRange { min: 1, max: 8 },
+                ..
+            })
+        ));
+
+        let valid = InputRichMessage::blocks([InputRichBlock::Buttons(
+            InputRichBlockButtons::new([RichMessageButton::callback("button", "callback")])
+                .align("center"),
+        )]);
+        assert_eq!(valid.validate_with(&RichMessageContext::Send), Ok(()));
+    }
+
+    #[test]
+    fn ephemeral_text_edit_requires_text_or_rich_message() {
+        let empty = EditEphemeralMessageText::new(UserId(1), UserId(2), 3);
+        assert!(matches!(
+            Validate::validate(&empty),
+            Err(RequestValidationError::InvalidValue {
+                reason: InvalidValueReason::MustHaveTextOrRichMessage,
+                ..
+            })
+        ));
+
+        let rich_only = EditEphemeralMessageText::new(UserId(1), UserId(2), 3)
+            .rich_message(InputRichMessage::html("<b>rich</b>"));
+        assert_eq!(Validate::validate(&rich_only), Ok(()));
     }
 
     #[tokio::test]

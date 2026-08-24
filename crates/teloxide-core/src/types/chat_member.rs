@@ -124,6 +124,11 @@ pub struct Administrator {
     #[serde(default)]
     pub can_manage_direct_messages: bool,
 
+    /// `true`, if the administrator can send welcome messages; groups and
+    /// supergroups only.
+    #[serde(default)]
+    pub can_send_welcome_messages: bool,
+
     /// `true` if the administrator can add new administrators with a subset of
     /// his own privileges or demote administrators that he has promoted,
     /// directly or indirectly (promoted by administrators that were appointed
@@ -772,6 +777,7 @@ mod tests {
                 can_pin_messages: true,
                 can_promote_members: true,
                 can_manage_direct_messages: true,
+                can_send_welcome_messages: false,
                 can_manage_topics: false,
                 can_manage_tags: false,
             }),

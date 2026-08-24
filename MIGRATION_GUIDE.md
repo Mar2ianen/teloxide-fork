@@ -3,6 +3,116 @@ Note that the list of required changes is not fully exhaustive and it may lack s
 
 ## unreleased
 
+### Bot API 10.3
+
+This fork now exposes Telegram Bot API 10.3. The generated send methods use
+`EphemeralMessageParameters` for ephemeral delivery, and message draft methods
+accept `can_stop` and `keep_on_stop` for the native Stop button flow.
+
+New public models cover rich-message buttons and document/expandable-quote/table
+blocks, disabled inline buttons, force-reply markup flags, stopped-generation
+updates, and community-joined service messages. Code that constructs affected
+structs with literals should initialize the new fields; constructors remain the
+preferred option where available.
+
+### Drafter Stop lifecycle
+
+Native text and rich-message drafters can opt into Telegram's Stop button and
+correlate `stopped_message_generation` updates without taking ownership of the
+worker away from the update handler:
+
+```rust
+let (drafter, sink) = TelegramDrafter::native_text_with_options(
+    bot,
+    UserId(7),
+    DraftConfig::default(),
+    InProcessRateLimiter::default(),
+    TelegramSendOptions::default(),
+    TelegramDraftOptions::default()
+        .stop_button()
+        .preserve_on_stop(),
+)?;
+let handle = drafter.handle();
+
+// In the stopped-generation update handler:
+if handle.matches_generation_stopped(&stopped) {
+    handle.stop().await?;
+}
+```
+
+`handle.stop()` performs the same backend cleanup as `Drafter::abort`. After
+the handle stops a worker, do not call `finish` on the owning `Drafter`.
+`native_rich_with_options` provides the equivalent API for rich-message drafts.
+
+### Rich button builders
+
+The new fields remain available for struct-literal users, while the common
+button flow can use backward-compatible constructors and builders:
+
+```rust
+let rich = InputRichMessage::blocks([
+    InputRichBlock::Buttons(
+        InputRichBlockButtons::new([
+            RichMessageButton::callback("Continue", "continue").style("primary"),
+            RichMessageButton::disabled("Unavailable"),
+        ])
+        .align("center"),
+    ),
+]);
+```
+
+`InlineKeyboardButton::style` and
+`InlineKeyboardButton::icon_custom_emoji_id` expose the corresponding native
+button fields on the existing inline-button primitive.
+
+Rich-message button blocks are validated before dispatch. Applications that
+construct buttons with struct literals must provide exactly one action, use a
+supported style/alignment, keep callback data within 1-64 UTF-8 bytes, and
+send between one and eight buttons per row.
+
+`edit_ephemeral_message_text` now mirrors the Bot API's two optional content
+fields. Pass text through `.text(...)` or rich content through
+`.rich_message(...)`; at least one must be present, and both may be supplied:
+
+```rust
+let request = bot
+    .edit_ephemeral_message_text(chat_id, receiver_user_id, ephemeral_message_id)
+    .rich_message(InputRichMessage::html("<b>updated</b>"));
+```
+
+`ChatAdministratorRights::can_send_welcome_messages` is now a defaulted
+`bool`, matching `ChatMemberAdministrator`. Struct literals should use
+`false`/`true` instead of `None`/`Some(...)`.
+
+### Ephemeral messages and status previews
+
+`TelegramSendOptions::ephemeral_message_parameters` is intended for an
+ephemeral send. `StatusThenText` and `StatusThenRich` deliberately remove that
+option from their temporary status request because the status lifecycle edits
+ordinary messages. Update a true ephemeral message with the dedicated
+`edit_ephemeral_message_text`, `edit_ephemeral_message_media`,
+`edit_ephemeral_message_caption` or `edit_ephemeral_message_reply_markup`
+methods instead.
+
+Direct uploads nested in rich draft documents are rejected before transport;
+the validation error path identifies `rich_message.blocks[N].document.media`
+or `.document.thumbnail` precisely.
+
+### Checked drafter targets and error diagnostics
+
+Native Telegram draft backends accept `UserId` rather than a general
+`ChatId`, which keeps group and channel identifiers out of their constructors.
+If an application selects a policy after inspecting a Telegram chat, call
+`TelegramDrafterPolicy::try_mode_for(is_private_chat)`. It returns
+`DraftStartError::UnsupportedTarget` for `NativeOnly` on non-private chats;
+`NativeInPrivateStatusInChats` continues to select the status-preview fallback.
+
+Custom drafter observers can override `DrafterObserver::record_error` to
+consume `DrafterErrorEvent` with its `DrafterErrorClass` and
+`DeliveryCertainty`. Existing observers remain source-compatible because the
+hook defaults to the ordinary lifecycle `record` callback. Raw Telegram
+errors and preview payloads are not exposed by this diagnostic event.
+
 ## 0.18 -> 0.19
 
 This fork updates the workspace crates together:
@@ -25,6 +135,12 @@ teloxide-macros = "0.11.1"
 The new scheduler is opt-in. Existing `Bot` request behavior is unchanged; wrap a bot with `Bot::outbound(queue)` only when the application wants bounded admission, rate windows or ordering lanes. The scheduler does not retry ordinary requests automatically. A completed request reports `Success`, `Failed` or an explicit `RetryAfter` penalty; retry policy remains with the caller.
 
 `OrderedStart` releases an ordering lane after `OutboundPermit::start()`, while `Serial` keeps it until completion. The durable outbox is at-least-once: applications must use idempotency keys when a remote operation can be replayed after an ambiguous transport result.
+
+For FIFO admission with bounded concurrency, use
+`OutboundQueueHandle::bounded_ordered_start_lane(max_in_flight)` and attach
+the returned lane with `ScheduledRequest::on_ordered_start_lane`. Grants are
+FIFO, completions may arrive in any order, and each completion frees one
+bounded slot; this mode does not require an explicit `start()` call.
 
 ### teloxide-core
 

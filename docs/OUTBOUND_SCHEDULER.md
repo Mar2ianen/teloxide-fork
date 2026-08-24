@@ -83,7 +83,8 @@ reservations: HashMap<WindowRef, Reservation>
       consumers; a lane reference wakes the lane's current head)
 lanes: HashMap<OutboundLaneKey, LaneState>
       LaneState { pending: BTreeSet<(u64 order, JobId)>, mode, in_flight,
-                  next_order, stale, in_candidate_heap, candidate_effective }
+                  in_flight_count, next_order, stale, in_candidate_heap,
+                  candidate_effective }
       (order is the lane's own counter — lane FIFO is immune to the global
        sequence wraparound; the window is rebased densely on counter wrap)
 coalesce: HashMap<InternalCoalesceKey, JobId>
@@ -157,6 +158,13 @@ occupied until the granted permit receives `start()`; subsequent grants may
 then run concurrently with earlier requests, but can never start before them.
 Priority only chooses between the heads of different lanes (and between
 unlaned jobs).
+
+`bounded_ordered_start_lane(max_in_flight)` adds a third choice for callers
+that need concurrency without abandoning FIFO admission. It returns an
+`OutboundOrderedStartLane`; grants remain in lane order, up to the non-zero
+bound may be active concurrently, and each completion releases one slot for
+the next head. Completions may arrive in any order. The adaptor exposes the
+same mode through `ScheduledRequest::on_ordered_start_lane`.
 
 ## Fairness
 
@@ -283,6 +291,9 @@ state. The actor clock derives `now` from the Tokio clock, so
   that releases after the caller invokes `OutboundPermit::start()`. Both
   modes preserve enqueue order, while `OrderedStart` permits already-started
   requests to run concurrently.
+- `bounded_ordered_start_lane(max_in_flight)` allocates a FIFO lane with a
+  bounded number of active permits. It does not require an explicit
+  `start()` call: a grant opens one slot immediately, and completion frees it.
 - `OutboundAcquire` resolves with `OutboundPermit` or an error. The grant
   receiver is owned by the future from the moment of creation (it is not
   nested inside the enqueue reply), and the **permit is minted by the actor
@@ -405,7 +416,9 @@ Key restrictions of the slice:
   request and applied on top of the hint at send time; the scope is not
   overridable. Admission, rate windows and `RetryAfter` penalties always
   follow the chat that actually receives the request. Ordering lanes are
-  an explicitly assigned policy (`ScheduledRequest::on_lane`) and do not
+  an explicitly assigned policy (`ScheduledRequest::on_lane` for serial lanes
+  or `ScheduledRequest::on_ordered_start_lane` for bounded concurrent lanes)
+  and do not
   move with the payload. Channel usernames are not collapsed into the
   global scope: `OutboundChatKey` has a closed representation (public
   constructors `id`/`username` only, the username constructor
@@ -755,6 +768,27 @@ so legacy implementations remain source-compatible. Existing custom backends
 remain legacy operation-level schedulers by default; scheduler-aware custom
 backends must keep success cleanup outside `finish`/`commit_segment` and opt
 into the new hook when they issue cleanup requests.
+
+The lifecycle observer keeps the original `record(DrafterEvent)` callback and
+adds the backward-compatible `record_error(DrafterErrorEvent)` hook. Classified
+preview, terminal and cleanup failures expose only `DrafterErrorClass` and
+`DeliveryCertainty`, so tracing and metrics can distinguish retry-safe,
+rejected and ambiguous outcomes without logging raw Telegram errors or preview
+payloads. `DrafterMetricsCollector::error_snapshot` exposes the class and
+delivery counters without changing the original lifecycle snapshot. Observer
+panics remain isolated from the drafter worker.
+
+Native Telegram drafters additionally expose `Drafter::handle()`. The cloneable
+`DrafterHandle` tracks the active `(chat_id, draft_id)` generation, matches a
+`MessageGenerationStopped` update, and invokes the same abort cleanup as the
+owning drafter. `TelegramDrafter::native_text_with_options` and
+`native_rich_with_options` make the native `can_stop`/`keep_on_stop` settings
+available without constructing the backend manually. Once a handle has stopped
+the worker, the owning `Drafter` must not be used for `finish`.
+
+Ephemeral send parameters are intentionally not copied into ordinary status
+previews: those previews use `editMessage*`, while ephemeral responses require
+the dedicated `editEphemeralMessage*` methods.
 
 ## Class-aware windows
 

@@ -4,7 +4,7 @@ use std::{
     panic::{catch_unwind, AssertUnwindSafe},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     time::Duration,
 };
@@ -18,14 +18,16 @@ use tokio::{
 use tracing::Instrument;
 
 use super::{
-    observer::next_instance_id, AccumulatorSource, CleanupFailure, DeliveryCertainty,
-    DraftAbortError, DraftCommitError, DraftConfig, DraftFinishError, DraftFlushError,
-    DraftPushError, DraftRevision, DraftStartError, DrafterAcquireError, DrafterBackend,
-    DrafterCapabilities, DrafterErrorClass, DrafterErrorDisposition, DrafterEvent,
-    DrafterEventKind, DrafterObserver, DrafterOperation, DrafterPermit, DrafterPermitCompletion,
-    DrafterPriority, DrafterRateLimitKey, DrafterRateLimiter, DrafterRequestClass,
-    DrafterRequestContext, PreviewAck, PreviewSource, ReplacePreview,
+    observer::{next_instance_id, DrafterErrorEvent},
+    AccumulatorSource, CleanupFailure, DeliveryCertainty, DraftAbortError, DraftCommitError,
+    DraftConfig, DraftFinishError, DraftFlushError, DraftPushError, DraftRevision, DraftStartError,
+    DrafterAcquireError, DrafterBackend, DrafterCapabilities, DrafterErrorClass,
+    DrafterErrorDisposition, DrafterEvent, DrafterEventKind, DrafterGeneration, DrafterObserver,
+    DrafterOperation, DrafterPermit, DrafterPermitCompletion, DrafterPriority, DrafterRateLimitKey,
+    DrafterRateLimiter, DrafterRequestClass, DrafterRequestContext, PreviewAck, PreviewSource,
+    ReplacePreview,
 };
+use teloxide_core::types::MessageGenerationStopped;
 
 /// A cloneable synchronous producer handle.
 pub struct DraftSink<U> {
@@ -282,6 +284,23 @@ where
     instance_id: u64,
     segment: u64,
     segment_counter: Arc<AtomicU64>,
+    generation: Arc<Mutex<Option<DrafterGeneration>>>,
+}
+
+impl<S, B, L> Worker<S, B, L>
+where
+    S: PreviewSource,
+    B: DrafterBackend<Preview = S::Preview>,
+    L: DrafterRateLimiter,
+{
+    fn sync_generation(&self) {
+        let generation = self.backend.as_ref().and_then(|backend| {
+            backend
+                .draft_id()
+                .map(|draft_id| DrafterGeneration::new(self.rate_limit_key.chat_id, draft_id))
+        });
+        *self.generation.lock().expect("drafter generation mutex poisoned") = generation;
+    }
 }
 
 fn emit_event(observer: &Arc<dyn DrafterObserver>, event: DrafterEvent) {
@@ -294,6 +313,16 @@ fn emit_event(observer: &Arc<dyn DrafterObserver>, event: DrafterEvent) {
     }
 }
 
+fn emit_error_event(observer: &Arc<dyn DrafterObserver>, error: DrafterErrorEvent) {
+    if catch_unwind(AssertUnwindSafe(|| observer.record_error(error))).is_err() {
+        #[cfg(feature = "tracing")]
+        tracing::warn!(
+            target: "teloxide::drafter",
+            "drafter observer panicked; classified error event was dropped"
+        );
+    }
+}
+
 impl<S, B, L> Worker<S, B, L>
 where
     S: PreviewSource,
@@ -301,6 +330,11 @@ where
     L: DrafterRateLimiter,
 {
     async fn run(mut self) {
+        self.run_loop().await;
+        *self.generation.lock().expect("drafter generation mutex poisoned") = None;
+    }
+
+    async fn run_loop(&mut self) {
         loop {
             match self.run_due_preview().await {
                 PreviewRunResult::Continue => continue,
@@ -378,6 +412,52 @@ where
                 operation,
                 draft_id: self.backend.as_ref().and_then(DrafterBackend::draft_id),
                 preview_message_id,
+            },
+        );
+    }
+
+    fn record_error(
+        &self,
+        kind: DrafterEventKind,
+        revision: Option<DraftRevision>,
+        operation: Option<DrafterOperation>,
+        disposition: DrafterErrorDisposition,
+    ) {
+        let preview_message_id = self.backend.as_ref().and_then(DrafterBackend::preview_message_id);
+        self.record_error_with_preview_message_id(
+            kind,
+            revision,
+            operation,
+            preview_message_id,
+            disposition,
+        );
+    }
+
+    fn record_error_with_preview_message_id(
+        &self,
+        kind: DrafterEventKind,
+        revision: Option<DraftRevision>,
+        operation: Option<DrafterOperation>,
+        preview_message_id: Option<teloxide_core::types::MessageId>,
+        disposition: DrafterErrorDisposition,
+    ) {
+        emit_error_event(
+            &self.observer,
+            DrafterErrorEvent {
+                event: DrafterEvent {
+                    instance_id: self.instance_id,
+                    kind,
+                    mode: self.capabilities.mode,
+                    chat_id: self.rate_limit_key.chat_id,
+                    segment: self.segment,
+                    revision,
+                    from_revision: None,
+                    to_revision: None,
+                    operation,
+                    draft_id: self.backend.as_ref().and_then(DrafterBackend::draft_id),
+                    preview_message_id,
+                },
+                disposition,
             },
         );
     }
@@ -632,15 +712,17 @@ where
                         super::DrafterMode::EditInPlace
                             | super::DrafterMode::StatusEditThenSendFinal
                     ) || self.last_delivered > DraftRevision::default();
-                    self.record(
+                    let disposition = DrafterErrorDisposition {
+                        class: DrafterErrorClass::Transient { retry_safe },
+                        delivery: DeliveryCertainty::Unknown,
+                    };
+                    self.record_error(
                         DrafterEventKind::PreviewTimeout,
                         Some(snapshot.revision),
                         Some(operation),
+                        disposition,
                     );
-                    self.handle_preview_error(
-                        DrafterErrorClass::Transient { retry_safe },
-                        operation,
-                    );
+                    self.handle_preview_error(disposition.class, operation);
                 } else {
                     let disposition = self
                         .backend
@@ -654,10 +736,11 @@ where
                         _ => DrafterPermitCompletion::Failed,
                     };
                     complete_optional_permit(&self.limiter, &mut permit, completion).await;
-                    self.record(
+                    self.record_error(
                         DrafterEventKind::PreviewError,
                         Some(snapshot.revision),
                         Some(operation),
+                        disposition,
                     );
                     self.handle_preview_error(disposition.class, operation);
                 }
@@ -673,12 +756,17 @@ where
                     self.capabilities.mode,
                     super::DrafterMode::EditInPlace | super::DrafterMode::StatusEditThenSendFinal
                 ) || self.last_delivered > DraftRevision::default();
-                self.record(
+                let disposition = DrafterErrorDisposition {
+                    class: DrafterErrorClass::Transient { retry_safe },
+                    delivery: DeliveryCertainty::Unknown,
+                };
+                self.record_error(
                     DrafterEventKind::PreviewTimeout,
                     Some(snapshot.revision),
                     Some(operation),
+                    disposition,
                 );
-                self.handle_preview_error(DrafterErrorClass::Transient { retry_safe }, operation);
+                self.handle_preview_error(disposition.class, operation);
             }
         }
         PreviewRunResult::Continue
@@ -813,14 +901,22 @@ where
                             break TerminalOutcome::RateLimiter(error);
                         }
                         TerminalWait::Deadline => {
-                            self.record(
+                            let delivery = failure_disposition
+                                .map_or(DeliveryCertainty::NotAttempted, |d| d.delivery);
+                            let disposition = DrafterErrorDisposition {
+                                class: DrafterErrorClass::Ambiguous,
+                                delivery,
+                            };
+                            failure_disposition = Some(disposition);
+                            self.record_error(
                                 DrafterEventKind::OperationDeadlineExceeded,
                                 None,
                                 Some(DrafterOperation::SegmentCommit),
+                                disposition,
                             );
-                            let delivery = failure_disposition
-                                .map_or(DeliveryCertainty::NotAttempted, |d| d.delivery);
-                            break TerminalOutcome::Synthetic(TerminalFailure::Deadline(delivery));
+                            break TerminalOutcome::Synthetic(TerminalFailure::Deadline(
+                                disposition.delivery,
+                            ));
                         }
                         TerminalWait::Cancelled => {
                             self.record(
@@ -885,14 +981,16 @@ where
                                     DrafterPermitCompletion::Failed,
                                 )
                                 .await;
-                                failure_disposition = Some(DrafterErrorDisposition {
+                                let disposition = DrafterErrorDisposition {
                                     class: DrafterErrorClass::Ambiguous,
                                     delivery: DeliveryCertainty::Unknown,
-                                });
-                                self.record(
+                                };
+                                failure_disposition = Some(disposition);
+                                self.record_error(
                                     DrafterEventKind::BackendTimeout,
                                     None,
                                     Some(DrafterOperation::SegmentCommit),
+                                    disposition,
                                 );
                                 break TerminalOutcome::Synthetic(TerminalFailure::RequestTimeout);
                             }
@@ -945,10 +1043,11 @@ where
                                 delivery: DeliveryCertainty::Unknown,
                             };
                             failure_disposition = Some(disposition);
-                            self.record(
+                            self.record_error(
                                 DrafterEventKind::BackendTimeout,
                                 None,
                                 Some(DrafterOperation::SegmentCommit),
+                                failure_disposition.expect("timeout disposition"),
                             );
                             break TerminalOutcome::Synthetic(TerminalFailure::RequestTimeout);
                         }
@@ -959,14 +1058,16 @@ where
                                 DrafterPermitCompletion::Failed,
                             )
                             .await;
-                            failure_disposition = Some(DrafterErrorDisposition {
+                            let disposition = DrafterErrorDisposition {
                                 class: DrafterErrorClass::Ambiguous,
                                 delivery: DeliveryCertainty::Unknown,
-                            });
-                            self.record(
+                            };
+                            failure_disposition = Some(disposition);
+                            self.record_error(
                                 DrafterEventKind::OperationDeadlineExceeded,
                                 None,
                                 Some(DrafterOperation::SegmentCommit),
+                                disposition,
                             );
                             break TerminalOutcome::Synthetic(TerminalFailure::Deadline(
                                 DeliveryCertainty::Unknown,
@@ -1055,10 +1156,14 @@ where
                     (None, false)
                 };
                 if cleanup_timed_out {
-                    self.record(
+                    self.record_error(
                         DrafterEventKind::BackendTimeout,
                         None,
                         Some(DrafterOperation::Cleanup),
+                        DrafterErrorDisposition {
+                            class: DrafterErrorClass::Ambiguous,
+                            delivery: DeliveryCertainty::Unknown,
+                        },
                     );
                 }
                 let cleanup_failure = self
@@ -1084,6 +1189,7 @@ where
                         self.segment_counter.store(self.segment, Ordering::Release);
                         self.record(DrafterEventKind::SegmentRotate, None, None);
                         self.source.reopen_segment();
+                        self.sync_generation();
                         let _ = reply.send(Ok(output));
                         true
                     }
@@ -1098,16 +1204,17 @@ where
                         false
                     }
                     TerminalOutcome::Backend(error) => {
-                        self.record(
+                        let disposition = failure_disposition
+                            .expect("non-retry segment commit errors have a disposition");
+                        self.record_error(
                             DrafterEventKind::SegmentCommitError,
                             None,
                             Some(DrafterOperation::SegmentCommit),
+                            disposition,
                         );
                         if !payload_invalid {
                             self.source.close();
                         }
-                        let disposition = failure_disposition
-                            .expect("non-retry segment commit errors have a disposition");
                         let _ = reply.send(Err(DraftCommitError::Backend {
                             source: error,
                             class: disposition.class,
@@ -1116,10 +1223,13 @@ where
                         payload_invalid
                     }
                     TerminalOutcome::Synthetic(failure) => {
-                        self.record(
+                        let disposition = failure_disposition
+                            .expect("synthetic segment commit errors have a disposition");
+                        self.record_error(
                             DrafterEventKind::SegmentCommitError,
                             None,
                             Some(DrafterOperation::SegmentCommit),
+                            disposition,
                         );
                         self.source.close();
                         let error = match failure {
@@ -1176,14 +1286,22 @@ where
                             break TerminalOutcome::RateLimiter(error);
                         }
                         TerminalWait::Deadline => {
-                            self.record(
+                            let delivery = failure_disposition
+                                .map_or(DeliveryCertainty::NotAttempted, |d| d.delivery);
+                            let disposition = DrafterErrorDisposition {
+                                class: DrafterErrorClass::Ambiguous,
+                                delivery,
+                            };
+                            failure_disposition = Some(disposition);
+                            self.record_error(
                                 DrafterEventKind::OperationDeadlineExceeded,
                                 None,
                                 Some(DrafterOperation::Final),
+                                disposition,
                             );
-                            let delivery = failure_disposition
-                                .map_or(DeliveryCertainty::NotAttempted, |d| d.delivery);
-                            break TerminalOutcome::Synthetic(TerminalFailure::Deadline(delivery));
+                            break TerminalOutcome::Synthetic(TerminalFailure::Deadline(
+                                disposition.delivery,
+                            ));
                         }
                         TerminalWait::Cancelled => {
                             self.record(
@@ -1248,14 +1366,16 @@ where
                                     DrafterPermitCompletion::Failed,
                                 )
                                 .await;
-                                failure_disposition = Some(DrafterErrorDisposition {
+                                let disposition = DrafterErrorDisposition {
                                     class: DrafterErrorClass::Ambiguous,
                                     delivery: DeliveryCertainty::Unknown,
-                                });
-                                self.record(
+                                };
+                                failure_disposition = Some(disposition);
+                                self.record_error(
                                     DrafterEventKind::BackendTimeout,
                                     None,
                                     Some(DrafterOperation::Final),
+                                    disposition,
                                 );
                                 break TerminalOutcome::Synthetic(TerminalFailure::RequestTimeout);
                             }
@@ -1305,10 +1425,11 @@ where
                                 class: DrafterErrorClass::Ambiguous,
                                 delivery: DeliveryCertainty::Unknown,
                             });
-                            self.record(
+                            self.record_error(
                                 DrafterEventKind::BackendTimeout,
                                 None,
                                 Some(DrafterOperation::Final),
+                                failure_disposition.expect("timeout disposition"),
                             );
                             break TerminalOutcome::Synthetic(TerminalFailure::RequestTimeout);
                         }
@@ -1319,14 +1440,16 @@ where
                                 DrafterPermitCompletion::Failed,
                             )
                             .await;
-                            failure_disposition = Some(DrafterErrorDisposition {
+                            let disposition = DrafterErrorDisposition {
                                 class: DrafterErrorClass::Ambiguous,
                                 delivery: DeliveryCertainty::Unknown,
-                            });
-                            self.record(
+                            };
+                            failure_disposition = Some(disposition);
+                            self.record_error(
                                 DrafterEventKind::OperationDeadlineExceeded,
                                 None,
                                 Some(DrafterOperation::Final),
+                                disposition,
                             );
                             break TerminalOutcome::Synthetic(TerminalFailure::Deadline(
                                 DeliveryCertainty::Unknown,
@@ -1414,10 +1537,14 @@ where
                     (None, false)
                 };
                 if cleanup_timed_out {
-                    self.record(
+                    self.record_error(
                         DrafterEventKind::BackendTimeout,
                         None,
                         Some(DrafterOperation::Cleanup),
+                        DrafterErrorDisposition {
+                            class: DrafterErrorClass::Ambiguous,
+                            delivery: DeliveryCertainty::Unknown,
+                        },
                     );
                 }
                 let cleanup_failure = self
@@ -1436,6 +1563,13 @@ where
                         DrafterEventKind::FinalSuccess,
                         None,
                         Some(DrafterOperation::Final),
+                    );
+                } else if let Some(disposition) = failure_disposition {
+                    self.record_error(
+                        DrafterEventKind::FinalError,
+                        None,
+                        Some(DrafterOperation::Final),
+                        disposition,
                     );
                 } else {
                     self.record(DrafterEventKind::FinalError, None, Some(DrafterOperation::Final));
@@ -1510,10 +1644,14 @@ where
                             return false;
                         }
                         Err(_) => {
-                            self.record(
+                            self.record_error(
                                 DrafterEventKind::BackendTimeout,
                                 None,
                                 Some(DrafterOperation::Cleanup),
+                                DrafterErrorDisposition {
+                                    class: DrafterErrorClass::Ambiguous,
+                                    delivery: DeliveryCertainty::Unknown,
+                                },
                             );
                             let _ = reply.send(Err(DraftAbortError::RequestTimeout));
                             self.backend.take();
@@ -1528,10 +1666,14 @@ where
                 let result = match timed_result {
                     Some(Ok(result)) => result,
                     Some(Err(_)) | None => {
-                        self.record(
+                        self.record_error(
                             DrafterEventKind::BackendTimeout,
                             None,
                             Some(DrafterOperation::Cleanup),
+                            DrafterErrorDisposition {
+                                class: DrafterErrorClass::Ambiguous,
+                                delivery: DeliveryCertainty::Unknown,
+                            },
                         );
                         let _ = reply.send(Err(DraftAbortError::RequestTimeout));
                         self.backend.take();
@@ -1544,31 +1686,38 @@ where
                         .expect("backend exists after abort")
                         .classify_error(DrafterOperation::Cleanup, error)
                 });
-                if let Some(DrafterErrorDisposition {
-                    class: DrafterErrorClass::RetryAfter { delay, scope },
-                    ..
-                }) = error_disposition
+                if let Some(
+                    disposition @ DrafterErrorDisposition {
+                        class: DrafterErrorClass::RetryAfter { delay, scope },
+                        ..
+                    },
+                ) = error_disposition
                 {
-                    self.record(
+                    self.record_error(
                         DrafterEventKind::RetryAfter,
                         None,
                         Some(DrafterOperation::Cleanup),
+                        disposition,
                     );
                     if !self.limiter.completion_handles_retry_after() {
                         self.limiter.penalize(scope, delay);
                     }
                 }
                 if result.is_err() {
-                    self.record(
-                        DrafterEventKind::CleanupError,
-                        None,
-                        Some(DrafterOperation::Cleanup),
-                    );
-                    self.record(
-                        DrafterEventKind::AbortError,
-                        None,
-                        Some(DrafterOperation::Cleanup),
-                    );
+                    if let Some(disposition) = error_disposition {
+                        self.record_error(
+                            DrafterEventKind::CleanupError,
+                            None,
+                            Some(DrafterOperation::Cleanup),
+                            disposition,
+                        );
+                        self.record_error(
+                            DrafterEventKind::AbortError,
+                            None,
+                            Some(DrafterOperation::Cleanup),
+                            disposition,
+                        );
+                    }
                 }
                 self.backend.take();
                 let _ = reply.send(result.map_err(DraftAbortError::Backend));
@@ -1670,8 +1819,22 @@ where
     }
 
     fn record_cleanup_timeout(&self) {
-        self.record(DrafterEventKind::BackendTimeout, None, Some(DrafterOperation::Cleanup));
-        self.record(DrafterEventKind::CleanupError, None, Some(DrafterOperation::Cleanup));
+        let disposition = DrafterErrorDisposition {
+            class: DrafterErrorClass::Ambiguous,
+            delivery: DeliveryCertainty::Unknown,
+        };
+        self.record_error(
+            DrafterEventKind::BackendTimeout,
+            None,
+            Some(DrafterOperation::Cleanup),
+            disposition,
+        );
+        self.record_error(
+            DrafterEventKind::CleanupError,
+            None,
+            Some(DrafterOperation::Cleanup),
+            disposition,
+        );
     }
 
     fn reset_segment_state(&mut self) {
@@ -1699,21 +1862,23 @@ where
         preview_message_id: Option<teloxide_core::types::MessageId>,
     ) {
         if let DrafterErrorClass::RetryAfter { delay, scope } = disposition.class {
-            self.record_with_preview_message_id(
+            self.record_error_with_preview_message_id(
                 DrafterEventKind::RetryAfter,
                 None,
                 Some(DrafterOperation::Cleanup),
                 preview_message_id,
+                disposition,
             );
             if !self.limiter.completion_handles_retry_after() {
                 self.limiter.penalize(scope, delay);
             }
         }
-        self.record_with_preview_message_id(
+        self.record_error_with_preview_message_id(
             DrafterEventKind::CleanupError,
             None,
             Some(DrafterOperation::Cleanup),
             preview_message_id,
+            disposition,
         );
     }
 }
@@ -1736,7 +1901,61 @@ where
     source: Arc<S>,
     commands: mpsc::Sender<Command<B>>,
     worker: Option<tokio::task::JoinHandle<()>>,
+    generation: Arc<Mutex<Option<DrafterGeneration>>>,
     _limiter: PhantomData<L>,
+}
+
+/// A cloneable control handle for a running drafter.
+///
+/// It is intended for update handlers: keep this handle together with the
+/// producer task, then call [`Self::matches_generation_stopped`] and
+/// [`Self::stop`] when Telegram reports that the user pressed Stop.
+#[derive(Clone)]
+pub struct DrafterHandle<S, B>
+where
+    S: PreviewSource,
+    B: DrafterBackend<Preview = S::Preview>,
+{
+    source: Arc<S>,
+    commands: mpsc::Sender<Command<B>>,
+    generation: Arc<Mutex<Option<DrafterGeneration>>>,
+}
+
+impl<S, B> DrafterHandle<S, B>
+where
+    S: PreviewSource,
+    B: DrafterBackend<Preview = S::Preview>,
+{
+    /// Returns the currently active native generation, if this backend owns
+    /// one. Message-based backends return `None`.
+    #[must_use]
+    pub fn generation(&self) -> Option<DrafterGeneration> {
+        *self.generation.lock().expect("drafter generation mutex poisoned")
+    }
+
+    /// Checks whether a Telegram Stop update belongs to this drafter's
+    /// current native generation.
+    #[must_use]
+    pub fn matches_generation_stopped(&self, update: &MessageGenerationStopped) -> bool {
+        self.generation().is_some_and(|generation| {
+            generation.chat_id == update.chat.id && generation.draft_id.get() == update.draft_id
+        })
+    }
+
+    /// Stops preview delivery and runs the backend's normal abort cleanup.
+    ///
+    /// The owning [`Drafter`] must not be used for `finish` or another
+    /// terminal operation after this succeeds.
+    pub async fn stop(&self) -> Result<(), super::DraftAbortError<B::Error>> {
+        self.source.close();
+        let (reply, receiver) = oneshot::channel();
+        if self.commands.send(Command::Abort { reply }).await.is_err() {
+            return Err(super::DraftAbortError::WorkerStopped);
+        }
+        let result = receiver.await.map_err(|_| super::DraftAbortError::WorkerStopped)?;
+        *self.generation.lock().expect("drafter generation mutex poisoned") = None;
+        result
+    }
 }
 
 impl<S, B, L> Drafter<S, B, L>
@@ -1755,6 +1974,11 @@ where
         let capabilities = backend.capabilities();
         config.validate(capabilities).map_err(DraftStartError::InvalidConfig)?;
         let rate_limit_key = backend.rate_limit_key();
+        let generation = Arc::new(Mutex::new(
+            backend
+                .draft_id()
+                .map(|draft_id| DrafterGeneration::new(rate_limit_key.chat_id, draft_id)),
+        ));
         let instance_id = next_instance_id();
         let segment_counter = Arc::new(AtomicU64::new(0));
         emit_event(
@@ -1797,6 +2021,7 @@ where
             instance_id,
             segment: 0,
             segment_counter: Arc::clone(&segment_counter),
+            generation: Arc::clone(&generation),
         };
         let sink_observer = Arc::clone(&worker.observer);
         let sink_segment_counter = Arc::clone(&segment_counter);
@@ -1836,7 +2061,32 @@ where
             sink_notify.notify_one();
             Ok(revision)
         });
-        Ok((Self { source, commands, worker: Some(worker), _limiter: PhantomData }, sink))
+        Ok((
+            Self { source, commands, worker: Some(worker), generation, _limiter: PhantomData },
+            sink,
+        ))
+    }
+
+    /// Returns a cloneable control handle for update-driven cancellation.
+    #[must_use]
+    pub fn handle(&self) -> DrafterHandle<S, B> {
+        DrafterHandle {
+            source: Arc::clone(&self.source),
+            commands: self.commands.clone(),
+            generation: Arc::clone(&self.generation),
+        }
+    }
+
+    /// Returns the current native generation, if this backend owns one.
+    #[must_use]
+    pub fn generation(&self) -> Option<DrafterGeneration> {
+        self.handle().generation()
+    }
+
+    /// Checks whether a Telegram Stop update belongs to this drafter.
+    #[must_use]
+    pub fn matches_generation_stopped(&self, update: &MessageGenerationStopped) -> bool {
+        self.handle().matches_generation_stopped(update)
     }
 
     /// Waits until a revision existing at call time has been delivered.
@@ -1908,6 +2158,7 @@ where
 {
     fn drop(&mut self) {
         self.source.close();
+        *self.generation.lock().expect("drafter generation mutex poisoned") = None;
         if let Some(worker) = self.worker.take() {
             worker.abort();
         }
@@ -2033,11 +2284,17 @@ mod tests {
     #[derive(Clone, Default)]
     struct RecordingObserver {
         events: Arc<Mutex<Vec<DrafterEvent>>>,
+        errors: Arc<Mutex<Vec<DrafterErrorEvent>>>,
     }
 
     impl DrafterObserver for RecordingObserver {
         fn record(&self, event: DrafterEvent) {
             self.events.lock().unwrap().push(event);
+        }
+
+        fn record_error(&self, error: DrafterErrorEvent) {
+            self.errors.lock().unwrap().push(error);
+            self.record(error.event);
         }
     }
 
@@ -3136,6 +3393,56 @@ mod tests {
             tokio::task::yield_now().await;
         }
         assert_eq!(previews.lock().unwrap().len(), 3);
+        let _ = drafter.abort().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn classified_preview_error_reaches_observer_without_raw_error() {
+        let backend = ClassifiedBackend {
+            previews: Arc::new(Mutex::new(Vec::new())),
+            update_calls: 0,
+            fail_update_at: Some(1),
+            final_attempts: Arc::new(Mutex::new(0)),
+            retry_final_once: false,
+            rejected_final: false,
+            ambiguous_final: false,
+            commit_attempts: Arc::new(Mutex::new(0)),
+            retry_commit_once: false,
+            invalid_commit_once: false,
+            cleanup_retry_once: false,
+            abort_cleanup_retry_once: false,
+            abort_calls: Arc::new(Mutex::new(0)),
+            preview_message_id: None,
+            expires_without_refresh: false,
+        };
+        let observer = RecordingObserver::default();
+        let observer_ref = Arc::new(observer.clone());
+        let (drafter, sink) = Drafter::snapshots_with_observer(
+            backend,
+            NoopLimiter,
+            DraftConfig { max_consecutive_preview_failures: Some(1), ..DraftConfig::default() },
+            Arc::clone(&observer_ref) as Arc<dyn DrafterObserver>,
+        )
+        .unwrap();
+
+        sink.update("preview".to_owned()).unwrap();
+        assert!(matches!(drafter.flush().await, Err(DraftFlushError::PreviewDisabled)));
+
+        let classified_error = {
+            let errors = observer.errors.lock().unwrap();
+            let error = errors
+                .iter()
+                .find(|error| error.event.kind == DrafterEventKind::PreviewError)
+                .expect("classified preview error");
+            assert_eq!(error.disposition.class, DrafterErrorClass::Transient { retry_safe: true });
+            assert_eq!(error.disposition.delivery, DeliveryCertainty::Unknown);
+            *error
+        };
+        let metrics = super::super::DrafterMetricsCollector::default();
+        metrics.record_error(classified_error);
+        let error_metrics = metrics.error_snapshot();
+        assert_eq!(error_metrics.transient_errors, 1);
+        assert_eq!(error_metrics.unknown_delivery_errors, 1);
         let _ = drafter.abort().await;
     }
 

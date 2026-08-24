@@ -1,7 +1,7 @@
 //! The outbound queue actor, handle and completion-aware permit.
 //!
-//! Commit 2: a thin Tokio actor over the pure [`SchedulerState`]. The actor
-//! owns the mutable scheduling state, processes commands (enqueue, cancel,
+//! A thin Tokio actor over the pure [`SchedulerState`]. The actor owns the
+//! mutable scheduling state and processes commands (enqueue, cancel,
 //! complete, penalize, limits, snapshot, shutdown), runs the admission loop
 //! on every wake-up and sleeps until the next scheduler deadline — never
 //! polling, never scanning all jobs per tick.

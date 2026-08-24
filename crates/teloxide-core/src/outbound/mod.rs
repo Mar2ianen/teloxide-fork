@@ -1,7 +1,4 @@
-//! Deterministic outbound scheduling model.
-//!
-//! Commit 1 delivered the pure deterministic state machine; Commit 2 adds
-//! the public actor, handle and completion-aware permit on top of it.
+//! Deterministic outbound scheduling and durable outbox runtime.
 //!
 //! The scheduler owns only the shared admission/rate/order layer:
 //! priorities with aging, per-chat ordering lanes, rolling windows,

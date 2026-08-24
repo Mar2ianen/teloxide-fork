@@ -1,8 +1,8 @@
-//! Deterministic outbound scheduling model (Commit 1).
+//! Deterministic outbound scheduling model.
 //!
-//! Pure state machine: time is passed as a parameter, no Tokio, no actor.
-//! The actor, completion-aware permits and the public API are added in
-//! Commit 2 on top of this model.
+//! This module contains the pure state machine: time is passed as a parameter,
+//! with no Tokio actor or transport dependency. The actor and public permits
+//! drive this model from the surrounding outbound runtime.
 //!
 //! Invariants:
 //!

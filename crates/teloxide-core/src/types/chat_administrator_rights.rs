@@ -68,4 +68,9 @@ pub struct ChatAdministratorRights {
     /// `true`, if the administrator can manage direct messages of the channel
     /// and decline suggested posts; for channels only
     pub can_manage_direct_messages: bool,
+
+    /// `true`, if the administrator can send welcome messages; groups and
+    /// supergroups only.
+    #[serde(default)]
+    pub can_send_welcome_messages: bool,
 }

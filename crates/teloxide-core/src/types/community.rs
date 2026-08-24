@@ -23,3 +23,12 @@ pub struct CommunityChatAdded {
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct CommunityChatRemoved {}
+
+/// Describes a service message about a chat being joined by a user from a
+/// community.
+#[serde_with::skip_serializing_none]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct CommunityChatJoined {
+    pub community: Community,
+}

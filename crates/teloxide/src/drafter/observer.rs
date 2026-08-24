@@ -5,7 +5,10 @@ use std::sync::{
 
 use teloxide_core::types::{ChatId, MessageId};
 
-use super::{DraftId, DraftRevision, DrafterMode, DrafterOperation};
+use super::{
+    DeliveryCertainty, DraftId, DraftRevision, DrafterErrorClass, DrafterErrorDisposition,
+    DrafterMode, DrafterOperation,
+};
 
 /// Lifecycle event emitted by a drafter without payload or user text.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -21,6 +24,15 @@ pub struct DrafterEvent {
     pub operation: Option<DrafterOperation>,
     pub draft_id: Option<DraftId>,
     pub preview_message_id: Option<MessageId>,
+}
+
+/// A lifecycle event that represents a failed operation and carries only its
+/// safe retry and delivery classification. The original request error and
+/// payload are intentionally not exposed to observers.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrafterErrorEvent {
+    pub event: DrafterEvent,
+    pub disposition: DrafterErrorDisposition,
 }
 
 /// Events exposed by the scheduler for tracing, metrics and tests.
@@ -65,6 +77,15 @@ pub enum DrafterEventKind {
 /// [`DraftSink::push`]: super::DraftSink::push
 pub trait DrafterObserver: Send + Sync + 'static {
     fn record(&self, event: DrafterEvent);
+
+    /// Receives a classified error event without raw backend error details.
+    ///
+    /// The default implementation preserves compatibility with observers that
+    /// only consume lifecycle events. Implementations that need structured
+    /// diagnostics should override this method.
+    fn record_error(&self, error: DrafterErrorEvent) {
+        self.record(error.event);
+    }
 }
 
 /// Observer used by constructors that do not need instrumentation.
@@ -97,6 +118,27 @@ impl DrafterObserver for TracingDrafterObserver {
             draft_id = event.draft_id.map(DraftId::get),
             preview_message_id = event.preview_message_id.map(|id| id.0),
             "drafter lifecycle"
+        );
+    }
+
+    fn record_error(&self, error: DrafterErrorEvent) {
+        let event = error.event;
+        tracing::debug!(
+            target: "teloxide::drafter",
+            instance_id = event.instance_id,
+            event = ?event.kind,
+            mode = ?event.mode,
+            chat_id = event.chat_id.0,
+            segment = event.segment,
+            revision = event.revision.map(DraftRevision::get),
+            from_revision = event.from_revision.map(DraftRevision::get),
+            to_revision = event.to_revision.map(DraftRevision::get),
+            operation = ?event.operation,
+            draft_id = event.draft_id.map(DraftId::get),
+            preview_message_id = event.preview_message_id.map(|id| id.0),
+            error_class = ?error.disposition.class,
+            delivery = ?error.disposition.delivery,
+            "drafter classified error"
         );
     }
 }
@@ -135,6 +177,14 @@ struct MetricsCounters {
     preview_failures: AtomicU64,
     final_failures: AtomicU64,
     cleanup_failures: AtomicU64,
+    retry_after_errors: AtomicU64,
+    transient_errors: AtomicU64,
+    invalid_payload_errors: AtomicU64,
+    permanent_errors: AtomicU64,
+    ambiguous_errors: AtomicU64,
+    not_attempted_errors: AtomicU64,
+    rejected_errors: AtomicU64,
+    unknown_delivery_errors: AtomicU64,
 }
 
 /// Snapshot of the counters maintained by [`DrafterMetricsCollector`].
@@ -153,6 +203,20 @@ pub struct DrafterMetricsSnapshot {
     pub cleanup_failures: u64,
 }
 
+/// Error-class and delivery-certainty counters maintained by
+/// [`DrafterMetricsCollector`].
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct DrafterErrorMetricsSnapshot {
+    pub retry_after_errors: u64,
+    pub transient_errors: u64,
+    pub invalid_payload_errors: u64,
+    pub permanent_errors: u64,
+    pub ambiguous_errors: u64,
+    pub not_attempted_errors: u64,
+    pub rejected_errors: u64,
+    pub unknown_delivery_errors: u64,
+}
+
 impl DrafterMetricsCollector {
     #[must_use]
     pub fn snapshot(&self) -> DrafterMetricsSnapshot {
@@ -169,6 +233,21 @@ impl DrafterMetricsCollector {
             preview_failures: load(&self.counters.preview_failures),
             final_failures: load(&self.counters.final_failures),
             cleanup_failures: load(&self.counters.cleanup_failures),
+        }
+    }
+
+    #[must_use]
+    pub fn error_snapshot(&self) -> DrafterErrorMetricsSnapshot {
+        let load = |counter: &AtomicU64| counter.load(Ordering::Relaxed);
+        DrafterErrorMetricsSnapshot {
+            retry_after_errors: load(&self.counters.retry_after_errors),
+            transient_errors: load(&self.counters.transient_errors),
+            invalid_payload_errors: load(&self.counters.invalid_payload_errors),
+            permanent_errors: load(&self.counters.permanent_errors),
+            ambiguous_errors: load(&self.counters.ambiguous_errors),
+            not_attempted_errors: load(&self.counters.not_attempted_errors),
+            rejected_errors: load(&self.counters.rejected_errors),
+            unknown_delivery_errors: load(&self.counters.unknown_delivery_errors),
         }
     }
 }
@@ -228,5 +307,27 @@ impl DrafterObserver for DrafterMetricsCollector {
         if matches!(event.kind, DrafterEventKind::TransientRetry) {
             self.counters.transient_retry_count.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    fn record_error(&self, error: DrafterErrorEvent) {
+        // Keep the existing event counters and let specialized observers opt
+        // into the classification through the new hook.
+        self.record(error.event);
+
+        let class_counter = match error.disposition.class {
+            DrafterErrorClass::RetryAfter { .. } => &self.counters.retry_after_errors,
+            DrafterErrorClass::Transient { .. } => &self.counters.transient_errors,
+            DrafterErrorClass::InvalidPayload => &self.counters.invalid_payload_errors,
+            DrafterErrorClass::Permanent => &self.counters.permanent_errors,
+            DrafterErrorClass::Ambiguous => &self.counters.ambiguous_errors,
+        };
+        class_counter.fetch_add(1, Ordering::Relaxed);
+
+        let delivery_counter = match error.disposition.delivery {
+            DeliveryCertainty::NotAttempted => &self.counters.not_attempted_errors,
+            DeliveryCertainty::Rejected => &self.counters.rejected_errors,
+            DeliveryCertainty::Unknown => &self.counters.unknown_delivery_errors,
+        };
+        delivery_counter.fetch_add(1, Ordering::Relaxed);
     }
 }

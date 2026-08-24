@@ -3,12 +3,14 @@
 use serde::Serialize;
 
 use crate::types::{
-    InlineKeyboardMarkup, LinkPreviewOptions, MessageEntity, ParseMode, Recipient, True, UserId,
+    InlineKeyboardMarkup, InputRichMessage, LinkPreviewOptions, MessageEntity, ParseMode,
+    Recipient, True, UserId,
 };
 
 impl_payload! {
-    /// Use this method to edit an ephemeral text message. Returns _True_ on success.
-    #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize)]
+    @[validate = crate::requests::validation::validate_edit_ephemeral_message_text]
+    /// Use this method to edit an ephemeral text or rich message. Returns _True_ on success.
+    #[derive(Debug, Clone, Serialize)]
     pub EditEphemeralMessageText (EditEphemeralMessageTextSetters) => True {
         required {
             /// Unique identifier for the target chat or username of the target supergroup
@@ -17,10 +19,12 @@ impl_payload! {
             pub receiver_user_id: UserId,
             /// Identifier of the ephemeral message to edit
             pub ephemeral_message_id: i32,
-            /// New text of the message, 1-4096 characters after entity parsing
-            pub text: String [into],
         }
         optional {
+            /// New text of the message, 1-4096 characters after entity parsing; required if rich_message isn't specified
+            pub text: String [into],
+            /// New rich message content
+            pub rich_message: InputRichMessage,
             /// Mode for parsing entities in the message text
             pub parse_mode: ParseMode,
             /// List of special entities that appear in message text

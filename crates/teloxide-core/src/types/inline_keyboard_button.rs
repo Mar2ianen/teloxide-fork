@@ -1,6 +1,6 @@
 use crate::types::{
-    CallbackGame, CopyTextButton, CustomEmojiId, LoginUrl, SwitchInlineQueryChosenChat, True,
-    WebAppInfo,
+    CallbackGame, CopyTextButton, CustomEmojiId, DisabledButton, LoginUrl,
+    SwitchInlineQueryChosenChat, True, WebAppInfo,
 };
 use serde::{Deserialize, Serialize};
 
@@ -113,6 +113,9 @@ pub enum InlineKeyboardButtonKind {
     ///
     /// [Pay button]: https://core.telegram.org/bots/api#payments
     Pay(True),
+
+    /// A disabled button which does nothing.
+    Disabled(DisabledButton),
 }
 
 impl InlineKeyboardButton {
@@ -225,5 +228,27 @@ impl InlineKeyboardButton {
         T: Into<String>,
     {
         Self::new(text, InlineKeyboardButtonKind::Pay(True))
+    }
+
+    /// Creates a disabled button which does nothing.
+    pub fn disabled<T>(text: T) -> Self
+    where
+        T: Into<String>,
+    {
+        Self::new(text, InlineKeyboardButtonKind::Disabled(DisabledButton {}))
+    }
+
+    /// Sets the native button style introduced by Bot API 10.3.
+    #[must_use]
+    pub fn style(mut self, style: impl Into<String>) -> Self {
+        self.style = Some(style.into());
+        self
+    }
+
+    /// Sets the custom emoji displayed before the button text.
+    #[must_use]
+    pub fn icon_custom_emoji_id(mut self, id: CustomEmojiId) -> Self {
+        self.icon_custom_emoji_id = Some(id);
+        self
     }
 }

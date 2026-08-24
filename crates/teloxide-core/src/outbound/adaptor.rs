@@ -32,9 +32,9 @@ use crate::{
     types::*,
 };
 
-/// Draft request classes used by the generated [`OutboundPayload`] impls
-/// (spec §11.1). The taxonomy will be refined when `Throttle` migrates
-/// onto the outbound queue; the scope classification is the strict part.
+/// Request classes used by the generated [`OutboundPayload`] implementations
+/// (spec §11.1). The taxonomy is deliberately compact; scope classification
+/// is the strict part of the scheduler contract.
 pub mod class {
     /// Read-only queries (`get_me`, ...).
     pub const READ: u64 = 1;

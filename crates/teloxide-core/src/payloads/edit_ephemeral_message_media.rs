@@ -5,7 +5,8 @@ use serde::Serialize;
 use crate::types::{InlineKeyboardMarkup, InputMedia, Recipient, True, UserId};
 
 impl_payload! {
-    /// Use this method to edit the media of an ephemeral message. New files can't be uploaded. Returns _True_ on success.
+    @[multipart = media]
+    /// Use this method to edit the media of an ephemeral message. Returns _True_ on success.
     #[derive(Debug, Clone, Serialize)]
     pub EditEphemeralMessageMedia (EditEphemeralMessageMediaSetters) => True {
         required {
@@ -15,7 +16,7 @@ impl_payload! {
             pub receiver_user_id: UserId,
             /// Identifier of the ephemeral message to edit
             pub ephemeral_message_id: i32,
-            /// New media content; use a file_id or URL because direct upload isn't supported
+            /// New media content
             pub media: InputMedia,
         }
         optional {

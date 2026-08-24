@@ -24,6 +24,10 @@ impl_payload! {
             pub parse_mode: ParseMode,
             /// List of special entities that appear in message text
             pub entities: Vec<MessageEntity> [collect],
+            /// Pass True to show the user a button to stop further drafts
+            pub can_stop: bool,
+            /// Pass True to keep the draft in the chat when the button is pressed
+            pub keep_on_stop: bool,
         }
     }
 }

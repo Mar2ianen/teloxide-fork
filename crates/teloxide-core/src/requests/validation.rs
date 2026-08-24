@@ -272,6 +272,7 @@ fn validate_block(
         }
         InputRichBlock::Document(value) => {
             path.push_field("document");
+            path.push_field("media");
             validate_file(&value.document.media, context, path)?;
             path.pop();
             validate_optional_file(value.document.thumbnail.as_ref(), context, path, "thumbnail")?;
@@ -557,10 +558,11 @@ mod tests {
         requests::{Payload, Request, Requester},
         types::{
             FileId, InlineQueryId, InlineQueryResult, InlineQueryResultArticle, InputFile,
-            InputMediaPhoto, InputMediaVideo, InputMediaVoiceNote, InputMessageContent,
-            InputRichBlock, InputRichBlockBlockQuotation, InputRichBlockDetails,
-            InputRichBlockList, InputRichBlockListItem, InputRichBlockPhoto,
-            InputRichBlockThinking, InputRichBlockVideo, InputRichBlockVoiceNote, InputRichMessage,
+            InputMediaDocument, InputMediaPhoto, InputMediaVideo, InputMediaVoiceNote,
+            InputMessageContent, InputRichBlock, InputRichBlockBlockQuotation,
+            InputRichBlockDetails, InputRichBlockDocument, InputRichBlockList,
+            InputRichBlockListItem, InputRichBlockPhoto, InputRichBlockThinking,
+            InputRichBlockVideo, InputRichBlockVoiceNote, InputRichMessage,
             InputRichMessageContent, InputRichMessageMedia, InputRichMessageMediaContent, RichText,
             UserId,
         },
@@ -772,6 +774,32 @@ mod tests {
             caption: None,
         })]);
         assert_eq!(url.validate_with(&RichMessageContext::Draft), Ok(()));
+    }
+
+    #[test]
+    fn draft_document_upload_errors_keep_exact_nested_paths() {
+        let media_error =
+            InputRichMessage::blocks([InputRichBlock::Document(InputRichBlockDocument {
+                document: InputMediaDocument::new(InputFile::memory("document")),
+                caption: None,
+            })]);
+        assert!(matches!(
+            media_error.validate_with(&RichMessageContext::Draft),
+            Err(RequestValidationError::DirectUploadNotAllowed { path })
+                if path.to_string() == "rich_message.blocks[0].document.media"
+        ));
+
+        let thumbnail_error =
+            InputRichMessage::blocks([InputRichBlock::Document(InputRichBlockDocument {
+                document: InputMediaDocument::new(InputFile::file_id(FileId("document".into())))
+                    .thumbnail(InputFile::memory("thumbnail")),
+                caption: None,
+            })]);
+        assert!(matches!(
+            thumbnail_error.validate_with(&RichMessageContext::Draft),
+            Err(RequestValidationError::DirectUploadNotAllowed { path })
+                if path.to_string() == "rich_message.blocks[0].document.thumbnail"
+        ));
     }
 
     #[test]

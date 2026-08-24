@@ -32,6 +32,53 @@ pub struct RichMessageButton {
     pub disabled: Option<DisabledButton>,
 }
 
+impl RichMessageButton {
+    /// Creates a rich-message button without an action.
+    pub fn new(text: impl Into<RichText>) -> Self {
+        Self {
+            text: text.into(),
+            style: None,
+            url: None,
+            callback_data: None,
+            web_app: None,
+            login_url: None,
+            switch_inline_query: None,
+            switch_inline_query_current_chat: None,
+            switch_inline_query_chosen_chat: None,
+            copy_text: None,
+            disabled: None,
+        }
+    }
+
+    /// Creates a rich-message callback button.
+    pub fn callback(text: impl Into<RichText>, callback_data: impl Into<String>) -> Self {
+        let mut button = Self::new(text);
+        button.callback_data = Some(callback_data.into());
+        button
+    }
+
+    /// Creates a rich-message URL button.
+    pub fn url(text: impl Into<RichText>, url: impl Into<String>) -> Self {
+        let mut button = Self::new(text);
+        button.url = Some(url.into());
+        button
+    }
+
+    /// Creates a disabled rich-message button.
+    pub fn disabled(text: impl Into<RichText>) -> Self {
+        let mut button = Self::new(text);
+        button.disabled = Some(DisabledButton {});
+        button
+    }
+
+    /// Sets the native button style introduced by Bot API 10.3.
+    #[must_use]
+    pub fn style(mut self, style: impl Into<String>) -> Self {
+        self.style = Some(style.into());
+        self
+    }
+}
+
 /// Rich-formatted inline text.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]

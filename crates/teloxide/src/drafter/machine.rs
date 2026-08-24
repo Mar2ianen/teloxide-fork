@@ -4,7 +4,7 @@ use std::{
     panic::{catch_unwind, AssertUnwindSafe},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     time::Duration,
 };
@@ -22,10 +22,11 @@ use super::{
     DraftAbortError, DraftCommitError, DraftConfig, DraftFinishError, DraftFlushError,
     DraftPushError, DraftRevision, DraftStartError, DrafterAcquireError, DrafterBackend,
     DrafterCapabilities, DrafterErrorClass, DrafterErrorDisposition, DrafterEvent,
-    DrafterEventKind, DrafterObserver, DrafterOperation, DrafterPermit, DrafterPermitCompletion,
-    DrafterPriority, DrafterRateLimitKey, DrafterRateLimiter, DrafterRequestClass,
-    DrafterRequestContext, PreviewAck, PreviewSource, ReplacePreview,
+    DrafterEventKind, DrafterGeneration, DrafterObserver, DrafterOperation, DrafterPermit,
+    DrafterPermitCompletion, DrafterPriority, DrafterRateLimitKey, DrafterRateLimiter,
+    DrafterRequestClass, DrafterRequestContext, PreviewAck, PreviewSource, ReplacePreview,
 };
+use teloxide_core::types::MessageGenerationStopped;
 
 /// A cloneable synchronous producer handle.
 pub struct DraftSink<U> {
@@ -282,6 +283,23 @@ where
     instance_id: u64,
     segment: u64,
     segment_counter: Arc<AtomicU64>,
+    generation: Arc<Mutex<Option<DrafterGeneration>>>,
+}
+
+impl<S, B, L> Worker<S, B, L>
+where
+    S: PreviewSource,
+    B: DrafterBackend<Preview = S::Preview>,
+    L: DrafterRateLimiter,
+{
+    fn sync_generation(&self) {
+        let generation = self.backend.as_ref().and_then(|backend| {
+            backend
+                .draft_id()
+                .map(|draft_id| DrafterGeneration::new(self.rate_limit_key.chat_id, draft_id))
+        });
+        *self.generation.lock().expect("drafter generation mutex poisoned") = generation;
+    }
 }
 
 fn emit_event(observer: &Arc<dyn DrafterObserver>, event: DrafterEvent) {
@@ -1084,6 +1102,7 @@ where
                         self.segment_counter.store(self.segment, Ordering::Release);
                         self.record(DrafterEventKind::SegmentRotate, None, None);
                         self.source.reopen_segment();
+                        self.sync_generation();
                         let _ = reply.send(Ok(output));
                         true
                     }
@@ -1736,7 +1755,59 @@ where
     source: Arc<S>,
     commands: mpsc::Sender<Command<B>>,
     worker: Option<tokio::task::JoinHandle<()>>,
+    generation: Arc<Mutex<Option<DrafterGeneration>>>,
     _limiter: PhantomData<L>,
+}
+
+/// A cloneable control handle for a running drafter.
+///
+/// It is intended for update handlers: keep this handle together with the
+/// producer task, then call [`Self::matches_generation_stopped`] and
+/// [`Self::stop`] when Telegram reports that the user pressed Stop.
+#[derive(Clone)]
+pub struct DrafterHandle<S, B>
+where
+    S: PreviewSource,
+    B: DrafterBackend<Preview = S::Preview>,
+{
+    source: Arc<S>,
+    commands: mpsc::Sender<Command<B>>,
+    generation: Arc<Mutex<Option<DrafterGeneration>>>,
+}
+
+impl<S, B> DrafterHandle<S, B>
+where
+    S: PreviewSource,
+    B: DrafterBackend<Preview = S::Preview>,
+{
+    /// Returns the currently active native generation, if this backend owns
+    /// one. Message-based backends return `None`.
+    #[must_use]
+    pub fn generation(&self) -> Option<DrafterGeneration> {
+        *self.generation.lock().expect("drafter generation mutex poisoned")
+    }
+
+    /// Checks whether a Telegram Stop update belongs to this drafter's
+    /// current native generation.
+    #[must_use]
+    pub fn matches_generation_stopped(&self, update: &MessageGenerationStopped) -> bool {
+        self.generation().is_some_and(|generation| {
+            generation.chat_id == update.chat.id && generation.draft_id.get() == update.draft_id
+        })
+    }
+
+    /// Stops preview delivery and runs the backend's normal abort cleanup.
+    ///
+    /// The owning [`Drafter`] must not be used for `finish` or another
+    /// terminal operation after this succeeds.
+    pub async fn stop(&self) -> Result<(), super::DraftAbortError<B::Error>> {
+        self.source.close();
+        let (reply, receiver) = oneshot::channel();
+        if self.commands.send(Command::Abort { reply }).await.is_err() {
+            return Err(super::DraftAbortError::WorkerStopped);
+        }
+        receiver.await.map_err(|_| super::DraftAbortError::WorkerStopped)?
+    }
 }
 
 impl<S, B, L> Drafter<S, B, L>
@@ -1755,6 +1826,11 @@ where
         let capabilities = backend.capabilities();
         config.validate(capabilities).map_err(DraftStartError::InvalidConfig)?;
         let rate_limit_key = backend.rate_limit_key();
+        let generation = Arc::new(Mutex::new(
+            backend
+                .draft_id()
+                .map(|draft_id| DrafterGeneration::new(rate_limit_key.chat_id, draft_id)),
+        ));
         let instance_id = next_instance_id();
         let segment_counter = Arc::new(AtomicU64::new(0));
         emit_event(
@@ -1797,6 +1873,7 @@ where
             instance_id,
             segment: 0,
             segment_counter: Arc::clone(&segment_counter),
+            generation: Arc::clone(&generation),
         };
         let sink_observer = Arc::clone(&worker.observer);
         let sink_segment_counter = Arc::clone(&segment_counter);
@@ -1836,7 +1913,32 @@ where
             sink_notify.notify_one();
             Ok(revision)
         });
-        Ok((Self { source, commands, worker: Some(worker), _limiter: PhantomData }, sink))
+        Ok((
+            Self { source, commands, worker: Some(worker), generation, _limiter: PhantomData },
+            sink,
+        ))
+    }
+
+    /// Returns a cloneable control handle for update-driven cancellation.
+    #[must_use]
+    pub fn handle(&self) -> DrafterHandle<S, B> {
+        DrafterHandle {
+            source: Arc::clone(&self.source),
+            commands: self.commands.clone(),
+            generation: Arc::clone(&self.generation),
+        }
+    }
+
+    /// Returns the current native generation, if this backend owns one.
+    #[must_use]
+    pub fn generation(&self) -> Option<DrafterGeneration> {
+        self.handle().generation()
+    }
+
+    /// Checks whether a Telegram Stop update belongs to this drafter.
+    #[must_use]
+    pub fn matches_generation_stopped(&self, update: &MessageGenerationStopped) -> bool {
+        self.handle().matches_generation_stopped(update)
     }
 
     /// Waits until a revision existing at call time has been delivered.

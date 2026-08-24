@@ -12,7 +12,7 @@
     <img src="https://img.shields.io/badge/license-MIT-blue.svg">
   </a>
   <a href="https://core.telegram.org/bots/api">
-    <img src="https://img.shields.io/badge/API%20coverage-Bot%20API%2010.0%20core-yellowgreen.svg">
+    <img src="https://img.shields.io/badge/API%20coverage-Bot%20API%2010.3%20core-yellowgreen.svg">
   </a>
   <a href="https://crates.io/crates/teloxide_core">
     <img src="https://img.shields.io/crates/v/teloxide_core.svg">

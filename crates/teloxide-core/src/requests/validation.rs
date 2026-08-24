@@ -270,6 +270,13 @@ fn validate_block(
             path.pop();
             path.pop();
         }
+        InputRichBlock::Document(value) => {
+            path.push_field("document");
+            validate_file(&value.document.media, context, path)?;
+            path.pop();
+            validate_optional_file(value.document.thumbnail.as_ref(), context, path, "thumbnail")?;
+            path.pop();
+        }
         InputRichBlock::Collage(value) => {
             path.push_field("collage");
             path.push_field("blocks");
@@ -329,8 +336,10 @@ fn validate_block(
         | InputRichBlock::Divider(_)
         | InputRichBlock::MathematicalExpression(_)
         | InputRichBlock::Anchor(_)
+        | InputRichBlock::ExpandableBlockquote(_)
         | InputRichBlock::Pullquote(_)
         | InputRichBlock::Table(_)
+        | InputRichBlock::Buttons(_)
         | InputRichBlock::Map(_)
         | InputRichBlock::Thinking(_) => {}
     }

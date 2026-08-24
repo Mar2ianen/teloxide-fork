@@ -10,9 +10,10 @@ use teloxide_core::{
     },
     requests::Requester,
     types::{
-        BusinessConnectionId, CallbackQueryId, ChatId, EffectId, InlineKeyboardMarkup,
-        InputRichMessage, LinkPreviewOptions, Message, MessageEntity, MessageId, ParseMode,
-        ReplyMarkup, ReplyParameters, SuggestedPostParameters, ThreadId, TopicId, UserId,
+        BusinessConnectionId, CallbackQueryId, ChatId, EffectId, EphemeralMessageParameters,
+        InlineKeyboardMarkup, InputRichMessage, LinkPreviewOptions, Message, MessageEntity,
+        MessageId, ParseMode, ReplyMarkup, ReplyParameters, SuggestedPostParameters, ThreadId,
+        TopicId, UserId,
     },
     Bot,
 };
@@ -87,7 +88,11 @@ pub struct TelegramSendOptions {
     pub business_connection_id: Option<BusinessConnectionId>,
     pub message_thread_id: Option<ThreadId>,
     pub direct_messages_topic_id: Option<TopicId>,
+    /// Parameters for sending an ephemeral message.
+    pub ephemeral_message_parameters: Option<EphemeralMessageParameters>,
+    /// Legacy receiver field; prefer `ephemeral_message_parameters`.
     pub receiver_user_id: Option<UserId>,
+    /// Legacy callback field; prefer `ephemeral_message_parameters`.
     pub callback_query_id: Option<CallbackQueryId>,
     pub parse_mode: Option<ParseMode>,
     pub entities: Option<Vec<MessageEntity>>,
@@ -132,6 +137,12 @@ impl TelegramSendOptions {
     #[must_use]
     pub fn direct_messages_topic_id(mut self, value: TopicId) -> Self {
         self.direct_messages_topic_id = Some(value);
+        self
+    }
+
+    #[must_use]
+    pub fn ephemeral_message_parameters(mut self, value: EphemeralMessageParameters) -> Self {
+        self.ephemeral_message_parameters = Some(value);
         self
     }
 
@@ -196,6 +207,8 @@ pub struct TelegramDraftOptions {
     pub message_thread_id: Option<ThreadId>,
     pub parse_mode: Option<ParseMode>,
     pub entities: Option<Vec<MessageEntity>>,
+    pub can_stop: Option<bool>,
+    pub keep_on_stop: Option<bool>,
 }
 
 impl TelegramDraftOptions {
@@ -214,6 +227,18 @@ impl TelegramDraftOptions {
     #[must_use]
     pub fn entities(mut self, value: Vec<MessageEntity>) -> Self {
         self.entities = Some(value);
+        self
+    }
+
+    #[must_use]
+    pub fn can_stop(mut self, value: bool) -> Self {
+        self.can_stop = Some(value);
+        self
+    }
+
+    #[must_use]
+    pub fn keep_on_stop(mut self, value: bool) -> Self {
+        self.keep_on_stop = Some(value);
         self
     }
 }
@@ -273,11 +298,14 @@ where
     if let Some(value) = options.direct_messages_topic_id {
         request = request.direct_messages_topic_id(value);
     }
-    if let Some(value) = options.receiver_user_id {
-        request = request.receiver_user_id(value);
-    }
-    if let Some(value) = options.callback_query_id.clone() {
-        request = request.callback_query_id(value);
+    if let Some(value) = options.ephemeral_message_parameters.clone() {
+        request = request.ephemeral_message_parameters(value);
+    } else if let Some(receiver_user_id) = options.receiver_user_id {
+        let mut value = EphemeralMessageParameters::new(receiver_user_id);
+        if let Some(callback_query_id) = options.callback_query_id.as_ref() {
+            value = value.callback_query_id(callback_query_id.0.clone());
+        }
+        request = request.ephemeral_message_parameters(value);
     }
     if let Some(value) = options.parse_mode {
         request = request.parse_mode(value);
@@ -325,6 +353,9 @@ where
     if let Some(value) = options.direct_messages_topic_id {
         request = request.direct_messages_topic_id(value);
     }
+    if let Some(value) = options.ephemeral_message_parameters.clone() {
+        request = request.ephemeral_message_parameters(value);
+    }
     if let Some(value) = options.disable_notification {
         request = request.disable_notification(value);
     }
@@ -362,6 +393,12 @@ where
     if let Some(value) = options.entities.clone() {
         request = request.entities(value);
     }
+    if let Some(value) = options.can_stop {
+        request = request.can_stop(value);
+    }
+    if let Some(value) = options.keep_on_stop {
+        request = request.keep_on_stop(value);
+    }
     request
 }
 
@@ -371,6 +408,12 @@ where
 {
     if let Some(value) = options.message_thread_id {
         request = request.message_thread_id(value);
+    }
+    if let Some(value) = options.can_stop {
+        request = request.can_stop(value);
+    }
+    if let Some(value) = options.keep_on_stop {
+        request = request.keep_on_stop(value);
     }
     request
 }
@@ -2074,7 +2117,10 @@ mod tests {
             .disable_notification(true)
             .protect_content(true)
             .parse_mode(ParseMode::Html)
-            .reply_parameters(ReplyParameters::new(MessageId(4)));
+            .reply_parameters(ReplyParameters::new(MessageId(4)))
+            .ephemeral_message_parameters(
+                EphemeralMessageParameters::new(UserId(7)).callback_query_id("query"),
+            );
         let request =
             apply_text_send_options(Bot::new("token").send_message(ChatId(1), "preview"), &options);
 
@@ -2083,6 +2129,10 @@ mod tests {
         assert_eq!(request.protect_content, Some(true));
         assert_eq!(request.parse_mode, Some(ParseMode::Html));
         assert_eq!(request.reply_parameters, Some(ReplyParameters::new(MessageId(4))));
+        assert_eq!(
+            request.ephemeral_message_parameters,
+            Some(EphemeralMessageParameters::new(UserId(7)).callback_query_id("query"))
+        );
     }
 
     #[test]
@@ -2138,13 +2188,28 @@ mod tests {
     fn draft_and_edit_options_are_applied_to_typed_requests() {
         let draft_options = TelegramDraftOptions::default()
             .message_thread_id(ThreadId(MessageId(3)))
-            .parse_mode(ParseMode::Html);
+            .parse_mode(ParseMode::Html)
+            .can_stop(true)
+            .keep_on_stop(true);
         let draft = apply_draft_options(
             Bot::new("token").send_message_draft(UserId(1), 7).text("preview"),
             &draft_options,
         );
         assert_eq!(draft.message_thread_id, Some(ThreadId(MessageId(3))));
         assert_eq!(draft.parse_mode, Some(ParseMode::Html));
+        assert_eq!(draft.can_stop, Some(true));
+        assert_eq!(draft.keep_on_stop, Some(true));
+
+        let rich_draft = apply_rich_draft_options(
+            Bot::new("token").send_rich_message_draft(
+                UserId(1),
+                7,
+                InputRichMessage::html("preview"),
+            ),
+            &draft_options,
+        );
+        assert_eq!(rich_draft.can_stop, Some(true));
+        assert_eq!(rich_draft.keep_on_stop, Some(true));
 
         let edit_options = TelegramEditOptions::default().parse_mode(ParseMode::Html);
         let edit = apply_edit_options(

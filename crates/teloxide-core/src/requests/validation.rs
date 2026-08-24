@@ -90,6 +90,13 @@ pub enum InvalidValueReason {
     MustBeCallbackButton,
     /// At least one of the alternative fields must be present.
     MustHaveTextOrRichMessage,
+    /// Rich-message button labels may only contain plain text, custom emoji
+    /// and date-time objects.
+    MustBeRichButtonLabel,
+    /// A field is not supported by the selected Bot API object.
+    MustBeUnset,
+    /// The value must be a 1-64 character ASCII identifier.
+    MustBeAsciiIdentifier,
 }
 
 impl fmt::Display for InvalidValueReason {
@@ -108,6 +115,11 @@ impl fmt::Display for InvalidValueReason {
             Self::MustHaveTextOrRichMessage => {
                 f.write_str("text or rich_message must be specified")
             }
+            Self::MustBeRichButtonLabel => {
+                f.write_str("must contain only plain text, custom emoji or date-time objects")
+            }
+            Self::MustBeUnset => f.write_str("must be omitted"),
+            Self::MustBeAsciiIdentifier => f.write_str("must be a 1-64 character ASCII identifier"),
         }
     }
 }
@@ -121,6 +133,8 @@ pub enum RichMessageContext {
     Edit,
     /// `editMessageText` for an inline message.
     EditInline,
+    /// `editEphemeralMessageText`.
+    EphemeralEdit,
     /// `sendRichMessageDraft`.
     Draft,
     /// An inline query result.
@@ -137,6 +151,7 @@ impl fmt::Display for RichMessageContext {
             Self::Send => "rich message send",
             Self::Edit => "rich message edit",
             Self::EditInline => "inline rich message edit",
+            Self::EphemeralEdit => "ephemeral rich message edit",
             Self::Draft => "rich message draft",
             Self::InlineResult => "inline result",
             Self::GuestResult => "guest result",
@@ -242,6 +257,20 @@ fn validate_rich_message_at(
         path.push_field("media");
         for (index, media) in media.iter().enumerate() {
             path.push_index(index);
+            path.push_field("id");
+            if media.id.is_empty()
+                || media.id.len() > 64
+                || !media
+                    .id
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+            {
+                return Err(RequestValidationError::InvalidValue {
+                    path: path.clone(),
+                    reason: InvalidValueReason::MustBeAsciiIdentifier,
+                });
+            }
+            path.pop();
             path.push_field("media");
             validate_rich_media_content(&media.media, context, path)?;
             path.pop();
@@ -274,6 +303,18 @@ fn validate_block(
     use crate::types::InputRichBlock;
 
     match block {
+        InputRichBlock::Paragraph(value) => {
+            validate_block_text(&value.text, context, path, "paragraph", "text")?;
+        }
+        InputRichBlock::Heading(value) => {
+            validate_block_text(&value.text, context, path, "heading", "text")?;
+        }
+        InputRichBlock::Pre(value) => {
+            validate_block_text(&value.text, context, path, "pre", "text")?;
+        }
+        InputRichBlock::Footer(value) => {
+            validate_block_text(&value.text, context, path, "footer", "text")?;
+        }
         InputRichBlock::List(value) => {
             path.push_field("list");
             path.push_field("items");
@@ -289,6 +330,7 @@ fn validate_block(
         }
         InputRichBlock::Blockquote(value) => {
             path.push_field("blockquote");
+            validate_optional_rich_text(value.credit.as_ref(), context, path, "credit")?;
             path.push_field("blocks");
             validate_blocks(&value.blocks, context, path)?;
             path.pop();
@@ -299,11 +341,13 @@ fn validate_block(
             path.push_field("media");
             validate_file(&value.document.media, context, path)?;
             path.pop();
+            validate_optional_caption(value.caption.as_ref(), context, path)?;
             validate_optional_file(value.document.thumbnail.as_ref(), context, path, "thumbnail")?;
             path.pop();
         }
         InputRichBlock::Collage(value) => {
             path.push_field("collage");
+            validate_optional_caption(value.caption.as_ref(), context, path)?;
             path.push_field("blocks");
             validate_blocks(&value.blocks, context, path)?;
             path.pop();
@@ -311,6 +355,7 @@ fn validate_block(
         }
         InputRichBlock::Slideshow(value) => {
             path.push_field("slideshow");
+            validate_optional_caption(value.caption.as_ref(), context, path)?;
             path.push_field("blocks");
             validate_blocks(&value.blocks, context, path)?;
             path.pop();
@@ -318,6 +363,7 @@ fn validate_block(
         }
         InputRichBlock::Details(value) => {
             path.push_field("details");
+            validate_block_text(&value.summary, context, path, "details", "summary")?;
             path.push_field("blocks");
             validate_blocks(&value.blocks, context, path)?;
             path.pop();
@@ -325,51 +371,235 @@ fn validate_block(
         }
         InputRichBlock::Animation(value) => {
             path.push_field("animation");
+            validate_optional_caption(value.caption.as_ref(), context, path)?;
             validate_animation(&value.animation, context, path)?;
             path.pop();
         }
         InputRichBlock::Audio(value) => {
             path.push_field("audio");
+            validate_optional_caption(value.caption.as_ref(), context, path)?;
             validate_audio(&value.audio, context, path)?;
             path.pop();
         }
         InputRichBlock::Photo(value) => {
             path.push_field("photo");
+            validate_optional_caption(value.caption.as_ref(), context, path)?;
             validate_photo(&value.photo, context, path)?;
             path.pop();
         }
         InputRichBlock::Video(value) => {
             path.push_field("video");
+            validate_optional_caption(value.caption.as_ref(), context, path)?;
             validate_video(&value.video, context, path)?;
             path.pop();
         }
         InputRichBlock::VoiceNote(value) => {
             path.push_field("voice_note");
+            validate_optional_caption(value.caption.as_ref(), context, path)?;
             validate_voice_note(&value.voice_note, context, path)?;
             path.pop();
         }
-        InputRichBlock::Buttons(value) => validate_buttons(value, path)?,
+        InputRichBlock::Buttons(value) => validate_buttons(value, context, path)?,
         InputRichBlock::Thinking(_) if context != RichMessageContext::Draft => {
             return Err(RequestValidationError::UnsupportedInContext {
                 path: path.clone(),
                 context,
             });
         }
-        InputRichBlock::Paragraph(_)
-        | InputRichBlock::Heading(_)
-        | InputRichBlock::Pre(_)
-        | InputRichBlock::Footer(_)
-        | InputRichBlock::Divider(_)
+        InputRichBlock::ExpandableBlockquote(value) => {
+            path.push_field("expandable_blockquote");
+            path.push_field("text");
+            validate_rich_text_at(&value.text, context, path)?;
+            path.pop();
+            validate_optional_rich_text(value.credit.as_ref(), context, path, "credit")?;
+            path.pop();
+        }
+        InputRichBlock::Pullquote(value) => {
+            path.push_field("pullquote");
+            path.push_field("text");
+            validate_rich_text_at(&value.text, context, path)?;
+            path.pop();
+            validate_optional_rich_text(value.credit.as_ref(), context, path, "credit")?;
+            path.pop();
+        }
+        InputRichBlock::Table(value) => {
+            path.push_field("table");
+            for (row_index, row) in value.cells.iter().enumerate() {
+                path.push_field("cells");
+                path.push_index(row_index);
+                for (cell_index, cell) in row.iter().enumerate() {
+                    path.push_index(cell_index);
+                    validate_optional_rich_text(cell.text.as_ref(), context, path, "text")?;
+                    path.pop();
+                }
+                path.pop();
+                path.pop();
+            }
+            validate_optional_rich_text(value.caption.as_ref(), context, path, "caption")?;
+            path.pop();
+        }
+        InputRichBlock::Map(value) => {
+            path.push_field("map");
+            validate_optional_caption(value.caption.as_ref(), context, path)?;
+            path.pop();
+        }
+        InputRichBlock::Thinking(value) => {
+            validate_block_text(&value.text, context, path, "thinking", "text")?;
+        }
+        InputRichBlock::Divider(_)
         | InputRichBlock::MathematicalExpression(_)
-        | InputRichBlock::Anchor(_)
-        | InputRichBlock::ExpandableBlockquote(_)
-        | InputRichBlock::Pullquote(_)
-        | InputRichBlock::Table(_)
-        | InputRichBlock::Map(_)
-        | InputRichBlock::Thinking(_) => {}
+        | InputRichBlock::Anchor(_) => {}
     }
 
     Ok(())
+}
+
+fn validate_block_text(
+    text: &crate::types::RichText,
+    context: RichMessageContext,
+    path: &mut RequestFieldPath,
+    block: &'static str,
+    field: &'static str,
+) -> Result<(), RequestValidationError> {
+    path.push_field(block);
+    path.push_field(field);
+    let result = validate_rich_text_at(text, context, path);
+    path.pop();
+    path.pop();
+    result
+}
+
+fn validate_optional_rich_text(
+    text: Option<&crate::types::RichText>,
+    context: RichMessageContext,
+    path: &mut RequestFieldPath,
+    field: &'static str,
+) -> Result<(), RequestValidationError> {
+    let Some(text) = text else { return Ok(()) };
+    path.push_field(field);
+    let result = validate_rich_text_at(text, context, path);
+    path.pop();
+    result
+}
+
+fn validate_optional_caption(
+    caption: Option<&crate::types::RichBlockCaption>,
+    context: RichMessageContext,
+    path: &mut RequestFieldPath,
+) -> Result<(), RequestValidationError> {
+    let Some(caption) = caption else { return Ok(()) };
+    path.push_field("caption");
+    validate_rich_text_at(&caption.text, context, &mut path.clone())?;
+    validate_optional_rich_text(caption.credit.as_ref(), context, path, "credit")?;
+    path.pop();
+    Ok(())
+}
+
+fn validate_rich_text_at(
+    text: &crate::types::RichText,
+    context: RichMessageContext,
+    path: &mut RequestFieldPath,
+) -> Result<(), RequestValidationError> {
+    use crate::types::RichTextObject;
+
+    match text {
+        crate::types::RichText::Text(_) => {}
+        crate::types::RichText::List(items) => {
+            for (index, item) in items.iter().enumerate() {
+                path.push_index(index);
+                validate_rich_text_at(item, context, path)?;
+                path.pop();
+            }
+        }
+        crate::types::RichText::Object(object) => match object {
+            RichTextObject::Bold(value) => {
+                validate_nested_rich_text(&value.text, context, path, "bold")?;
+            }
+            RichTextObject::Italic(value) => {
+                validate_nested_rich_text(&value.text, context, path, "italic")?;
+            }
+            RichTextObject::Underline(value) => {
+                validate_nested_rich_text(&value.text, context, path, "underline")?;
+            }
+            RichTextObject::Strikethrough(value) => {
+                validate_nested_rich_text(&value.text, context, path, "strikethrough")?;
+            }
+            RichTextObject::Spoiler(value) => {
+                validate_nested_rich_text(&value.text, context, path, "spoiler")?;
+            }
+            RichTextObject::DateTime(value) => {
+                validate_nested_rich_text(&value.text, context, path, "date_time")?;
+            }
+            RichTextObject::TextMention(value) => {
+                validate_nested_rich_text(&value.text, context, path, "text_mention")?;
+            }
+            RichTextObject::Subscript(value) => {
+                validate_nested_rich_text(&value.text, context, path, "subscript")?;
+            }
+            RichTextObject::Superscript(value) => {
+                validate_nested_rich_text(&value.text, context, path, "superscript")?;
+            }
+            RichTextObject::Marked(value) => {
+                validate_nested_rich_text(&value.text, context, path, "marked")?;
+            }
+            RichTextObject::Code(value) => {
+                validate_nested_rich_text(&value.text, context, path, "code")?;
+            }
+            RichTextObject::Url(value) => {
+                validate_nested_rich_text(&value.text, context, path, "url")?;
+            }
+            RichTextObject::EmailAddress(value) => {
+                validate_nested_rich_text(&value.text, context, path, "email_address")?;
+            }
+            RichTextObject::PhoneNumber(value) => {
+                validate_nested_rich_text(&value.text, context, path, "phone_number")?;
+            }
+            RichTextObject::BankCardNumber(value) => {
+                validate_nested_rich_text(&value.text, context, path, "bank_card_number")?;
+            }
+            RichTextObject::Mention(value) => {
+                validate_nested_rich_text(&value.text, context, path, "mention")?;
+            }
+            RichTextObject::Hashtag(value) => {
+                validate_nested_rich_text(&value.text, context, path, "hashtag")?;
+            }
+            RichTextObject::Cashtag(value) => {
+                validate_nested_rich_text(&value.text, context, path, "cashtag")?;
+            }
+            RichTextObject::BotCommand(value) => {
+                validate_nested_rich_text(&value.text, context, path, "bot_command")?;
+            }
+            RichTextObject::Button(value) => {
+                path.push_field("button");
+                let mut button_path = path.clone();
+                button_path.push_field("button");
+                validate_button(&value.button, context, &button_path)?;
+                path.pop();
+            }
+            RichTextObject::CustomEmoji(_)
+            | RichTextObject::MathematicalExpression(_)
+            | RichTextObject::Anchor(_)
+            | RichTextObject::AnchorLink(_)
+            | RichTextObject::Reference(_)
+            | RichTextObject::ReferenceLink(_)
+            | RichTextObject::Unknown(_) => {}
+        },
+    }
+    Ok(())
+}
+
+fn validate_nested_rich_text(
+    text: &crate::types::RichText,
+    context: RichMessageContext,
+    path: &mut RequestFieldPath,
+    object: &'static str,
+) -> Result<(), RequestValidationError> {
+    path.push_field(object);
+    path.push_field("text");
+    let result = validate_rich_text_at(text, context, path);
+    path.pop();
+    path.pop();
+    result
 }
 
 fn validate_rich_media_content(
@@ -477,7 +707,7 @@ fn validate_file(
     path: &RequestFieldPath,
 ) -> Result<(), RequestValidationError> {
     if matches!(context, RichMessageContext::Draft | RichMessageContext::EditInline)
-        && file.needs_attach()
+        && !matches!(file.source_kind(), crate::types::InputFileSourceKind::FileId)
     {
         return Err(RequestValidationError::DirectUploadNotAllowed { path: path.clone() });
     }
@@ -524,7 +754,7 @@ pub(crate) fn validate_edit_ephemeral_message_text(
 
     if let Some(rich_message) = &payload.rich_message {
         let mut path = RequestFieldPath::field("rich_message");
-        validate_rich_message_at(rich_message, RichMessageContext::Edit, &mut path)?;
+        validate_rich_message_at(rich_message, RichMessageContext::EphemeralEdit, &mut path)?;
     }
     Ok(())
 }
@@ -545,20 +775,85 @@ pub(crate) fn validate_edit_message_text_inline(
     validate_rich_message_at(rich_message, RichMessageContext::EditInline, &mut path)
 }
 
+const INLINE_BUTTON_STYLES: &[&str] = &["danger", "success", "primary"];
+
+/// Validates the Bot API's native styles on a regular inline keyboard.
+pub(crate) fn validate_inline_keyboard_markup(
+    markup: &crate::types::InlineKeyboardMarkup,
+    field: &'static str,
+) -> Result<(), RequestValidationError> {
+    let mut path = RequestFieldPath::field(field);
+    for (row_index, row) in markup.inline_keyboard.iter().enumerate() {
+        path.push_index(row_index);
+        for (button_index, button) in row.iter().enumerate() {
+            path.push_index(button_index);
+            if let Some(style) = &button.style {
+                if !INLINE_BUTTON_STYLES.contains(&style.as_str()) {
+                    let mut style_path = path.clone();
+                    style_path.push_field("style");
+                    return Err(RequestValidationError::InvalidValue {
+                        path: style_path,
+                        reason: InvalidValueReason::MustBeOneOf(INLINE_BUTTON_STYLES),
+                    });
+                }
+            }
+            path.pop();
+        }
+        path.pop();
+    }
+    Ok(())
+}
+
+/// Applies keyboard validation to payload fields without making the payload
+/// generator aware of every request that can carry a reply markup.
+pub(crate) fn validate_payload_field<T: 'static>(
+    value: &T,
+    field: &'static str,
+) -> Result<(), RequestValidationError> {
+    let value = value as &dyn std::any::Any;
+    if let Some(markup) = value.downcast_ref::<crate::types::InlineKeyboardMarkup>() {
+        return validate_inline_keyboard_markup(markup, field);
+    }
+    if let Some(markup) = value.downcast_ref::<Option<crate::types::InlineKeyboardMarkup>>() {
+        if let Some(markup) = markup {
+            return validate_inline_keyboard_markup(markup, field);
+        }
+    }
+    if let Some(markup) = value.downcast_ref::<crate::types::ReplyMarkup>() {
+        return validate_reply_markup(markup, field);
+    }
+    if let Some(markup) = value.downcast_ref::<Option<crate::types::ReplyMarkup>>() {
+        if let Some(markup) = markup {
+            return validate_reply_markup(markup, field);
+        }
+    }
+    Ok(())
+}
+
+/// Validates an inline keyboard when it is wrapped in `ReplyMarkup`.
+pub(crate) fn validate_reply_markup(
+    markup: &crate::types::ReplyMarkup,
+    field: &'static str,
+) -> Result<(), RequestValidationError> {
+    if let crate::types::ReplyMarkup::InlineKeyboard(markup) = markup {
+        validate_inline_keyboard_markup(markup, field)?;
+    }
+    Ok(())
+}
+
 const BUTTON_STYLES: &[&str] = &["danger", "success", "primary", "link"];
 const BUTTON_ALIGNS: &[&str] = &["left", "center", "right"];
 
 fn validate_buttons(
     value: &crate::types::InputRichBlockButtons,
+    context: RichMessageContext,
     path: &RequestFieldPath,
 ) -> Result<(), RequestValidationError> {
     let mut buttons_path = path.clone();
     buttons_path.push_field("buttons");
     if !(1..=8).contains(&value.buttons.len()) {
-        let mut field_path = buttons_path.clone();
-        field_path.push_field("buttons");
         return Err(RequestValidationError::InvalidValue {
-            path: field_path,
+            path: buttons_path,
             reason: InvalidValueReason::MustBeInRange { min: 1, max: 8 },
         });
     }
@@ -577,15 +872,20 @@ fn validate_buttons(
     for (index, button) in value.buttons.iter().enumerate() {
         let mut button_path = buttons_path.clone();
         button_path.push_index(index);
-        validate_button(button, &button_path)?;
+        validate_button(button, context, &button_path)?;
     }
     Ok(())
 }
 
 fn validate_button(
     button: &crate::types::RichMessageButton,
+    context: RichMessageContext,
     path: &RequestFieldPath,
 ) -> Result<(), RequestValidationError> {
+    let mut text_path = path.clone();
+    text_path.push_field("text");
+    validate_rich_button_label(&button.text, &text_path)?;
+
     let action_count = [
         button.url.is_some(),
         button.callback_data.is_some(),
@@ -637,7 +937,54 @@ fn validate_button(
             });
         }
     }
+
+    if let Some(login_url) = &button.login_url {
+        if login_url.bot_username.is_some() {
+            let mut field_path = path.clone();
+            field_path.push_field("login_url");
+            field_path.push_field("bot_username");
+            return Err(RequestValidationError::InvalidValue {
+                path: field_path,
+                reason: InvalidValueReason::MustBeUnset,
+            });
+        }
+        if context == RichMessageContext::EphemeralEdit {
+            let mut field_path = path.clone();
+            field_path.push_field("login_url");
+            return Err(RequestValidationError::UnsupportedInContext { path: field_path, context });
+        }
+    }
     Ok(())
+}
+
+fn validate_rich_button_label(
+    text: &crate::types::RichText,
+    path: &RequestFieldPath,
+) -> Result<(), RequestValidationError> {
+    use crate::types::RichTextObject;
+
+    match text {
+        crate::types::RichText::Text(_) => Ok(()),
+        crate::types::RichText::List(items) => {
+            for (index, item) in items.iter().enumerate() {
+                let mut item_path = path.clone();
+                item_path.push_index(index);
+                validate_rich_button_label(item, &item_path)?;
+            }
+            Ok(())
+        }
+        crate::types::RichText::Object(RichTextObject::CustomEmoji(_)) => Ok(()),
+        crate::types::RichText::Object(RichTextObject::DateTime(value)) => {
+            let mut nested_path = path.clone();
+            nested_path.push_field("date_time");
+            nested_path.push_field("text");
+            validate_rich_button_label(&value.text, &nested_path)
+        }
+        crate::types::RichText::Object(_) => Err(RequestValidationError::InvalidValue {
+            path: path.clone(),
+            reason: InvalidValueReason::MustBeRichButtonLabel,
+        }),
+    }
 }
 
 fn validate_inline_result_at(
@@ -702,18 +1049,20 @@ mod tests {
         payloads::{
             AnswerGuestQuery, AnswerInlineQuery, AnswerWebAppQuery, EditEphemeralMessageText,
             EditEphemeralMessageTextSetters, EditMessageText, EditMessageTextInline,
-            SavePreparedInlineMessage, SendMessageDraft, SendRichMessage, SendRichMessageDraft,
+            SavePreparedInlineMessage, SendMessage, SendMessageDraft, SendRichMessage,
+            SendRichMessageDraft,
         },
         requests::{Payload, Request, Requester},
         types::{
-            FileId, InlineQueryId, InlineQueryResult, InlineQueryResultArticle, InputFile,
-            InputMediaDocument, InputMediaPhoto, InputMediaVideo, InputMediaVoiceNote,
-            InputMessageContent, InputRichBlock, InputRichBlockBlockQuotation,
-            InputRichBlockButtons, InputRichBlockDetails, InputRichBlockDocument,
-            InputRichBlockList, InputRichBlockListItem, InputRichBlockPhoto,
-            InputRichBlockThinking, InputRichBlockVideo, InputRichBlockVoiceNote, InputRichMessage,
-            InputRichMessageContent, InputRichMessageMedia, InputRichMessageMediaContent,
-            RichMessageButton, RichText, UserId,
+            FileId, InlineKeyboardButton, InlineQueryId, InlineQueryResult,
+            InlineQueryResultArticle, InputFile, InputMediaDocument, InputMediaPhoto,
+            InputMediaVideo, InputMediaVoiceNote, InputMessageContent, InputRichBlock,
+            InputRichBlockBlockQuotation, InputRichBlockButtons, InputRichBlockDetails,
+            InputRichBlockDocument, InputRichBlockList, InputRichBlockListItem,
+            InputRichBlockParagraph, InputRichBlockPhoto, InputRichBlockThinking,
+            InputRichBlockVideo, InputRichBlockVoiceNote, InputRichMessage,
+            InputRichMessageContent, InputRichMessageMedia, InputRichMessageMediaContent, LoginUrl,
+            ReplyMarkup, RichMessageButton, RichText, RichTextBold, RichTextButton, UserId,
         },
         Bot,
     };
@@ -995,7 +1344,139 @@ mod tests {
             )),
             caption: None,
         })]);
-        assert_eq!(url.validate_with(&RichMessageContext::Draft), Ok(()));
+        assert!(matches!(
+            url.validate_with(&RichMessageContext::Draft),
+            Err(RequestValidationError::DirectUploadNotAllowed { path })
+                if path.to_string() == "rich_message.blocks[0].photo.media"
+        ));
+    }
+
+    #[test]
+    fn rich_text_buttons_are_validated_recursively() {
+        let invalid_action =
+            InputRichMessage::blocks([InputRichBlock::Paragraph(InputRichBlockParagraph {
+                text: RichText::from(RichTextButton {
+                    button: Box::new(RichMessageButton::new("button")),
+                }),
+            })]);
+        assert!(matches!(
+            invalid_action.validate_with(&RichMessageContext::Send),
+            Err(RequestValidationError::InvalidValue {
+                reason: InvalidValueReason::MustHaveExactlyOneAction,
+                ..
+            })
+        ));
+
+        let invalid_label =
+            InputRichMessage::blocks([InputRichBlock::Paragraph(InputRichBlockParagraph {
+                text: RichText::from(RichTextButton {
+                    button: Box::new(RichMessageButton::callback(
+                        RichText::from(RichTextBold::new("bold")),
+                        "callback",
+                    )),
+                }),
+            })]);
+        assert!(matches!(
+            invalid_label.validate_with(&RichMessageContext::Send),
+            Err(RequestValidationError::InvalidValue {
+                reason: InvalidValueReason::MustBeRichButtonLabel,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn rich_button_login_url_constraints_are_context_aware() {
+        let login_url = LoginUrl {
+            url: "https://example.com/login".parse().unwrap(),
+            forward_text: None,
+            bot_username: Some("other_bot".to_owned()),
+            request_write_access: None,
+        };
+        let message =
+            InputRichMessage::blocks([InputRichBlock::Buttons(InputRichBlockButtons::new([
+                RichMessageButton {
+                    text: RichText::from("login"),
+                    style: None,
+                    url: None,
+                    callback_data: None,
+                    web_app: None,
+                    login_url: Some(login_url.clone()),
+                    switch_inline_query: None,
+                    switch_inline_query_current_chat: None,
+                    switch_inline_query_chosen_chat: None,
+                    copy_text: None,
+                    disabled: None,
+                },
+            ]))]);
+        assert!(matches!(
+            message.validate_with(&RichMessageContext::Send),
+            Err(RequestValidationError::InvalidValue {
+                reason: InvalidValueReason::MustBeUnset,
+                ..
+            })
+        ));
+
+        let ephemeral =
+            InputRichMessage::blocks([InputRichBlock::Buttons(InputRichBlockButtons::new([
+                RichMessageButton {
+                    text: RichText::from("login"),
+                    style: None,
+                    url: None,
+                    callback_data: None,
+                    web_app: None,
+                    login_url: Some(LoginUrl { bot_username: None, ..login_url }),
+                    switch_inline_query: None,
+                    switch_inline_query_current_chat: None,
+                    switch_inline_query_chosen_chat: None,
+                    copy_text: None,
+                    disabled: None,
+                },
+            ]))]);
+        assert!(matches!(
+            ephemeral.validate_with(&RichMessageContext::EphemeralEdit),
+            Err(RequestValidationError::UnsupportedInContext {
+                context: RichMessageContext::EphemeralEdit,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn rich_media_ids_follow_tg_link_identifier_constraints() {
+        let message = InputRichMessage::html("<img src=\"tg://photo?id=bad id\">").media([
+            InputRichMessageMedia::new(
+                "bad id",
+                InputRichMessageMediaContent::Photo(InputMediaPhoto::new(InputFile::file_id(
+                    FileId("photo".to_owned()),
+                ))),
+            ),
+        ]);
+
+        assert!(matches!(
+            message.validate_with(&RichMessageContext::Send),
+            Err(RequestValidationError::InvalidValue {
+                path,
+                reason: InvalidValueReason::MustBeAsciiIdentifier,
+            }) if path.to_string() == "rich_message.media[0].id"
+        ));
+    }
+
+    #[test]
+    fn inline_keyboard_styles_are_validated_before_dispatch() {
+        let mut payload = SendMessage::new(UserId(1), "text");
+        payload.reply_markup =
+            Some(ReplyMarkup::inline_kb([[
+                InlineKeyboardButton::callback("button", "callback").style("link")
+            ]]));
+
+        assert!(matches!(
+            Payload::validate(&payload),
+            Err(RequestValidationError::InvalidValue {
+                reason: InvalidValueReason::MustBeOneOf(_),
+                ..
+            })
+        ));
     }
 
     #[test]

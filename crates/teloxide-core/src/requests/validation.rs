@@ -706,9 +706,17 @@ fn validate_file(
     context: RichMessageContext,
     path: &RequestFieldPath,
 ) -> Result<(), RequestValidationError> {
-    if matches!(context, RichMessageContext::Draft | RichMessageContext::EditInline)
-        && !matches!(file.source_kind(), crate::types::InputFileSourceKind::FileId)
-    {
+    let allowed = match context {
+        RichMessageContext::Draft => {
+            matches!(file.source_kind(), crate::types::InputFileSourceKind::FileId)
+        }
+        RichMessageContext::EditInline => matches!(
+            file.source_kind(),
+            crate::types::InputFileSourceKind::FileId | crate::types::InputFileSourceKind::Url
+        ),
+        _ => true,
+    };
+    if !allowed {
         return Err(RequestValidationError::DirectUploadNotAllowed { path: path.clone() });
     }
     Ok(())
@@ -1342,6 +1350,33 @@ mod tests {
         })]);
         assert!(matches!(
             url.validate_with(&RichMessageContext::Draft),
+            Err(RequestValidationError::DirectUploadNotAllowed { path })
+                if path.to_string() == "rich_message.blocks[0].photo.media"
+        ));
+    }
+
+    #[test]
+    fn inline_edit_accepts_file_ids_and_urls_but_rejects_direct_uploads() {
+        let file_id = InputRichMessage::blocks([InputRichBlock::Photo(InputRichBlockPhoto {
+            photo: InputMediaPhoto::new(InputFile::file_id(FileId("file-id".to_owned()))),
+            caption: None,
+        })]);
+        assert_eq!(file_id.validate_with(&RichMessageContext::EditInline), Ok(()));
+
+        let url = InputRichMessage::blocks([InputRichBlock::Photo(InputRichBlockPhoto {
+            photo: InputMediaPhoto::new(InputFile::url(
+                "https://example.com/photo.jpg".parse().unwrap(),
+            )),
+            caption: None,
+        })]);
+        assert_eq!(url.validate_with(&RichMessageContext::EditInline), Ok(()));
+
+        let upload = InputRichMessage::blocks([InputRichBlock::Photo(InputRichBlockPhoto {
+            photo: InputMediaPhoto::new(InputFile::memory("photo")),
+            caption: None,
+        })]);
+        assert!(matches!(
+            upload.validate_with(&RichMessageContext::EditInline),
             Err(RequestValidationError::DirectUploadNotAllowed { path })
                 if path.to_string() == "rich_message.blocks[0].photo.media"
         ));

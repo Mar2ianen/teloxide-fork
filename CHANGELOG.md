@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Support for Telegram Bot API 10.3: rich-message buttons, documents, expandable quote blocks and compact tables; ephemeral message parameters and rich ephemeral editing; native Stop-button draft parameters; disabled inline buttons; force-reply markup flags; stopped-generation updates; and community-joined service messages.
 - Add integration coverage for 10.3 serialization, update routing and nested rich-document multipart uploads.
+- Enrich `Drafter` with a cloneable `DrafterHandle` for correlating and stopping native draft generations, configurable Telegram native-text/rich backends, and ergonomic Stop-button options.
+- Add backward-compatible builders for native button styles, custom button emojis, disabled rich buttons, rich-button alignment and legacy ephemeral send options.
+
+### Changed
+
+- Ordinary status-preview backends now strip ephemeral send parameters before using regular message edits; ephemeral messages must be updated through the dedicated `edit_ephemeral_message_*` methods.
+
+### Fixed
+
+- Rich-document draft validation now reports exact nested paths for direct document and thumbnail uploads.
 
 ## 0.19.0 - 2026-08-14
 

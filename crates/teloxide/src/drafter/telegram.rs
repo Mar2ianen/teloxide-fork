@@ -113,6 +113,8 @@ impl TelegramSendOptions {
         // identifier must be edited through editEphemeralMessage*, not
         // editMessageText. Status backends therefore must never inherit it.
         options.ephemeral_message_parameters = None;
+        options.receiver_user_id = None;
+        options.callback_query_id = None;
         options.allow_paid_broadcast = None;
         options.message_effect_id = None;
         options.suggested_post_parameters = None;
@@ -2264,6 +2266,8 @@ mod tests {
     fn status_preview_options_drop_final_only_fields() {
         let options = TelegramSendOptions::default()
             .ephemeral_message_parameters(EphemeralMessageParameters::new(UserId(7)))
+            .receiver_user_id(UserId(8))
+            .callback_query_id(CallbackQueryId("legacy".to_owned()))
             .allow_paid_broadcast(true)
             .message_effect_id(EffectId("effect".to_owned()))
             .suggested_post_parameters(SuggestedPostParameters { price: None, send_date: None })
@@ -2271,6 +2275,8 @@ mod tests {
         let preview_options = options.preview_safe();
 
         assert_eq!(preview_options.ephemeral_message_parameters, None);
+        assert_eq!(preview_options.receiver_user_id, None);
+        assert_eq!(preview_options.callback_query_id, None);
         assert_eq!(preview_options.allow_paid_broadcast, None);
         assert_eq!(preview_options.message_effect_id, None);
         assert_eq!(preview_options.suggested_post_parameters, None);
@@ -2358,6 +2364,7 @@ mod tests {
             .unwrap();
         assert!(handle.matches_generation_stopped(&update));
         handle.stop().await.unwrap();
+        assert_eq!(handle.generation(), None);
         drop(drafter);
     }
 

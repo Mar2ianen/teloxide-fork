@@ -97,7 +97,7 @@ module rustdoc and the time renderer API docs.
 
 ### Telegram Bot API 10.3
 
-The fork exposes the Bot API 10.3 surface in `teloxide-core`, including rich
+The current development line exposes the Bot API 10.3 surface in `teloxide-core`, including rich
 message buttons/documents, expandable quotations, compact tables, ephemeral
 message editing, native draft Stop controls, disabled buttons and the
 `stopped_message_generation` update. Existing inline-button code can opt into

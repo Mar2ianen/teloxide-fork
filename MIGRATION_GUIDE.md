@@ -65,6 +65,25 @@ let rich = InputRichMessage::blocks([
 `InlineKeyboardButton::icon_custom_emoji_id` expose the corresponding native
 button fields on the existing inline-button primitive.
 
+Rich-message button blocks are validated before dispatch. Applications that
+construct buttons with struct literals must provide exactly one action, use a
+supported style/alignment, keep callback data within 1-64 UTF-8 bytes, and
+send between one and eight buttons per row.
+
+`edit_ephemeral_message_text` now mirrors the Bot API's two optional content
+fields. Pass text through `.text(...)` or rich content through
+`.rich_message(...)`; at least one must be present, and both may be supplied:
+
+```rust
+let request = bot
+    .edit_ephemeral_message_text(chat_id, receiver_user_id, ephemeral_message_id)
+    .rich_message(InputRichMessage::html("<b>updated</b>"));
+```
+
+`ChatAdministratorRights::can_send_welcome_messages` is now a defaulted
+`bool`, matching `ChatMemberAdministrator`. Struct literals should use
+`false`/`true` instead of `None`/`Some(...)`.
+
 ### Ephemeral messages and status previews
 
 `TelegramSendOptions::ephemeral_message_parameters` is intended for an

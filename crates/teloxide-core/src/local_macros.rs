@@ -188,7 +188,11 @@ macro_rules! impl_payload {
                 }
             )?
 
-            impl_payload! { @validation $($validation)? }
+            impl_payload! {
+                @validation $($validation)?;
+                req { $($($fields : $FTy),*)? }
+                opt { $($($opt_fields : $OptFTy),*)? }
+            }
         }
 
         calculated_doc! {
@@ -215,13 +219,30 @@ macro_rules! impl_payload {
 
         impl_payload! { @[$(multipart = $($multipart_attr),*)?] $Method req { $($($fields),*)? } opt { $($($opt_fields),*)? } }
     };
-    (@validation $validation:path) => {
+    (@validation $validation:path; req { $($field:ident : $FTy:ty),* } opt { $($opt_field:ident : $OptFTy:ty),* }) => {
         fn validate(&self) -> Result<(), $crate::requests::RequestValidationError> {
-            $validation(self)
+            $validation(self)?;
+            $($crate::requests::validation::validate_payload_field(
+                &self.$field,
+                stringify!($field),
+            )?;)*
+            $($crate::requests::validation::validate_payload_field(
+                &self.$opt_field,
+                stringify!($opt_field),
+            )?;)*
+            Ok(())
         }
     };
-    (@validation) => {
+    (@validation ; req { $($field:ident : $FTy:ty),* } opt { $($opt_field:ident : $OptFTy:ty),* }) => {
         fn validate(&self) -> Result<(), $crate::requests::RequestValidationError> {
+            $($crate::requests::validation::validate_payload_field(
+                &self.$field,
+                stringify!($field),
+            )?;)*
+            $($crate::requests::validation::validate_payload_field(
+                &self.$opt_field,
+                stringify!($opt_field),
+            )?;)*
             Ok(())
         }
     };
@@ -1979,10 +2000,9 @@ macro_rules! requester_forward {
     (@method edit_ephemeral_message_text $body:ident $ty:ident) => {
         type EditEphemeralMessageText = $ty![EditEphemeralMessageText];
 
-        fn edit_ephemeral_message_text<C, T>(&self, chat_id: C, receiver_user_id: UserId, ephemeral_message_id: i32, text: T) -> Self::EditEphemeralMessageText where C: Into<Recipient>,
-        T: Into<String> {
+        fn edit_ephemeral_message_text<C>(&self, chat_id: C, receiver_user_id: UserId, ephemeral_message_id: i32) -> Self::EditEphemeralMessageText where C: Into<Recipient> {
             let this = self;
-            $body!(edit_ephemeral_message_text this (chat_id: C, receiver_user_id: UserId, ephemeral_message_id: i32, text: T))
+            $body!(edit_ephemeral_message_text this (chat_id: C, receiver_user_id: UserId, ephemeral_message_id: i32))
         }
     };
     (@method edit_ephemeral_message_media $body:ident $ty:ident) => {

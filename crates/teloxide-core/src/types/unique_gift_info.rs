@@ -1,4 +1,4 @@
-use crate::types::{OwnedGiftId, UniqueGift};
+use crate::types::{MessageEntity, OwnedGiftId, UniqueGift};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +39,15 @@ pub struct UniqueGiftInfo {
     #[serde(default, with = "crate::types::serde_opt_date_from_unix_timestamp")]
     #[cfg_attr(test, schemars(with = "Option<i64>"))]
     pub next_transfer_date: Option<DateTime<Utc>>,
+
+    /// Text associated with the gift.
+    pub text: Option<String>,
+
+    /// Special entities that appear in the gift text.
+    pub entities: Option<Vec<MessageEntity>>,
+
+    /// `true`, if the gift is only visible to the recipient.
+    pub is_private: Option<bool>,
 }
 
 /// Origin of the gift. Currently, either `Upgrade` for gifts upgraded from

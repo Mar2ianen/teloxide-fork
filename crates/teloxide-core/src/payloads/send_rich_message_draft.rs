@@ -20,6 +20,10 @@ impl_payload! {
         optional {
             /// Unique identifier for the target message thread
             pub message_thread_id: ThreadId,
+            /// Pass True to show the user a button to stop further drafts
+            pub can_stop: bool,
+            /// Pass True to keep the draft in the chat when the button is pressed
+            pub keep_on_stop: bool,
         }
     }
 }

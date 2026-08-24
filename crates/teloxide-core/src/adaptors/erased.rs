@@ -1228,7 +1228,6 @@ trait ErasableRequester<'a> {
         chat_id: Recipient,
         receiver_user_id: UserId,
         ephemeral_message_id: i32,
-        text: String,
     ) -> ErasedRequest<'a, EditEphemeralMessageText, Self::Err>;
 
     fn edit_ephemeral_message_media(
@@ -2630,14 +2629,12 @@ where
         chat_id: Recipient,
         receiver_user_id: UserId,
         ephemeral_message_id: i32,
-        text: String,
     ) -> ErasedRequest<'a, EditEphemeralMessageText, Self::Err> {
         Requester::edit_ephemeral_message_text(
             self,
             chat_id,
             receiver_user_id,
             ephemeral_message_id,
-            text,
         )
         .erase()
     }

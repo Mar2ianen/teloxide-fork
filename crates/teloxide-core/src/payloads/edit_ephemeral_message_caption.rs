@@ -23,6 +23,8 @@ impl_payload! {
             pub parse_mode: ParseMode,
             /// List of special entities that appear in the caption
             pub caption_entities: Vec<MessageEntity> [collect],
+            /// Pass True, if the caption must be shown above the message media
+            pub show_caption_above_media: bool,
             /// Inline keyboard for the message
             pub reply_markup: InlineKeyboardMarkup,
         }

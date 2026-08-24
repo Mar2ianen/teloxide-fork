@@ -237,4 +237,18 @@ impl InlineKeyboardButton {
     {
         Self::new(text, InlineKeyboardButtonKind::Disabled(DisabledButton {}))
     }
+
+    /// Sets the native button style introduced by Bot API 10.3.
+    #[must_use]
+    pub fn style(mut self, style: impl Into<String>) -> Self {
+        self.style = Some(style.into());
+        self
+    }
+
+    /// Sets the custom emoji displayed before the button text.
+    #[must_use]
+    pub fn icon_custom_emoji_id(mut self, id: CustomEmojiId) -> Self {
+        self.icon_custom_emoji_id = Some(id);
+        self
+    }
 }

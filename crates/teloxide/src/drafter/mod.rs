@@ -46,8 +46,8 @@ pub use machine::{DraftSink, Drafter, DrafterHandle};
 #[cfg(feature = "tracing")]
 pub use observer::TracingDrafterObserver;
 pub use observer::{
-    DrafterEvent, DrafterEventKind, DrafterMetricsCollector, DrafterMetricsSnapshot,
-    DrafterObserver, NoopDrafterObserver,
+    DrafterErrorEvent, DrafterErrorMetricsSnapshot, DrafterEvent, DrafterEventKind,
+    DrafterMetricsCollector, DrafterMetricsSnapshot, DrafterObserver, NoopDrafterObserver,
 };
 pub use outbound::{DrafterOutboundLimiter, DrafterRequestContext, DrafterRequestError};
 pub use source::{

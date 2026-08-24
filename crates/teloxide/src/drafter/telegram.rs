@@ -2009,12 +2009,27 @@ pub type SnapshotDrafter<P, B, L> = (Drafter<ReplacePreview<P>, B, L>, DraftSink
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TelegramDrafterPolicy {
     NativeInPrivateStatusInChats,
+    /// Require native drafts and reject non-private targets.
     NativeOnly,
     EditInPlaceOnly,
     StatusThenFinalOnly,
 }
 
 impl TelegramDrafterPolicy {
+    /// Select a mode and reject a target that cannot support it.
+    ///
+    /// Native Telegram drafts accept only private-chat recipients. Use this
+    /// checked method when the policy is selected from an actual Telegram
+    /// chat, rather than relying on the type-level `UserId` boundary alone.
+    pub const fn try_mode_for(self, is_private_chat: bool) -> Result<DrafterMode, DraftStartError> {
+        if matches!(self, Self::NativeOnly) && !is_private_chat {
+            return Err(DraftStartError::UnsupportedTarget(
+                "native Telegram drafts require a private chat",
+            ));
+        }
+        Ok(self.mode_for(is_private_chat))
+    }
+
     #[must_use]
     pub const fn mode_for(self, is_private_chat: bool) -> DrafterMode {
         match self {
@@ -2366,5 +2381,21 @@ mod tests {
 
         assert_eq!(disposition.delivery, DeliveryCertainty::Unknown);
         assert_eq!(disposition.class, DrafterErrorClass::Transient { retry_safe: false });
+    }
+
+    #[test]
+    fn checked_policy_rejects_native_only_for_non_private_chat() {
+        assert_eq!(
+            TelegramDrafterPolicy::NativeInPrivateStatusInChats.try_mode_for(false).unwrap(),
+            DrafterMode::StatusEditThenSendFinal
+        );
+        assert_eq!(
+            TelegramDrafterPolicy::NativeOnly.try_mode_for(true).unwrap(),
+            DrafterMode::NativeDraft
+        );
+        assert!(matches!(
+            TelegramDrafterPolicy::NativeOnly.try_mode_for(false),
+            Err(DraftStartError::UnsupportedTarget(_))
+        ));
     }
 }

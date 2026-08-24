@@ -769,6 +769,15 @@ remain legacy operation-level schedulers by default; scheduler-aware custom
 backends must keep success cleanup outside `finish`/`commit_segment` and opt
 into the new hook when they issue cleanup requests.
 
+The lifecycle observer keeps the original `record(DrafterEvent)` callback and
+adds the backward-compatible `record_error(DrafterErrorEvent)` hook. Classified
+preview, terminal and cleanup failures expose only `DrafterErrorClass` and
+`DeliveryCertainty`, so tracing and metrics can distinguish retry-safe,
+rejected and ambiguous outcomes without logging raw Telegram errors or preview
+payloads. `DrafterMetricsCollector::error_snapshot` exposes the class and
+delivery counters without changing the original lifecycle snapshot. Observer
+panics remain isolated from the drafter worker.
+
 Native Telegram drafters additionally expose `Drafter::handle()`. The cloneable
 `DrafterHandle` tracks the active `(chat_id, draft_id)` generation, matches a
 `MessageGenerationStopped` update, and invokes the same abort cleanup as the

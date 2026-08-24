@@ -113,6 +113,37 @@ consume `DrafterErrorEvent` with its `DrafterErrorClass` and
 hook defaults to the ordinary lifecycle `record` callback. Raw Telegram
 errors and preview payloads are not exposed by this diagnostic event.
 
+## 0.19 -> 0.20
+
+This release promotes the Bot API 10.3 and Drafter work from the development
+line:
+
+- `teloxide`: `0.19.x` -> `0.20.0`
+- `teloxide-core`: `0.15.x` -> `0.16.0`
+- `teloxide-macros`: remains `0.11.1` (no macro API changed)
+
+Update direct dependencies together:
+
+```toml
+teloxide = { version = "0.20.0", features = ["macros", "drafter", "rich-text"] }
+# Only if used directly:
+teloxide-core = "0.16.0"
+teloxide-macros = "0.11.1"
+```
+
+The release now validates rich-message buttons recursively, including inline
+`RichTextButton` objects. Rich button labels may contain only plain text,
+custom emoji and date-time objects; `LoginUrl.bot_username` is not accepted
+in rich buttons, and `login_url` is rejected for ephemeral rich edits.
+
+Rich drafts accept reusable Telegram `file_id` values only. Local uploads and
+URL-backed files are rejected before transport. Regular inline keyboard styles
+are also checked before dispatch and must be one of `danger`, `success` or
+`primary`.
+
+Rich media identifiers used by `tg://` links must be 1-64 ASCII characters from
+`[A-Za-z0-9_-]`.
+
 ## 0.18 -> 0.19
 
 This fork updates the workspace crates together:

@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Support for Telegram Bot API 10.3, including rich-message button/document blocks, expandable quotations, compact tables, ephemeral message parameters, draft Stop-button controls, disabled inline buttons, force-reply markup flags and new service/update types.
 - Add schema/codegen and integration coverage for the 10.3 request and type surface.
+- Add ergonomic builders for existing inline buttons and new rich-message buttons, including native styles, custom emojis, disabled buttons and rich-button alignment.
+- Report exact nested validation paths for direct uploads in rich draft documents.
 
 ## 0.15.0 - 2026-08-14
 

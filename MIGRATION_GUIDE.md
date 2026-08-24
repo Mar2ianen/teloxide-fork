@@ -15,6 +15,70 @@ updates, and community-joined service messages. Code that constructs affected
 structs with literals should initialize the new fields; constructors remain the
 preferred option where available.
 
+### Drafter Stop lifecycle
+
+Native text and rich-message drafters can opt into Telegram's Stop button and
+correlate `stopped_message_generation` updates without taking ownership of the
+worker away from the update handler:
+
+```rust
+let (drafter, sink) = TelegramDrafter::native_text_with_options(
+    bot,
+    UserId(7),
+    DraftConfig::default(),
+    InProcessRateLimiter::default(),
+    TelegramSendOptions::default(),
+    TelegramDraftOptions::default()
+        .stop_button()
+        .preserve_on_stop(),
+)?;
+let handle = drafter.handle();
+
+// In the stopped-generation update handler:
+if handle.matches_generation_stopped(&stopped) {
+    handle.stop().await?;
+}
+```
+
+`handle.stop()` performs the same backend cleanup as `Drafter::abort`. After
+the handle stops a worker, do not call `finish` on the owning `Drafter`.
+`native_rich_with_options` provides the equivalent API for rich-message drafts.
+
+### Rich button builders
+
+The new fields remain available for struct-literal users, while the common
+button flow can use backward-compatible constructors and builders:
+
+```rust
+let rich = InputRichMessage::blocks([
+    InputRichBlock::Buttons(
+        InputRichBlockButtons::new([
+            RichMessageButton::callback("Continue", "continue").style("primary"),
+            RichMessageButton::disabled("Unavailable"),
+        ])
+        .align("center"),
+    ),
+]);
+```
+
+`InlineKeyboardButton::style` and
+`InlineKeyboardButton::icon_custom_emoji_id` expose the corresponding native
+button fields on the existing inline-button primitive.
+
+### Ephemeral messages and status previews
+
+`TelegramSendOptions::ephemeral_message_parameters` is intended for an
+ephemeral send. `StatusThenText` and `StatusThenRich` deliberately remove that
+option from their temporary status request because the status lifecycle edits
+ordinary messages. Update a true ephemeral message with the dedicated
+`edit_ephemeral_message_text`, `edit_ephemeral_message_media`,
+`edit_ephemeral_message_caption` or `edit_ephemeral_message_reply_markup`
+methods instead.
+
+Direct uploads nested in rich draft documents are rejected before transport;
+the validation error path identifies `rich_message.blocks[N].document.media`
+or `.document.thumbnail` precisely.
+
 ## 0.18 -> 0.19
 
 This fork updates the workspace crates together:

@@ -3,7 +3,8 @@ use serde::{de::MapAccess, Deserialize, Serialize, Serializer};
 use serde_json::Value;
 
 use crate::types::{
-    BusinessConnection, BusinessMessagesDeleted, CallbackQuery, Chat, ChatBoostRemoved,
+    BotSubscriptionUpdated, BusinessConnection, BusinessMessagesDeleted, CallbackQuery, Chat,
+    ChatBoostRemoved,
     ChatBoostUpdated, ChatJoinRequest, ChatMemberUpdated, ChosenInlineResult, InlineQuery,
     ManagedBotUpdated, Message, MessageReactionCountUpdated, MessageReactionUpdated,
     PaidMediaPurchased, Poll, PollAnswer, PreCheckoutQuery, ShippingQuery, User,
@@ -80,6 +81,9 @@ pub enum UpdateKind {
     /// A managed bot was created, or token or owner of a managed bot was
     /// changed.
     ManagedBot(ManagedBotUpdated),
+
+    /// A user payment subscription changed.
+    Subscription(BotSubscriptionUpdated),
 
     /// A reaction to a message was changed by a user. The bot must be an
     /// administrator in the chat and must explicitly specify
@@ -205,6 +209,7 @@ impl Update {
             ChatBoost(b) => return b.boost.source.user(),
             RemovedChatBoost(b) => return b.source.user(),
             ManagedBot(m) => &m.user,
+            Subscription(update) => &update.user,
 
             MessageReactionCount(_) | DeletedBusinessMessages(_) | Poll(_) | Error(_) => {
                 return None
@@ -302,6 +307,7 @@ impl Update {
             | UpdateKind::MessageReactionCount(_)
             | UpdateKind::BusinessConnection(_)
             | UpdateKind::ManagedBot(_)
+            | UpdateKind::Subscription(_)
             | UpdateKind::DeletedBusinessMessages(_)
             | UpdateKind::Error(_) => i5(empty()),
         }
@@ -333,6 +339,7 @@ impl Update {
             InlineQuery(_)
             | BusinessConnection(_)
             | ManagedBot(_)
+            | Subscription(_)
             | ChosenInlineResult(_)
             | ShippingQuery(_)
             | PreCheckoutQuery(_)
@@ -421,6 +428,10 @@ impl<'de> Deserialize<'de> for UpdateKind {
                         "managed_bot" => {
                             map.next_value::<ManagedBotUpdated>().ok().map(UpdateKind::ManagedBot)
                         }
+                        "subscription" => map
+                            .next_value::<BotSubscriptionUpdated>()
+                            .ok()
+                            .map(UpdateKind::Subscription),
                         "message_reaction" => map
                             .next_value::<MessageReactionUpdated>()
                             .ok()
@@ -514,6 +525,9 @@ impl Serialize for UpdateKind {
                 s.serialize_newtype_variant(name, 7, "deleted_business_messages", v)
             }
             UpdateKind::ManagedBot(v) => s.serialize_newtype_variant(name, 24, "managed_bot", v),
+            UpdateKind::Subscription(v) => {
+                s.serialize_newtype_variant(name, 25, "subscription", v)
+            }
             UpdateKind::MessageReaction(v) => {
                 s.serialize_newtype_variant(name, 8, "message_reaction", v)
             }

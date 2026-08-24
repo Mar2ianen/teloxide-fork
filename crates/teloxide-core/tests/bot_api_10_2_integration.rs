@@ -2,9 +2,10 @@ use teloxide_core::{
     payloads::EditMessageText,
     requests::{MultipartPayload, MultipartRequest},
     types::{
-        ChatId, ChatJoinRequest, InputFile, InputMediaPhoto, InputRichMessage,
-        InputRichMessageMedia, InputRichMessageMediaContent, MediaKind, Message, MessageId,
-        MessageKind, UserId,
+        AllowedUpdate, BotCommand, BotSubscriptionState, ChatFullInfo, ChatId, ChatJoinRequest,
+        InputFile, InputMediaPhoto, InputRichMessage, InputRichMessageMedia,
+        InputRichMessageMediaContent, MediaKind, Message, MessageId, MessageKind, Update,
+        UpdateKind, UserId,
     },
     Bot,
 };
@@ -17,7 +18,7 @@ fn rich_message_response_preserves_content_and_ephemeral_identifiers() {
         "chat": {"id": 1, "type": "private", "first_name": "receiver"},
         "receiver_user": {"id": 7, "is_bot": false, "first_name": "receiver"},
         "ephemeral_message_id": 99,
-        "rich_message": {"blocks": []}
+        "rich_message": {"blocks": [], "is_rtl": true}
     }))
     .unwrap();
 
@@ -31,6 +32,7 @@ fn rich_message_response_preserves_content_and_ephemeral_identifiers() {
         panic!("expected rich message media kind");
     };
     assert!(rich.rich_message.blocks.is_empty());
+    assert_eq!(rich.rich_message.is_rtl, Some(true));
 }
 
 #[test]
@@ -68,4 +70,79 @@ fn join_request_keeps_query_id_needed_by_query_methods() {
     .unwrap();
 
     assert_eq!(request.query_id.as_deref(), Some("join-query"));
+}
+
+#[test]
+fn ephemeral_command_flag_serializes() {
+    let command = BotCommand::new("private", "Private reply").is_ephemeral(true);
+    assert_eq!(
+        serde_json::to_value(command).unwrap(),
+        serde_json::json!({
+            "command": "private",
+            "description": "Private reply",
+            "is_ephemeral": true,
+        })
+    );
+}
+
+#[test]
+fn community_service_messages_and_chat_info_preserve_community() {
+    let added: Message = serde_json::from_value(serde_json::json!({
+        "message_id": 1,
+        "date": 0,
+        "chat": {"id": -100, "type": "supergroup", "title": "group"},
+        "community_chat_added": {"community": {"id": 42, "name": "Example"}}
+    }))
+    .unwrap();
+    assert_eq!(added.community_chat_added().unwrap().community.name, "Example");
+
+    let removed: Message = serde_json::from_value(serde_json::json!({
+        "message_id": 2,
+        "date": 0,
+        "chat": {"id": -100, "type": "supergroup", "title": "group"},
+        "community_chat_removed": {}
+    }))
+    .unwrap();
+    assert!(removed.community_chat_removed().is_some());
+
+    let chat: ChatFullInfo = serde_json::from_value(serde_json::json!({
+        "id": -100,
+        "type": "supergroup",
+        "title": "group",
+        "accent_color_id": 0,
+        "max_reaction_count": 1,
+        "accepted_gift_types": {
+            "unlimited_gifts": true,
+            "limited_gifts": true,
+            "unique_gifts": true,
+            "premium_subscription": true,
+            "gifts_from_channels": false
+        },
+        "community": {"id": 42, "name": "Example"}
+    }))
+    .unwrap();
+    assert_eq!(chat.community.unwrap().id, 42);
+}
+
+#[test]
+fn subscription_update_is_routed_and_allowed() {
+    let update: Update = serde_json::from_value(serde_json::json!({
+        "update_id": 1,
+        "subscription": {
+            "user": {"id": 7, "is_bot": false, "first_name": "subscriber"},
+            "invoice_payload": "sub-42",
+            "state": "active"
+        }
+    }))
+    .unwrap();
+
+    let UpdateKind::Subscription(subscription) = update.kind else {
+        panic!("expected subscription update");
+    };
+    assert_eq!(subscription.state, BotSubscriptionState::Active);
+    assert_eq!(subscription.user.id, UserId(7));
+    assert_eq!(
+        serde_json::to_value(AllowedUpdate::Subscription).unwrap(),
+        serde_json::json!("subscription")
+    );
 }

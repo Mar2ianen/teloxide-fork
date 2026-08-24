@@ -769,6 +769,18 @@ remain legacy operation-level schedulers by default; scheduler-aware custom
 backends must keep success cleanup outside `finish`/`commit_segment` and opt
 into the new hook when they issue cleanup requests.
 
+Native Telegram drafters additionally expose `Drafter::handle()`. The cloneable
+`DrafterHandle` tracks the active `(chat_id, draft_id)` generation, matches a
+`MessageGenerationStopped` update, and invokes the same abort cleanup as the
+owning drafter. `TelegramDrafter::native_text_with_options` and
+`native_rich_with_options` make the native `can_stop`/`keep_on_stop` settings
+available without constructing the backend manually. Once a handle has stopped
+the worker, the owning `Drafter` must not be used for `finish`.
+
+Ephemeral send parameters are intentionally not copied into ordinary status
+previews: those previews use `editMessage*`, while ephemeral responses require
+the dedicated `editEphemeralMessage*` methods.
+
 ## Class-aware windows
 
 `OutboundClassWindowLimit { class, capacity, window }` applies to one exact

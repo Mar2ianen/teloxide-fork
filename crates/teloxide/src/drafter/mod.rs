@@ -28,7 +28,8 @@ mod source;
 mod telegram;
 
 pub use backend::{
-    CleanupFailure, DraftId, DrafterBackend, DrafterCapabilities, DrafterMode, PreviewAck,
+    CleanupFailure, DraftId, DrafterBackend, DrafterCapabilities, DrafterGeneration, DrafterMode,
+    PreviewAck,
 };
 pub use config::{DraftConfig, DraftSchedule};
 pub use error::{
@@ -41,7 +42,7 @@ pub use limiter::{
     DrafterRateLimitKey, DrafterRateLimitScope, DrafterRateLimiter, DrafterRequestClass,
     InProcessRateLimiter,
 };
-pub use machine::{DraftSink, Drafter};
+pub use machine::{DraftSink, Drafter, DrafterHandle};
 #[cfg(feature = "tracing")]
 pub use observer::TracingDrafterObserver;
 pub use observer::{

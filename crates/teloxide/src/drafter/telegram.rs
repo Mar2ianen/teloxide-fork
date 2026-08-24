@@ -109,6 +109,10 @@ pub struct TelegramSendOptions {
 impl TelegramSendOptions {
     fn preview_safe(&self) -> Self {
         let mut options = self.clone();
+        // An ephemeral send is not a regular status message: the returned
+        // identifier must be edited through editEphemeralMessage*, not
+        // editMessageText. Status backends therefore must never inherit it.
+        options.ephemeral_message_parameters = None;
         options.allow_paid_broadcast = None;
         options.message_effect_id = None;
         options.suggested_post_parameters = None;
@@ -137,6 +141,23 @@ impl TelegramSendOptions {
     #[must_use]
     pub fn direct_messages_topic_id(mut self, value: TopicId) -> Self {
         self.direct_messages_topic_id = Some(value);
+        self
+    }
+
+    /// Compatibility builder for the pre-10.3 receiver field.
+    ///
+    /// The value is encoded into [`EphemeralMessageParameters`] when the
+    /// request is built; explicit `ephemeral_message_parameters` wins.
+    #[must_use]
+    pub fn receiver_user_id(mut self, value: UserId) -> Self {
+        self.receiver_user_id = Some(value);
+        self
+    }
+
+    /// Compatibility builder for the pre-10.3 callback-query field.
+    #[must_use]
+    pub fn callback_query_id(mut self, value: CallbackQueryId) -> Self {
+        self.callback_query_id = Some(value);
         self
     }
 
@@ -240,6 +261,18 @@ impl TelegramDraftOptions {
     pub fn keep_on_stop(mut self, value: bool) -> Self {
         self.keep_on_stop = Some(value);
         self
+    }
+
+    /// Enables Telegram's native Stop button for streamed drafts.
+    #[must_use]
+    pub fn stop_button(self) -> Self {
+        self.can_stop(true)
+    }
+
+    /// Keeps the partial draft when the user presses Telegram's Stop button.
+    #[must_use]
+    pub fn preserve_on_stop(self) -> Self {
+        self.keep_on_stop(true)
     }
 }
 
@@ -354,6 +387,12 @@ where
         request = request.direct_messages_topic_id(value);
     }
     if let Some(value) = options.ephemeral_message_parameters.clone() {
+        request = request.ephemeral_message_parameters(value);
+    } else if let Some(receiver_user_id) = options.receiver_user_id {
+        let mut value = EphemeralMessageParameters::new(receiver_user_id);
+        if let Some(callback_query_id) = options.callback_query_id.as_ref() {
+            value = value.callback_query_id(callback_query_id.0.clone());
+        }
         request = request.ephemeral_message_parameters(value);
     }
     if let Some(value) = options.disable_notification {
@@ -2007,6 +2046,30 @@ impl TelegramDrafter {
         Drafter::snapshots(NativeTextBackend::new(bot, chat_id), limiter, config)
     }
 
+    /// Native text drafter with explicit send and draft options.
+    pub fn native_text_with_options<R, L>(
+        bot: R,
+        chat_id: UserId,
+        config: DraftConfig,
+        limiter: L,
+        send_options: TelegramSendOptions,
+        draft_options: TelegramDraftOptions,
+    ) -> Result<SnapshotDrafter<String, NativeTextBackend<R>, L>, DraftStartError>
+    where
+        R: Requester<Err = RequestError> + Clone + Send + Sync + 'static,
+        R::SendMessageDraft: Send,
+        R::SendMessage: Send,
+        L: super::DrafterRateLimiter,
+    {
+        Drafter::snapshots(
+            NativeTextBackend::new(bot, chat_id)
+                .send_options(send_options)
+                .draft_options(draft_options),
+            limiter,
+            config,
+        )
+    }
+
     pub fn native_rich<R, L>(
         bot: R,
         chat_id: UserId,
@@ -2020,6 +2083,30 @@ impl TelegramDrafter {
         L: super::DrafterRateLimiter,
     {
         Drafter::snapshots(NativeRichBackend::new(bot, chat_id), limiter, config)
+    }
+
+    /// Native rich-message drafter with explicit send and draft options.
+    pub fn native_rich_with_options<R, L>(
+        bot: R,
+        chat_id: UserId,
+        config: DraftConfig,
+        limiter: L,
+        send_options: TelegramSendOptions,
+        draft_options: TelegramDraftOptions,
+    ) -> Result<SnapshotDrafter<InputRichMessage, NativeRichBackend<R>, L>, DraftStartError>
+    where
+        R: Requester<Err = RequestError> + Clone + Send + Sync + 'static,
+        R::SendRichMessageDraft: Send,
+        R::SendRichMessage: Send,
+        L: super::DrafterRateLimiter,
+    {
+        Drafter::snapshots(
+            NativeRichBackend::new(bot, chat_id)
+                .send_options(send_options)
+                .draft_options(draft_options),
+            limiter,
+            config,
+        )
     }
 
     pub fn edit_in_place<R, L>(
@@ -2133,6 +2220,18 @@ mod tests {
             request.ephemeral_message_parameters,
             Some(EphemeralMessageParameters::new(UserId(7)).callback_query_id("query"))
         );
+
+        let legacy = TelegramSendOptions::default()
+            .receiver_user_id(UserId(8))
+            .callback_query_id(CallbackQueryId("legacy".to_owned()));
+        let rich_request = apply_rich_send_options(
+            Bot::new("token").send_rich_message(ChatId(1), InputRichMessage::html("preview")),
+            &legacy,
+        );
+        assert_eq!(
+            rich_request.ephemeral_message_parameters,
+            Some(EphemeralMessageParameters::new(UserId(8)).callback_query_id("legacy"))
+        );
     }
 
     #[test]
@@ -2149,12 +2248,14 @@ mod tests {
     #[test]
     fn status_preview_options_drop_final_only_fields() {
         let options = TelegramSendOptions::default()
+            .ephemeral_message_parameters(EphemeralMessageParameters::new(UserId(7)))
             .allow_paid_broadcast(true)
             .message_effect_id(EffectId("effect".to_owned()))
             .suggested_post_parameters(SuggestedPostParameters { price: None, send_date: None })
             .reply_markup(ReplyMarkup::inline_kb(std::iter::empty::<Vec<InlineKeyboardButton>>()));
         let preview_options = options.preview_safe();
 
+        assert_eq!(preview_options.ephemeral_message_parameters, None);
         assert_eq!(preview_options.allow_paid_broadcast, None);
         assert_eq!(preview_options.message_effect_id, None);
         assert_eq!(preview_options.suggested_post_parameters, None);
@@ -2189,8 +2290,8 @@ mod tests {
         let draft_options = TelegramDraftOptions::default()
             .message_thread_id(ThreadId(MessageId(3)))
             .parse_mode(ParseMode::Html)
-            .can_stop(true)
-            .keep_on_stop(true);
+            .stop_button()
+            .preserve_on_stop();
         let draft = apply_draft_options(
             Bot::new("token").send_message_draft(UserId(1), 7).text("preview"),
             &draft_options,
@@ -2217,6 +2318,32 @@ mod tests {
             &edit_options,
         );
         assert_eq!(edit.parse_mode, Some(ParseMode::Html));
+    }
+
+    #[tokio::test]
+    async fn native_generation_can_be_matched_and_stopped_through_handle() {
+        let (drafter, _sink) = TelegramDrafter::native_text_with_options(
+            Bot::new("token"),
+            UserId(7),
+            DraftConfig::default(),
+            InProcessRateLimiter::default(),
+            TelegramSendOptions::default(),
+            TelegramDraftOptions::default().stop_button(),
+        )
+        .unwrap();
+        let generation = drafter.generation().expect("native backend generation");
+        let handle = drafter.handle();
+        assert_eq!(handle.generation(), Some(generation));
+
+        let update: teloxide_core::types::MessageGenerationStopped =
+            serde_json::from_value(serde_json::json!({
+                "chat": {"id": 7, "type": "private", "first_name": "User"},
+                "draft_id": generation.draft_id.get()
+            }))
+            .unwrap();
+        assert!(handle.matches_generation_stopped(&update));
+        handle.stop().await.unwrap();
+        drop(drafter);
     }
 
     #[test]

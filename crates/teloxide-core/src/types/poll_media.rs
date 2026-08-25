@@ -206,3 +206,19 @@ impl InputPollOptionMedia {
         files.into_iter()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn input_poll_option_link_serializes() {
+        let media =
+            InputPollOptionMedia::Link(crate::types::InputMediaLink::new("https://example.com"));
+
+        assert_eq!(
+            serde_json::to_value(media).unwrap(),
+            serde_json::json!({"type": "link", "url": "https://example.com"})
+        );
+    }
+}

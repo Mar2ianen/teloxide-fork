@@ -12193,7 +12193,7 @@
         "default": true
       },
       "documentation_link": "https://core.telegram.org/bots/api#editephemeralmessagemedia",
-      "maybe_multipart": false
+      "maybe_multipart": true
     },
     {
       "name": "editEphemeralMessageCaption",

@@ -126,13 +126,13 @@ mod tests {
         requests::{MultipartPayload, MultipartRequest, Requester},
         types::{
             BusinessConnectionId, ChatId, InlineQueryId, InlineQueryResult,
-            InlineQueryResultArticle, InputFile, InputMediaAnimation, InputMediaDocument,
-            InputMediaLivePhoto, InputMediaPhoto, InputMediaSticker, InputMediaVideo,
-            InputMessageContent, InputMessageContentText, InputPollMedia, InputPollOption,
-            InputPollOptionMedia, InputRichBlock, InputRichBlockPhoto, InputRichMessage,
-            InputRichMessageContent, InputRichMessageMedia, InputRichMessageMediaContent,
-            InputStoryContent, InputStoryContentPhoto, InputStoryContentVideo, Seconds, StoryId,
-            UserId,
+            InlineQueryResultArticle, InputFile, InputMedia, InputMediaAnimation,
+            InputMediaDocument, InputMediaLivePhoto, InputMediaPhoto, InputMediaSticker,
+            InputMediaVideo, InputMessageContent, InputMessageContentText, InputPollMedia,
+            InputPollOption, InputPollOptionMedia, InputRichBlock, InputRichBlockPhoto,
+            InputRichMessage, InputRichMessageContent, InputRichMessageMedia,
+            InputRichMessageMediaContent, InputStoryContent, InputStoryContentPhoto,
+            InputStoryContentVideo, Seconds, StoryId, UserId,
         },
         Bot,
     };
@@ -183,6 +183,18 @@ mod tests {
         );
 
         assert_multipart(request);
+    }
+
+    #[test]
+    fn ephemeral_message_media_uses_multipart_request() {
+        fn assert_multipart(_: MultipartRequest<crate::payloads::EditEphemeralMessageMedia>) {}
+
+        assert_multipart(Bot::new("token").edit_ephemeral_message_media(
+            UserId(1),
+            UserId(2),
+            3,
+            InputMedia::Photo(InputMediaPhoto::new(file())),
+        ));
     }
 
     #[test]

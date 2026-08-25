@@ -2248,7 +2248,7 @@ impl Requester for Bot {
         )
     }
 
-    type EditEphemeralMessageMedia = JsonRequest<payloads::EditEphemeralMessageMedia>;
+    type EditEphemeralMessageMedia = MultipartRequest<payloads::EditEphemeralMessageMedia>;
 
     fn edit_ephemeral_message_media<C>(
         &self,

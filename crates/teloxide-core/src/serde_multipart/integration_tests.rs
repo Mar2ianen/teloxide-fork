@@ -6,10 +6,11 @@ use serde_json::Value;
 
 use super::to_form_ref;
 use crate::{
-    payloads::SendPoll,
+    payloads::{EditEphemeralMessageMedia, SendPoll},
     types::{
-        ChatId, InputFile, InputMediaAnimation, InputMediaLivePhoto, InputMediaSticker,
-        InputMediaVideo, InputPollMedia, InputPollOption, InputPollOptionMedia,
+        ChatId, InputFile, InputMediaAnimation, InputMediaLivePhoto, InputMediaPhoto,
+        InputMediaSticker, InputMediaVideo, InputPollMedia, InputPollOption, InputPollOptionMedia,
+        UserId,
     },
 };
 
@@ -121,4 +122,47 @@ async fn send_poll_attach_ids_match_multipart_file_parts() {
     assert_eq!(attach_ids.len(), attach_id_set.len(), "duplicate attach:// id");
     assert_eq!(attach_ids.len(), 8);
     assert_eq!(attach_id_set, file_part_ids);
+}
+
+#[tokio::test]
+async fn edit_ephemeral_message_media_attach_ids_match_multipart_file_parts() {
+    let payload = EditEphemeralMessageMedia::new(
+        ChatId(1),
+        UserId(2),
+        3,
+        crate::types::InputMedia::Photo(InputMediaPhoto::new(file(b"photo", "photo.bin"))),
+    );
+    let form = to_form_ref(&payload).unwrap().await;
+    let mut request =
+        Client::new().post("http://localhost.invalid").multipart(form).build().unwrap();
+
+    let boundary = request.headers()[CONTENT_TYPE]
+        .to_str()
+        .unwrap()
+        .split("boundary=")
+        .nth(1)
+        .expect("multipart boundary")
+        .to_owned();
+    let body = request.body_mut().take().unwrap().collect().await.unwrap().to_bytes();
+    let parts = multipart_parts(&body, &boundary);
+
+    let media = parts.get("media").expect("missing media part");
+    let mut attach_ids = Vec::new();
+    collect_attach_ids(&serde_json::from_slice(media).unwrap(), &mut attach_ids);
+
+    let file_part_ids: BTreeSet<_> = parts
+        .keys()
+        .filter(|name| {
+            !matches!(
+                name.as_str(),
+                "chat_id" | "receiver_user_id" | "ephemeral_message_id" | "media"
+            )
+        })
+        .cloned()
+        .collect();
+    let attach_id_set: BTreeSet<_> = attach_ids.iter().cloned().collect();
+
+    assert_eq!(attach_ids, attach_id_set.iter().cloned().collect::<Vec<_>>());
+    assert_eq!(attach_id_set, file_part_ids);
+    assert_eq!(parts.get(&attach_ids[0]).map(Vec::as_slice), Some(b"photo".as_slice()));
 }

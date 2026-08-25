@@ -3,9 +3,9 @@ use teloxide_core::{
     requests::MultipartPayload,
     types::{
         ChatId, CommunityChatJoined, EphemeralMessageParameters, InlineKeyboardButton,
-        InlineKeyboardMarkup, InputFile, InputMediaDocument, InputRichBlock,
+        InlineKeyboardMarkup, InputFile, InputMediaDocument, InputRichBlock, InputRichBlockButtons,
         InputRichBlockDocument, InputRichMessage, KeyboardMarkup, RichBlock, RichBlockKind,
-        RichMessage, RichText, Update, UpdateKind, UserId,
+        RichMessage, RichMessageButton, RichText, Update, UpdateKind, UserId,
     },
 };
 
@@ -92,6 +92,20 @@ fn rich_document_collects_uploaded_files() {
 #[test]
 fn disabled_and_force_reply_markup_serializes() {
     assert_eq!(
+        serde_json::to_value(
+            InlineKeyboardButton::callback("Open", "open")
+                .style("primary")
+                .icon_custom_emoji_id(teloxide_core::types::CustomEmojiId("emoji".into()))
+        )
+        .unwrap(),
+        serde_json::json!({
+            "text": "Open",
+            "callback_data": "open",
+            "style": "primary",
+            "icon_custom_emoji_id": "emoji"
+        })
+    );
+    assert_eq!(
         serde_json::to_value(InlineKeyboardButton::disabled("Unavailable")).unwrap(),
         serde_json::json!({"text": "Unavailable", "disabled": {}})
     );
@@ -102,6 +116,30 @@ fn disabled_and_force_reply_markup_serializes() {
     assert_eq!(
         serde_json::to_value(KeyboardMarkup::default().force_reply()).unwrap()["force_reply"],
         true
+    );
+}
+
+#[test]
+fn rich_button_primitives_expose_native_style_and_alignment() {
+    let buttons = InputRichBlockButtons::new([
+        RichMessageButton::callback("Open", "open").style("primary"),
+        RichMessageButton::disabled("Unavailable"),
+    ])
+    .align("center");
+    let message = InputRichMessage::blocks([InputRichBlock::Buttons(buttons)]);
+
+    assert_eq!(
+        serde_json::to_value(message).unwrap(),
+        serde_json::json!({
+            "blocks": [{
+                "type": "buttons",
+                "buttons": [
+                    {"text": "Open", "callback_data": "open", "style": "primary"},
+                    {"text": "Unavailable", "disabled": {}}
+                ],
+                "align": "center"
+            }]
+        })
     );
 }
 

@@ -463,6 +463,20 @@ pub struct InputRichBlockButtons {
     pub align: Option<String>,
 }
 
+impl InputRichBlockButtons {
+    /// Creates a rich-message buttons block.
+    pub fn new(buttons: impl IntoIterator<Item = RichMessageButton>) -> Self {
+        Self { buttons: buttons.into_iter().collect(), align: None }
+    }
+
+    /// Sets the native alignment for the buttons block.
+    #[must_use]
+    pub fn align(mut self, align: impl Into<String>) -> Self {
+        self.align = Some(align.into());
+        self
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockDocument {

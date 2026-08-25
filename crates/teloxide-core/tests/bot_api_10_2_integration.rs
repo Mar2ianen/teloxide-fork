@@ -143,7 +143,6 @@ fn subscription_update_is_routed_and_allowed() {
         }
     }))
     .unwrap();
-
     let UpdateKind::Subscription(subscription) = update.kind else {
         panic!("expected subscription update");
     };

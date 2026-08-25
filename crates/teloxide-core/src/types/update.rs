@@ -4,11 +4,10 @@ use serde_json::Value;
 
 use crate::types::{
     BotSubscriptionUpdated, BusinessConnection, BusinessMessagesDeleted, CallbackQuery, Chat,
-    ChatBoostRemoved,
-    ChatBoostUpdated, ChatJoinRequest, ChatMemberUpdated, ChosenInlineResult, InlineQuery,
-    ManagedBotUpdated, Message, MessageGenerationStopped, MessageReactionCountUpdated,
-    MessageReactionUpdated,
-    PaidMediaPurchased, Poll, PollAnswer, PreCheckoutQuery, ShippingQuery, User,
+    ChatBoostRemoved, ChatBoostUpdated, ChatJoinRequest, ChatMemberUpdated, ChosenInlineResult,
+    InlineQuery, ManagedBotUpdated, Message, MessageGenerationStopped, MessageReactionCountUpdated,
+    MessageReactionUpdated, PaidMediaPurchased, Poll, PollAnswer, PreCheckoutQuery, ShippingQuery,
+    User,
 };
 
 /// This [object] represents an incoming update.
@@ -219,9 +218,7 @@ impl Update {
             | DeletedBusinessMessages(_)
             | StoppedMessageGeneration(_)
             | Poll(_)
-            | Error(_) => {
-                return None
-            }
+            | Error(_) => return None,
         };
 
         Some(from)
@@ -394,20 +391,10 @@ impl<'de> Deserialize<'de> for UpdateKind {
             where
                 A: MapAccess<'de>,
             {
-                let mut tmp = None;
-
-                // Try to deserialize a borrowed-str key, or else try deserializing an owned
-                // string key
-                let key = map.next_key::<&str>().or_else(|_| {
-                    map.next_key::<String>().map(|k| {
-                        tmp = k;
-                        tmp.as_deref()
-                    })
-                });
+                let key = map.next_key::<String>().ok().flatten();
 
                 let this = key
-                    .ok()
-                    .flatten()
+                    .as_deref()
                     .and_then(|key| match key {
                         "message" => map.next_value::<Message>().ok().map(UpdateKind::Message),
                         "edited_message" => {
@@ -540,9 +527,7 @@ impl Serialize for UpdateKind {
                 s.serialize_newtype_variant(name, 7, "deleted_business_messages", v)
             }
             UpdateKind::ManagedBot(v) => s.serialize_newtype_variant(name, 24, "managed_bot", v),
-            UpdateKind::Subscription(v) => {
-                s.serialize_newtype_variant(name, 25, "subscription", v)
-            }
+            UpdateKind::Subscription(v) => s.serialize_newtype_variant(name, 25, "subscription", v),
             UpdateKind::StoppedMessageGeneration(v) => {
                 s.serialize_newtype_variant(name, 26, "stopped_message_generation", v)
             }

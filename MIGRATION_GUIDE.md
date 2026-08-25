@@ -5,7 +5,7 @@ Note that the list of required changes is not fully exhaustive and it may lack s
 
 ### Bot API 10.3
 
-This fork now exposes Telegram Bot API 10.3. The generated send methods use
+This release exposes Telegram Bot API 10.3. The generated send methods use
 `EphemeralMessageParameters` for ephemeral delivery, and message draft methods
 accept `can_stop` and `keep_on_stop` for the native Stop button flow.
 

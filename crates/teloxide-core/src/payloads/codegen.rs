@@ -244,28 +244,6 @@ fn partial_eq_suitable(method: &Method) -> bool {
     method.params.iter().all(|param| ty_partial_eq_suitable(&param.ty))
 }
 
-fn partial_eq_suitable(method: &Method) -> bool {
-    fn ty_partial_eq_suitable(ty: &Type) -> bool {
-        match ty {
-            Type::Option(inner) | Type::ArrayOf(inner) => ty_partial_eq_suitable(inner),
-            Type::RawTy(raw) => !matches!(
-                raw.as_str(),
-                "InputSticker"
-                    | "InputProfilePhoto"
-                    | "InputStoryContent"
-                    | "InputMedia"
-                    | "InputPaidMedia"
-                    | "InputPollMedia"
-                    | "InputPollOption"
-                    | "InputPollOptionMedia"
-            ),
-            _ => true,
-        }
-    }
-
-    method.params.iter().all(|param| ty_partial_eq_suitable(&param.ty))
-}
-
 fn eq_hash_suitable(method: &Method) -> bool {
     fn ty_eq_hash_suitable(ty: &Type) -> bool {
         match ty {

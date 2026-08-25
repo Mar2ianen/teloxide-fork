@@ -119,9 +119,7 @@ impl MultipartPayload for payloads::EditStory {
 #[cfg(test)]
 mod tests {
     use crate::{
-        payloads::{
-            EditStory, PostStory, SendPoll, SendRichMessage,
-        },
+        payloads::{EditStory, PostStory, SendPoll, SendRichMessage},
         requests::{MultipartPayload, MultipartRequest, Requester},
         types::{
             BusinessConnectionId, ChatId, InputFile, InputMedia, InputMediaAnimation,

@@ -8,7 +8,13 @@ use serde::Serialize;
 /// Describes a rich message to be sent.
 ///
 /// The source fields are private, so every constructor selects exactly one of
-/// HTML, Markdown, or typed blocks.
+/// HTML, Markdown, or typed blocks. Method-specific static constraints can be
+/// checked with [`ValidateWith<RichMessageContext>`] before dispatch. This
+/// validation does not prove that Telegram will accept permissions or other
+/// server-side capabilities.
+///
+/// [`ValidateWith<RichMessageContext>`]: crate::requests::ValidateWith
+/// [`RichMessageContext`]: crate::requests::RichMessageContext
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
@@ -16,7 +22,8 @@ pub struct InputRichMessage {
     blocks: Option<Vec<InputRichBlock>>,
     html: Option<String>,
     markdown: Option<String>,
-    /// Media referenced by `tg://photo`, `tg://video`, or `tg://audio` links.
+    /// Media referenced by `tg://photo`, `tg://video`, `tg://audio`, or
+    /// `tg://document` links.
     pub media: Option<Vec<InputRichMessageMedia>>,
     /// Show the rich message right-to-left.
     pub is_rtl: Option<bool>,
@@ -652,15 +659,21 @@ mod tests {
         ]))
         .unwrap();
 
-        assert_eq!(value["blocks"][0], serde_json::json!({
-            "type": "details",
-            "summary": "summary",
-            "blocks": []
-        }));
-        assert_eq!(value["blocks"][1], serde_json::json!({
-            "type": "map",
-            "location": {"longitude": 0.0, "latitude": 0.0}
-        }));
+        assert_eq!(
+            value["blocks"][0],
+            serde_json::json!({
+                "type": "details",
+                "summary": "summary",
+                "blocks": []
+            })
+        );
+        assert_eq!(
+            value["blocks"][1],
+            serde_json::json!({
+                "type": "map",
+                "location": {"longitude": 0.0, "latitude": 0.0}
+            })
+        );
     }
 
     #[test]

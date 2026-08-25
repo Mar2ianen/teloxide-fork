@@ -48,6 +48,21 @@ enum InnerFile {
 
 use InnerFile::*;
 
+/// The source category of an [`InputFile`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum InputFileSourceKind {
+    /// A file read from an asynchronous reader.
+    Reader,
+    /// A file read from a local path.
+    Path,
+    /// Bytes held in memory.
+    Memory,
+    /// A URL that Telegram fetches.
+    Url,
+    /// A file already stored by Telegram.
+    FileId,
+}
+
 impl PartialEq for InputFile {
     fn eq(&self, other: &Self) -> bool {
         self.file_name == other.file_name
@@ -142,10 +157,30 @@ impl InputFile {
         self.id.get_or_init(random)
     }
 
+    /// Returns the source category without initializing a multipart attachment
+    /// id.
+    pub(crate) fn source_kind(&self) -> InputFileSourceKind {
+        match &self.inner {
+            Read(_) => InputFileSourceKind::Reader,
+            File(_) => InputFileSourceKind::Path,
+            Bytes(_) => InputFileSourceKind::Memory,
+            Url(_) => InputFileSourceKind::Url,
+            FileId(_) => InputFileSourceKind::FileId,
+        }
+    }
+
     /// Returns `true` if this file needs an attachment i.e. it's not a file_id
     /// or url that can be serialized without any additional multipart parts.
     pub(crate) fn needs_attach(&self) -> bool {
-        !matches!(self.inner, Url(_) | FileId(_))
+        matches!(
+            self.source_kind(),
+            InputFileSourceKind::Reader | InputFileSourceKind::Path | InputFileSourceKind::Memory
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn attachment_id_initialized(&self) -> bool {
+        self.id.get().is_some()
     }
 
     /// Takes this file out.

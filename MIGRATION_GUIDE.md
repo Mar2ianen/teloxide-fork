@@ -15,6 +15,10 @@ updates, and community-joined service messages. Code that constructs affected
 structs with literals should initialize the new fields; constructors remain the
 preferred option where available.
 
+Requests with statically checkable Bot API 10.3 constraints now perform local
+validation before dispatch. Handle the new `RequestError::Validation` variant
+when matching request errors; validation failures do not send an HTTP request.
+
 
 ### teloxide-core
 

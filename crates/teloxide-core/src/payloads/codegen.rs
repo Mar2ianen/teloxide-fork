@@ -56,6 +56,12 @@ fn codegen_payloads() {
             .map(|field| format!("    @[multipart = {}]\n", field.join(", ")))
             .unwrap_or_default();
 
+        let validation = method
+            .validation
+            .as_deref()
+            .map(|function| format!("    @[validate = {function}]\n"))
+            .unwrap_or_default();
+
         // FIXME: CreateNewStickerSet has to be be only Debug + Clone + Serialize (maybe
         // better fix?)
         let derive = if !multipart.is_empty()
@@ -86,7 +92,7 @@ fn codegen_payloads() {
 {uses}
 
 impl_payload! {{
-{multipart}{timeout_secs}{method_doc}
+{multipart}{validation}{timeout_secs}{method_doc}
     {derive}
     pub {Method} ({Method}Setters) => {return_ty} {{
 {required}{optional}

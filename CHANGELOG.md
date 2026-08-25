@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Support for Telegram Bot API 10.3: rich-message buttons, documents, expandable quote blocks and compact tables; ephemeral message parameters and rich ephemeral editing; native Stop-button draft parameters; disabled inline buttons; force-reply markup flags; stopped-generation updates; and community-joined service messages.
 - Add integration coverage for 10.3 serialization, update routing and nested rich-document multipart uploads.
+- Add pre-dispatch validation for statically known Bot API 10.3 request constraints. Requests may now return `RequestError::Validation` before an HTTP request is sent [**BC**].
 
 - `MessageToEditHasNoText` variant to `ApiError` ([#1426](https://github.com/teloxide/teloxide/issues/1426))
 - `ParticipantIdInvalid` and `ChatAdminRequired` variants to `ApiError` ([#1349](https://github.com/teloxide/teloxide/issues/1349))

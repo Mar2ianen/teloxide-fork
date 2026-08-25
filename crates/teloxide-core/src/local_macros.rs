@@ -94,6 +94,9 @@ macro_rules! impl_payload {
             @[multipart = $($multipart_attr:ident),*]
         )?
         $(
+            @[validate = $validation:path]
+        )?
+        $(
             @[timeout_secs = $timeout_secs:ident]
         )?
         $(
@@ -184,6 +187,12 @@ macro_rules! impl_payload {
                     self.$timeout_secs.map(<_>::into).map(std::time::Duration::from_secs)
                 }
             )?
+
+            impl_payload! {
+                @validation $($validation)?;
+                req { $($($fields : $FTy),*)? }
+                opt { $($($opt_fields : $OptFTy),*)? }
+            }
         }
 
         calculated_doc! {
@@ -209,6 +218,33 @@ macro_rules! impl_payload {
         impl<P> $Setters for P where P: crate::requests::HasPayload<Payload = $Method> {}
 
         impl_payload! { @[$(multipart = $($multipart_attr),*)?] $Method req { $($($fields),*)? } opt { $($($opt_fields),*)? } }
+    };
+    (@validation $validation:path; req { $($field:ident : $FTy:ty),* } opt { $($opt_field:ident : $OptFTy:ty),* }) => {
+        fn validate(&self) -> Result<(), $crate::requests::RequestValidationError> {
+            $validation(self)?;
+            $($crate::requests::validation::validate_payload_field(
+                &self.$field,
+                stringify!($field),
+            )?;)*
+            $($crate::requests::validation::validate_payload_field(
+                &self.$opt_field,
+                stringify!($opt_field),
+            )?;)*
+            Ok(())
+        }
+    };
+    (@validation ; req { $($field:ident : $FTy:ty),* } opt { $($opt_field:ident : $OptFTy:ty),* }) => {
+        fn validate(&self) -> Result<(), $crate::requests::RequestValidationError> {
+            $($crate::requests::validation::validate_payload_field(
+                &self.$field,
+                stringify!($field),
+            )?;)*
+            $($crate::requests::validation::validate_payload_field(
+                &self.$opt_field,
+                stringify!($opt_field),
+            )?;)*
+            Ok(())
+        }
     };
     (@setter_opt $Method:ident $field:ident : $FTy:ty [into]) => {
         calculated_doc! {

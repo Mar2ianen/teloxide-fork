@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Support for Telegram Bot API 10.3, including rich-message button/document blocks, expandable quotations, compact tables, ephemeral message parameters, draft Stop-button controls, disabled inline buttons, force-reply markup flags and new service/update types.
 - Add schema/codegen and integration coverage for the 10.3 request and type surface.
+- Add pre-dispatch request validation and the public `RequestError::Validation` error path [**BC**].
 
 - Support for TBA 10.0
   - Add `send_live_photo`, `send_message_draft`, `get_user_profile_audios`, `set_chat_member_tag`, `get_user_personal_chat_messages`, `answer_guest_query`, `get_managed_bot_token`, `replace_managed_bot_token`, `get_managed_bot_access_settings`, `set_managed_bot_access_settings`, `set_my_profile_photo`, `remove_my_profile_photo`, `get_user_gifts`, `get_chat_gifts`, `repost_story`, `save_prepared_keyboard_button`, `delete_message_reaction` and `delete_all_message_reactions` methods

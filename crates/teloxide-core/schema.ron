@@ -4085,7 +4085,6 @@ Schema(
             doc: Doc(md: "Use this method to send answers to an inline query. On success, _True_ is returned. No more than **50** results per query are allowed."),
             tg_doc: "https://core.telegram.org/bots/api#answerinlinequery",
             tg_category: "Inline Mode",
-            multipart: ["results"],
             params: [
                 Param(
                     name: "inline_query_id",
@@ -4128,7 +4127,6 @@ Schema(
             ),
             tg_doc: "https://core.telegram.org/bots/api#answerwebappquery",
             tg_category: "Inline Mode",
-            multipart: ["result"],
             params: [
                 Param(
                     name: "web_app_query_id",
@@ -4151,7 +4149,6 @@ Schema(
             ),
             tg_doc: "https://core.telegram.org/bots/api#savepreparedinlinemessage",
             tg_category: "Inline Mode",
-            multipart: ["result"],
             params: [
                 Param(
                     name: "user_id",
@@ -6547,7 +6544,6 @@ Schema(
             doc: Doc(md: "Use this method to reply to a received guest message. On success, a [SentGuestMessage] object is returned.", md_links: {"SentGuestMessage": "https://core.telegram.org/bots/api#sentguestmessage"}),
             tg_doc: "https://core.telegram.org/bots/api#answerguestquery",
             tg_category: "Available methods",
-            multipart: ["result"],
             params: [
                 Param(name: "guest_query_id", ty: String, descr: Doc(md: "Unique identifier for the query to be answered")),
                 Param(name: "result", ty: RawTy("InlineQueryResult"), descr: Doc(md: "An object describing the message to be sent")),
@@ -6847,7 +6843,7 @@ Schema(
                 Param(name: "chat_id", ty: RawTy("UserId"), descr: Doc(md: "Unique identifier for the target private chat")),
                 Param(name: "message_thread_id", ty: Option(RawTy("ThreadId")), descr: Doc(md: "Unique identifier for the target message thread")),
                 Param(name: "draft_id", ty: i32, descr: Doc(md: "Unique non-zero identifier of the message draft")),
-                Param(name: "rich_message", ty: RawTy("InputRichMessage"), descr: Doc(md: "The partial message to be streamed; direct upload of new files isn't supported")),
+                Param(name: "rich_message", ty: RawTy("InputRichMessage"), descr: Doc(md: "The partial message to be streamed; direct upload of new files and explicit upload of files by a URL aren't supported")),
                 Param(name: "can_stop", ty: Option(bool), descr: Doc(md: "Pass True to show the user a button to stop further drafts")),
                 Param(name: "keep_on_stop", ty: Option(bool), descr: Doc(md: "Pass True to keep the draft in the chat when the button is pressed")),
             ],

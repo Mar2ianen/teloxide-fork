@@ -120,19 +120,16 @@ impl MultipartPayload for payloads::EditStory {
 mod tests {
     use crate::{
         payloads::{
-            AnswerGuestQuery, AnswerInlineQuery, AnswerWebAppQuery, EditStory, PostStory,
-            SavePreparedInlineMessage, SendPoll, SendRichMessage,
+            EditStory, PostStory, SendPoll, SendRichMessage,
         },
         requests::{MultipartPayload, MultipartRequest, Requester},
         types::{
-            BusinessConnectionId, ChatId, InlineQueryId, InlineQueryResult,
-            InlineQueryResultArticle, InputFile, InputMedia, InputMediaAnimation,
+            BusinessConnectionId, ChatId, InputFile, InputMedia, InputMediaAnimation,
             InputMediaDocument, InputMediaLivePhoto, InputMediaPhoto, InputMediaSticker,
-            InputMediaVideo, InputMessageContent, InputMessageContentText, InputPollMedia,
-            InputPollOption, InputPollOptionMedia, InputRichBlock, InputRichBlockPhoto,
-            InputRichMessage, InputRichMessageContent, InputRichMessageMedia,
-            InputRichMessageMediaContent, InputStoryContent, InputStoryContentPhoto,
-            InputStoryContentVideo, Seconds, StoryId, UserId,
+            InputMediaVideo, InputPollMedia, InputPollOption, InputPollOptionMedia,
+            InputRichMessage, InputRichMessageMedia, InputRichMessageMediaContent,
+            InputStoryContent, InputStoryContentPhoto, InputStoryContentVideo, Seconds, StoryId,
+            UserId,
         },
         Bot,
     };
@@ -251,66 +248,6 @@ mod tests {
             }),
         ));
     }
-    fn rich_result(id: &str) -> InlineQueryResult {
-        InlineQueryResult::Article(InlineQueryResultArticle::new(
-            id,
-            "Rich",
-            InputMessageContent::Rich(InputRichMessageContent::new(InputRichMessage::blocks([
-                InputRichBlock::Photo(InputRichBlockPhoto {
-                    photo: InputMediaPhoto::new(file()),
-                    caption: None,
-                }),
-            ]))),
-        ))
-    }
-
-    #[test]
-    fn inline_query_rich_content_collects_files_from_any_result() {
-        fn assert_inline(_: MultipartRequest<AnswerInlineQuery>) {}
-        fn assert_guest(_: MultipartRequest<AnswerGuestQuery>) {}
-        fn assert_web_app(_: MultipartRequest<AnswerWebAppQuery>) {}
-        fn assert_prepared(_: MultipartRequest<SavePreparedInlineMessage>) {}
-
-        let first = InlineQueryResult::Article(InlineQueryResultArticle::new(
-            "first",
-            "First",
-            InputMessageContent::Text(InputMessageContentText::new("text")),
-        ));
-        let mut inline = AnswerInlineQuery::new(
-            InlineQueryId("query".to_owned()),
-            [first, rich_result("second")],
-        );
-        let mut copied = 0;
-        inline.copy_files(&mut |_| copied += 1);
-        assert_eq!(copied, 1);
-        let mut moved = 0;
-        inline.move_files(&mut |_| moved += 1);
-        assert_eq!(moved, 1);
-
-        let guest = AnswerGuestQuery::new("guest", rich_result("guest"));
-        let mut copied = 0;
-        guest.copy_files(&mut |_| copied += 1);
-        assert_eq!(copied, 1);
-
-        let web_app = AnswerWebAppQuery::new("web-app", rich_result("web-app"));
-        let mut copied = 0;
-        web_app.copy_files(&mut |_| copied += 1);
-        assert_eq!(copied, 1);
-
-        let prepared = SavePreparedInlineMessage::new(UserId(1), rich_result("prepared"));
-        let mut copied = 0;
-        prepared.copy_files(&mut |_| copied += 1);
-        assert_eq!(copied, 1);
-
-        let bot = Bot::new("token");
-        assert_inline(
-            bot.answer_inline_query(InlineQueryId("query".to_owned()), [rich_result("inline")]),
-        );
-        assert_guest(bot.answer_guest_query("guest", rich_result("guest")));
-        assert_web_app(bot.answer_web_app_query("web-app", rich_result("web-app")));
-        assert_prepared(bot.save_prepared_inline_message(UserId(1), rich_result("prepared")));
-    }
-
     #[test]
     fn send_rich_message_collects_nested_attachments_and_uses_multipart() {
         fn assert_multipart(_: MultipartRequest<SendRichMessage>) {}

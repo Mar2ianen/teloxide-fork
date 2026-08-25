@@ -371,6 +371,7 @@ pub struct InputRichBlockSectionHeading {
     pub size: u8,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockPreformatted {
@@ -400,6 +401,7 @@ pub struct InputRichBlockList {
     pub items: Vec<InputRichBlockListItem>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockListItem {
@@ -421,6 +423,7 @@ impl InputFileLike for InputRichBlockListItem {
     }
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockBlockQuotation {
@@ -428,6 +431,7 @@ pub struct InputRichBlockBlockQuotation {
     pub credit: Option<RichText>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockExpandableBlockQuotation {
@@ -435,6 +439,7 @@ pub struct InputRichBlockExpandableBlockQuotation {
     pub credit: Option<RichText>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockPullQuotation {
@@ -442,6 +447,7 @@ pub struct InputRichBlockPullQuotation {
     pub credit: Option<RichText>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockCollage {
@@ -449,6 +455,7 @@ pub struct InputRichBlockCollage {
     pub caption: Option<RichBlockCaption>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockSlideshow {
@@ -456,6 +463,7 @@ pub struct InputRichBlockSlideshow {
     pub caption: Option<RichBlockCaption>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockTable {
@@ -466,6 +474,7 @@ pub struct InputRichBlockTable {
     pub caption: Option<RichText>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockButtons {
@@ -487,6 +496,7 @@ impl InputRichBlockButtons {
     }
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockDocument {
@@ -494,6 +504,7 @@ pub struct InputRichBlockDocument {
     pub caption: Option<RichBlockCaption>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockDetails {
@@ -502,16 +513,18 @@ pub struct InputRichBlockDetails {
     pub is_open: Option<bool>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockMap {
     pub location: Location,
-    pub zoom: u8,
-    pub width: u32,
-    pub height: u32,
+    pub zoom: Option<u8>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
     pub caption: Option<RichBlockCaption>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockAnimation {
@@ -519,6 +532,7 @@ pub struct InputRichBlockAnimation {
     pub caption: Option<RichBlockCaption>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockAudio {
@@ -526,6 +540,7 @@ pub struct InputRichBlockAudio {
     pub caption: Option<RichBlockCaption>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockPhoto {
@@ -533,6 +548,7 @@ pub struct InputRichBlockPhoto {
     pub caption: Option<RichBlockCaption>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockVideo {
@@ -540,6 +556,7 @@ pub struct InputRichBlockVideo {
     pub caption: Option<RichBlockCaption>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockVoiceNote {
@@ -608,6 +625,42 @@ mod tests {
                 "skip_entity_detection": true
             })
         );
+    }
+
+    #[test]
+    fn optional_input_rich_block_fields_are_omitted() {
+        let value = serde_json::to_value(InputRichMessage::blocks([
+            InputRichBlock::Details(InputRichBlockDetails {
+                summary: RichText::from("summary"),
+                blocks: Vec::new(),
+                is_open: None,
+            }),
+            InputRichBlock::Map(InputRichBlockMap {
+                location: Location {
+                    longitude: 0.0,
+                    latitude: 0.0,
+                    horizontal_accuracy: None,
+                    live_period: None,
+                    heading: None,
+                    proximity_alert_radius: None,
+                },
+                zoom: None,
+                width: None,
+                height: None,
+                caption: None,
+            }),
+        ]))
+        .unwrap();
+
+        assert_eq!(value["blocks"][0], serde_json::json!({
+            "type": "details",
+            "summary": "summary",
+            "blocks": []
+        }));
+        assert_eq!(value["blocks"][1], serde_json::json!({
+            "type": "map",
+            "location": {"longitude": 0.0, "latitude": 0.0}
+        }));
     }
 
     #[test]

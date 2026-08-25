@@ -13,7 +13,7 @@ impl_payload! {
             pub chat_id: UserId,
             /// Unique non-zero identifier of the message draft
             pub draft_id: i32,
-            /// The partial message to be streamed; direct upload of new files isn't supported
+            /// The partial message to be streamed; direct upload of new files and explicit upload of files by a URL aren't supported
             pub rich_message: InputRichMessage,
         }
         optional {

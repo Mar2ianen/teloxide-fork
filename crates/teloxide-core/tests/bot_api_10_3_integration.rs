@@ -15,11 +15,10 @@ fn rich_message_10_3_blocks_and_buttons_round_trip() {
         "blocks": [
             {
                 "type": "buttons",
-                "buttons": [{
-                    "text": "Open",
-                    "callback_data": "open",
-                    "disabled": {}
-                }],
+                "buttons": [
+                    {"text": "Open", "callback_data": "open"},
+                    {"text": "Unavailable", "disabled": {}}
+                ],
                 "align": "center"
             },
             {
@@ -63,7 +62,8 @@ fn rich_message_10_3_blocks_and_buttons_round_trip() {
     ));
 
     let encoded = serde_json::to_value(&rich).unwrap();
-    assert_eq!(encoded["blocks"][0]["buttons"][0]["disabled"], serde_json::json!({}));
+    assert_eq!(encoded["blocks"][0]["buttons"][0]["callback_data"], "open");
+    assert_eq!(encoded["blocks"][0]["buttons"][1]["disabled"], serde_json::json!({}));
     assert_eq!(encoded["blocks"][2]["is_compact"], true);
 
     let button_text: RichText = serde_json::from_value(serde_json::json!({

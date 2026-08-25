@@ -1,7 +1,7 @@
 use crate::types::{
-    InputFile, InputFileLike, InputMediaAnimation, InputMediaAudio, InputMediaPhoto,
-    InputMediaVideo, Location, MessageEntity, ParseMode, RichBlockCaption, RichBlockTableCell,
-    RichText,
+    InputFile, InputFileLike, InputMediaAnimation, InputMediaAudio, InputMediaDocument,
+    InputMediaPhoto, InputMediaVideo, Location, MessageEntity, ParseMode, RichBlockCaption,
+    RichBlockTableCell, RichMessageButton, RichText,
 };
 use serde::Serialize;
 
@@ -262,10 +262,13 @@ pub enum InputRichBlock {
     Anchor(InputRichBlockAnchor),
     List(InputRichBlockList),
     Blockquote(InputRichBlockBlockQuotation),
+    ExpandableBlockquote(InputRichBlockExpandableBlockQuotation),
     Pullquote(InputRichBlockPullQuotation),
     Collage(InputRichBlockCollage),
     Slideshow(InputRichBlockSlideshow),
     Table(InputRichBlockTable),
+    Buttons(InputRichBlockButtons),
+    Document(InputRichBlockDocument),
     Details(InputRichBlockDetails),
     Map(InputRichBlockMap),
     Animation(InputRichBlockAnimation),
@@ -282,9 +285,12 @@ impl InputFileLike for InputRichBlock {
         match self {
             Self::List(value) => value.items.copy_into(into),
             Self::Blockquote(value) => value.blocks.copy_into(into),
+            Self::ExpandableBlockquote(_) => {}
             Self::Collage(value) => value.blocks.copy_into(into),
             Self::Slideshow(value) => value.blocks.copy_into(into),
             Self::Details(value) => value.blocks.copy_into(into),
+            Self::Buttons(_) => {}
+            Self::Document(value) => value.document.copy_into(into),
             Self::Animation(value) => value.animation.copy_into(into),
             Self::Audio(value) => value.audio.copy_into(into),
             Self::Photo(value) => value.photo.copy_into(into),
@@ -308,9 +314,12 @@ impl InputFileLike for InputRichBlock {
         match self {
             Self::List(value) => value.items.move_into(into),
             Self::Blockquote(value) => value.blocks.move_into(into),
+            Self::ExpandableBlockquote(_) => {}
             Self::Collage(value) => value.blocks.move_into(into),
             Self::Slideshow(value) => value.blocks.move_into(into),
             Self::Details(value) => value.blocks.move_into(into),
+            Self::Buttons(_) => {}
+            Self::Document(value) => value.document.move_into(into),
             Self::Animation(value) => value.animation.move_into(into),
             Self::Audio(value) => value.audio.move_into(into),
             Self::Photo(value) => value.photo.move_into(into),
@@ -411,6 +420,13 @@ pub struct InputRichBlockBlockQuotation {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockExpandableBlockQuotation {
+    pub text: RichText,
+    pub credit: Option<RichText>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockPullQuotation {
     pub text: RichText,
     pub credit: Option<RichText>,
@@ -436,7 +452,22 @@ pub struct InputRichBlockTable {
     pub cells: Vec<Vec<RichBlockTableCell>>,
     pub is_bordered: Option<bool>,
     pub is_striped: Option<bool>,
+    pub is_compact: Option<bool>,
     pub caption: Option<RichText>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockButtons {
+    pub buttons: Vec<RichMessageButton>,
+    pub align: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputRichBlockDocument {
+    pub document: InputMediaDocument,
+    pub caption: Option<RichBlockCaption>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]

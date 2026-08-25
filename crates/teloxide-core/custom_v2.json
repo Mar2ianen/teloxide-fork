@@ -1,13 +1,13 @@
 {
   "version": {
     "major": 10,
-    "minor": 2,
+    "minor": 3,
     "patch": 0
   },
   "recent_changes": {
     "year": 2026,
-    "month": 7,
-    "day": 14
+    "month": 8,
+    "day": 24
   },
   "methods": [
     {
@@ -262,21 +262,12 @@
           }
         },
         {
-          "name": "receiver_user_id",
-          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "name": "ephemeral_message_parameters",
+          "description": "A JSON-serialized object containing the parameters of the ephemeral message to send",
           "required": false,
           "type_info": {
             "type": "reference",
-            "reference": "UserId"
-          }
-        },
-        {
-          "name": "callback_query_id",
-          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
-          "required": false,
-          "type_info": {
-            "type": "reference",
-            "reference": "CallbackQueryId"
+            "reference": "EphemeralMessageParameters"
           }
         },
         {
@@ -958,21 +949,12 @@
           }
         },
         {
-          "name": "receiver_user_id",
-          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "name": "ephemeral_message_parameters",
+          "description": "A JSON-serialized object containing the parameters of the ephemeral message to send",
           "required": false,
           "type_info": {
             "type": "reference",
-            "reference": "UserId"
-          }
-        },
-        {
-          "name": "callback_query_id",
-          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
-          "required": false,
-          "type_info": {
-            "type": "reference",
-            "reference": "CallbackQueryId"
+            "reference": "EphemeralMessageParameters"
           }
         },
         {
@@ -1176,21 +1158,12 @@
           }
         },
         {
-          "name": "receiver_user_id",
-          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "name": "ephemeral_message_parameters",
+          "description": "A JSON-serialized object containing the parameters of the ephemeral message to send",
           "required": false,
           "type_info": {
             "type": "reference",
-            "reference": "UserId"
-          }
-        },
-        {
-          "name": "callback_query_id",
-          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
-          "required": false,
-          "type_info": {
-            "type": "reference",
-            "reference": "CallbackQueryId"
+            "reference": "EphemeralMessageParameters"
           }
         },
         {
@@ -1423,21 +1396,12 @@
           }
         },
         {
-          "name": "receiver_user_id",
-          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "name": "ephemeral_message_parameters",
+          "description": "A JSON-serialized object containing the parameters of the ephemeral message to send",
           "required": false,
           "type_info": {
             "type": "reference",
-            "reference": "UserId"
-          }
-        },
-        {
-          "name": "callback_query_id",
-          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
-          "required": false,
-          "type_info": {
-            "type": "reference",
-            "reference": "CallbackQueryId"
+            "reference": "EphemeralMessageParameters"
           }
         },
         {
@@ -1651,21 +1615,12 @@
           }
         },
         {
-          "name": "receiver_user_id",
-          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "name": "ephemeral_message_parameters",
+          "description": "A JSON-serialized object containing the parameters of the ephemeral message to send",
           "required": false,
           "type_info": {
             "type": "reference",
-            "reference": "UserId"
-          }
-        },
-        {
-          "name": "callback_query_id",
-          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
-          "required": false,
-          "type_info": {
-            "type": "reference",
-            "reference": "CallbackQueryId"
+            "reference": "EphemeralMessageParameters"
           }
         },
         {
@@ -1949,21 +1904,12 @@
           }
         },
         {
-          "name": "receiver_user_id",
-          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "name": "ephemeral_message_parameters",
+          "description": "A JSON-serialized object containing the parameters of the ephemeral message to send",
           "required": false,
           "type_info": {
             "type": "reference",
-            "reference": "UserId"
-          }
-        },
-        {
-          "name": "callback_query_id",
-          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
-          "required": false,
-          "type_info": {
-            "type": "reference",
-            "reference": "CallbackQueryId"
+            "reference": "EphemeralMessageParameters"
           }
         },
         {
@@ -2212,21 +2158,12 @@
           }
         },
         {
-          "name": "receiver_user_id",
-          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "name": "ephemeral_message_parameters",
+          "description": "A JSON-serialized object containing the parameters of the ephemeral message to send",
           "required": false,
           "type_info": {
             "type": "reference",
-            "reference": "UserId"
-          }
-        },
-        {
-          "name": "callback_query_id",
-          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
-          "required": false,
-          "type_info": {
-            "type": "reference",
-            "reference": "CallbackQueryId"
+            "reference": "EphemeralMessageParameters"
           }
         },
         {
@@ -2423,21 +2360,12 @@
           }
         },
         {
-          "name": "receiver_user_id",
-          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "name": "ephemeral_message_parameters",
+          "description": "A JSON-serialized object containing the parameters of the ephemeral message to send",
           "required": false,
           "type_info": {
             "type": "reference",
-            "reference": "UserId"
-          }
-        },
-        {
-          "name": "callback_query_id",
-          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
-          "required": false,
-          "type_info": {
-            "type": "reference",
-            "reference": "CallbackQueryId"
+            "reference": "EphemeralMessageParameters"
           }
         },
         {
@@ -2955,21 +2883,12 @@
           }
         },
         {
-          "name": "receiver_user_id",
-          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "name": "ephemeral_message_parameters",
+          "description": "A JSON-serialized object containing the parameters of the ephemeral message to send",
           "required": false,
           "type_info": {
             "type": "reference",
-            "reference": "UserId"
-          }
-        },
-        {
-          "name": "callback_query_id",
-          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
-          "required": false,
-          "type_info": {
-            "type": "reference",
-            "reference": "CallbackQueryId"
+            "reference": "EphemeralMessageParameters"
           }
         },
         {
@@ -3158,21 +3077,12 @@
           }
         },
         {
-          "name": "receiver_user_id",
-          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "name": "ephemeral_message_parameters",
+          "description": "A JSON-serialized object containing the parameters of the ephemeral message to send",
           "required": false,
           "type_info": {
             "type": "reference",
-            "reference": "UserId"
-          }
-        },
-        {
-          "name": "callback_query_id",
-          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
-          "required": false,
-          "type_info": {
-            "type": "reference",
-            "reference": "CallbackQueryId"
+            "reference": "EphemeralMessageParameters"
           }
         },
         {
@@ -3380,21 +3290,12 @@
           }
         },
         {
-          "name": "receiver_user_id",
-          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "name": "ephemeral_message_parameters",
+          "description": "A JSON-serialized object containing the parameters of the ephemeral message to send",
           "required": false,
           "type_info": {
             "type": "reference",
-            "reference": "UserId"
-          }
-        },
-        {
-          "name": "callback_query_id",
-          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
-          "required": false,
-          "type_info": {
-            "type": "reference",
-            "reference": "CallbackQueryId"
+            "reference": "EphemeralMessageParameters"
           }
         },
         {
@@ -8632,21 +8533,12 @@
           }
         },
         {
-          "name": "receiver_user_id",
-          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "name": "ephemeral_message_parameters",
+          "description": "A JSON-serialized object containing the parameters of the ephemeral message to send",
           "required": false,
           "type_info": {
             "type": "reference",
-            "reference": "UserId"
-          }
-        },
-        {
-          "name": "callback_query_id",
-          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
-          "required": false,
-          "type_info": {
-            "type": "reference",
-            "reference": "CallbackQueryId"
+            "reference": "EphemeralMessageParameters"
           }
         },
         {
@@ -11038,21 +10930,12 @@
           }
         },
         {
-          "name": "receiver_user_id",
-          "description": "For outgoing ephemeral messages, unique identifier of the user who will receive the message",
+          "name": "ephemeral_message_parameters",
+          "description": "A JSON-serialized object containing the parameters of the ephemeral message to send",
           "required": false,
           "type_info": {
             "type": "reference",
-            "reference": "UserId"
-          }
-        },
-        {
-          "name": "callback_query_id",
-          "description": "Identifier of the callback query which triggered the ephemeral message, if any",
-          "required": false,
-          "type_info": {
-            "type": "reference",
-            "reference": "CallbackQueryId"
+            "reference": "EphemeralMessageParameters"
           }
         },
         {
@@ -11246,6 +11129,22 @@
               "type": "reference"
             },
             "type": "array"
+          }
+        },
+        {
+          "description": "Pass True to show a Stop button while the message is being generated",
+          "name": "can_stop",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "description": "Pass True to keep the partial message when generation is stopped",
+          "name": "keep_on_stop",
+          "required": false,
+          "type_info": {
+            "type": "bool"
           }
         }
       ],
@@ -12374,6 +12273,15 @@
           }
         },
         {
+          "name": "ephemeral_message_parameters",
+          "description": "Parameters of the ephemeral message to send",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "EphemeralMessageParameters"
+          }
+        },
+        {
           "name": "rich_message",
           "description": "The rich message to send",
           "required": true,
@@ -12488,6 +12396,22 @@
           "type_info": {
             "type": "reference",
             "reference": "InputRichMessage"
+          }
+        },
+        {
+          "name": "can_stop",
+          "description": "Pass True to show a Stop button while the message is being generated",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "keep_on_stop",
+          "description": "Pass True to keep the partial message when generation is stopped",
+          "required": false,
+          "type_info": {
+            "type": "bool"
           }
         }
       ],
@@ -12719,6 +12643,15 @@
           "type_info": {
             "type": "reference",
             "reference": "ChatBoostRemoved"
+          }
+        },
+        {
+          "name": "stopped_message_generation",
+          "description": "*Optional*. A user stopped generation of a streamed message draft",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "MessageGenerationStopped"
           }
         }
       ],
@@ -14172,6 +14105,15 @@
           "type_info": {
             "type": "reference",
             "reference": "ChatBackground"
+          }
+        },
+        {
+          "name": "community_chat_joined",
+          "description": "*Optional*. Service message: the chat was joined by a user from a community",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "CommunityChatJoined"
           }
         },
         {
@@ -18186,6 +18128,14 @@
           "type_info": {
             "type": "bool"
           }
+        },
+        {
+          "name": "force_reply",
+          "description": "*Optional*. Requests clients to show the reply interface to the user",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
         }
       ],
       "documentation_link": "https://core.telegram.org/bots/api#replykeyboardmarkup"
@@ -18486,6 +18436,14 @@
               }
             }
           }
+        },
+        {
+          "name": "force_reply",
+          "description": "*Optional*. Requests clients to show the reply interface to the user",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
         }
       ],
       "documentation_link": "https://core.telegram.org/bots/api#inlinekeyboardmarkup"
@@ -18591,6 +18549,15 @@
           "required": false,
           "type_info": {
             "type": "bool"
+          }
+        },
+        {
+          "name": "disabled",
+          "description": "*Optional*. A disabled button which does nothing",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "DisabledButton"
           }
         }
       ],
@@ -19094,6 +19061,14 @@
           "type_info": {
             "type": "bool"
           }
+        },
+        {
+          "name": "can_send_welcome_messages",
+          "description": "*Optional*. *True*, if the administrator can send welcome messages",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
         }
       ],
       "documentation_link": "https://core.telegram.org/bots/api#chatadministratorrights"
@@ -19408,6 +19383,14 @@
           "name": "can_manage_direct_messages",
           "description": "*Optional*. *True*, if the administrator can manage direct messages of the channel and decline suggested posts; for channels only",
           "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "can_send_welcome_messages",
+          "description": "*True*, if the administrator can send welcome messages",
+          "required": true,
           "type_info": {
             "type": "bool"
           }
@@ -21193,6 +21176,35 @@
           "type_info": {
             "type": "integer",
             "enumeration": []
+          }
+        },
+        {
+          "name": "text",
+          "description": "*Optional*. Text of the message added to the gift",
+          "required": false,
+          "type_info": {
+            "type": "string",
+            "enumeration": []
+          }
+        },
+        {
+          "name": "entities",
+          "description": "*Optional*. Special entities that appear in the gift text",
+          "required": false,
+          "type_info": {
+            "type": "array",
+            "array": {
+              "type": "reference",
+              "reference": "MessageEntity"
+            }
+          }
+        },
+        {
+          "name": "is_private",
+          "description": "*Optional*. *True*, if the sender and gift text are shown only to the gift receiver",
+          "required": false,
+          "type_info": {
+            "type": "bool"
           }
         }
       ],

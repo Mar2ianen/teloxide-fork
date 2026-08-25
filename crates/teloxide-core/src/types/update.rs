@@ -6,7 +6,8 @@ use crate::types::{
     BotSubscriptionUpdated, BusinessConnection, BusinessMessagesDeleted, CallbackQuery, Chat,
     ChatBoostRemoved,
     ChatBoostUpdated, ChatJoinRequest, ChatMemberUpdated, ChosenInlineResult, InlineQuery,
-    ManagedBotUpdated, Message, MessageReactionCountUpdated, MessageReactionUpdated,
+    ManagedBotUpdated, Message, MessageGenerationStopped, MessageReactionCountUpdated,
+    MessageReactionUpdated,
     PaidMediaPurchased, Poll, PollAnswer, PreCheckoutQuery, ShippingQuery, User,
 };
 
@@ -81,6 +82,9 @@ pub enum UpdateKind {
     /// A managed bot was created, or token or owner of a managed bot was
     /// changed.
     ManagedBot(ManagedBotUpdated),
+
+    /// A user stopped generation of a streamed message draft.
+    StoppedMessageGeneration(MessageGenerationStopped),
 
     /// A user payment subscription changed.
     Subscription(BotSubscriptionUpdated),
@@ -211,7 +215,11 @@ impl Update {
             ManagedBot(m) => &m.user,
             Subscription(update) => &update.user,
 
-            MessageReactionCount(_) | DeletedBusinessMessages(_) | Poll(_) | Error(_) => {
+            MessageReactionCount(_)
+            | DeletedBusinessMessages(_)
+            | StoppedMessageGeneration(_)
+            | Poll(_)
+            | Error(_) => {
                 return None
             }
         };
@@ -308,6 +316,7 @@ impl Update {
             | UpdateKind::BusinessConnection(_)
             | UpdateKind::ManagedBot(_)
             | UpdateKind::Subscription(_)
+            | UpdateKind::StoppedMessageGeneration(_)
             | UpdateKind::DeletedBusinessMessages(_)
             | UpdateKind::Error(_) => i5(empty()),
         }
@@ -335,6 +344,8 @@ impl Update {
             ChatBoost(b) => &b.chat,
             RemovedChatBoost(b) => &b.chat,
             DeletedBusinessMessages(m) => &m.chat,
+
+            StoppedMessageGeneration(update) => &update.chat,
 
             InlineQuery(_)
             | BusinessConnection(_)
@@ -482,6 +493,10 @@ impl<'de> Deserialize<'de> for UpdateKind {
                             .next_value::<ChatBoostRemoved>()
                             .ok()
                             .map(UpdateKind::RemovedChatBoost),
+                        "stopped_message_generation" => map
+                            .next_value::<MessageGenerationStopped>()
+                            .ok()
+                            .map(UpdateKind::StoppedMessageGeneration),
                         _ => Some(empty_error()),
                     })
                     .unwrap_or_else(empty_error);
@@ -527,6 +542,9 @@ impl Serialize for UpdateKind {
             UpdateKind::ManagedBot(v) => s.serialize_newtype_variant(name, 24, "managed_bot", v),
             UpdateKind::Subscription(v) => {
                 s.serialize_newtype_variant(name, 25, "subscription", v)
+            }
+            UpdateKind::StoppedMessageGeneration(v) => {
+                s.serialize_newtype_variant(name, 26, "stopped_message_generation", v)
             }
             UpdateKind::MessageReaction(v) => {
                 s.serialize_newtype_variant(name, 8, "message_reaction", v)

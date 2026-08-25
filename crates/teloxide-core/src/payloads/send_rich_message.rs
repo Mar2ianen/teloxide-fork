@@ -3,8 +3,8 @@
 use serde::Serialize;
 
 use crate::types::{
-    BusinessConnectionId, EffectId, InputRichMessage, Message, Recipient, ReplyMarkup,
-    ReplyParameters, SuggestedPostParameters, ThreadId, TopicId,
+    BusinessConnectionId, EffectId, EphemeralMessageParameters, InputRichMessage, Message,
+    Recipient, ReplyMarkup, ReplyParameters, SuggestedPostParameters, ThreadId, TopicId,
 };
 
 impl_payload! {
@@ -27,6 +27,8 @@ impl_payload! {
             pub message_thread_id: ThreadId,
             /// Identifier of the direct messages topic
             pub direct_messages_topic_id: TopicId,
+            /// A JSON-serialized object containing the parameters of the ephemeral message to send
+            pub ephemeral_message_parameters: EphemeralMessageParameters,
             /// Sends the message silently
             pub disable_notification: bool,
             /// Protects the contents from forwarding and saving

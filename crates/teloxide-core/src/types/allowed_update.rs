@@ -31,4 +31,5 @@ pub enum AllowedUpdate {
     ChatJoinRequest,
     ChatBoost,
     RemovedChatBoost,
+    StoppedMessageGeneration,
 }

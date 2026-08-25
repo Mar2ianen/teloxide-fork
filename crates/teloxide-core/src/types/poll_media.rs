@@ -15,12 +15,23 @@ pub struct PollMedia {
     pub animation: Option<Animation>,
     pub audio: Option<Audio>,
     pub document: Option<Document>,
+    pub link: Option<Link>,
     pub live_photo: Option<LivePhoto>,
     pub location: Option<Location>,
     pub photo: Option<Vec<PhotoSize>>,
     pub sticker: Option<Sticker>,
     pub venue: Option<Venue>,
     pub video: Option<Video>,
+}
+
+/// This object represents an HTTP link attached to a poll option.
+///
+/// [The official docs](https://core.telegram.org/bots/api#link).
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct Link {
+    /// URL of the link.
+    pub url: String,
 }
 
 /// Content of a poll description or quiz explanation to be sent.
@@ -53,6 +64,7 @@ pub enum InputPollMedia {
 #[allow(clippy::large_enum_variant)]
 pub enum InputPollOptionMedia {
     Animation(crate::types::InputMediaAnimation),
+    Link(crate::types::InputMediaLink),
     LivePhoto(crate::types::InputMediaLivePhoto),
     Location(crate::types::InputMediaLocation),
     Photo(crate::types::InputMediaPhoto),
@@ -127,6 +139,22 @@ impl InputPollMedia {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn input_poll_option_link_serializes() {
+        let media =
+            InputPollOptionMedia::Link(crate::types::InputMediaLink::new("https://example.com"));
+
+        assert_eq!(
+            serde_json::to_value(media).unwrap(),
+            serde_json::json!({"type": "link", "url": "https://example.com"})
+        );
+    }
+}
+
 impl InputPollOptionMedia {
     pub(crate) fn files(&self) -> impl Iterator<Item = &InputFile> {
         let mut files = Vec::new();
@@ -147,7 +175,7 @@ impl InputPollOptionMedia {
                 files.extend(media.thumbnail.iter());
                 files.extend(media.cover.iter());
             }
-            Self::Location(_) | Self::Venue(_) => {}
+            Self::Link(_) | Self::Location(_) | Self::Venue(_) => {}
         }
 
         files.into_iter()
@@ -172,7 +200,7 @@ impl InputPollOptionMedia {
                 files.extend(media.thumbnail.iter_mut());
                 files.extend(media.cover.iter_mut());
             }
-            Self::Location(_) | Self::Venue(_) => {}
+            Self::Link(_) | Self::Location(_) | Self::Venue(_) => {}
         }
 
         files.into_iter()

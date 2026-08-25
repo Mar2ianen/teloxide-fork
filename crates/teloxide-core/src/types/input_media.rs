@@ -108,6 +108,25 @@ impl InputFileLike for InputMediaDocument {
     }
 }
 
+/// Represents an HTTP link to be attached to a poll option.
+///
+/// [The official docs](https://core.telegram.org/bots/api#inputmedialink).
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct InputMediaLink {
+    /// HTTP URL of the link.
+    pub url: String,
+}
+
+impl InputMediaLink {
+    pub fn new<S>(url: S) -> Self
+    where
+        S: Into<String>,
+    {
+        Self { url: url.into() }
+    }
+}
+
 /// Represents a photo to be sent.
 ///
 /// [The official docs](https://core.telegram.org/bots/api#inputmediaphoto).

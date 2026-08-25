@@ -122,7 +122,8 @@ impl InputFileLike for InputRichMessage {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichMessageMedia {
-    /// Identifier used by a `tg://photo`, `tg://video`, or `tg://audio` link.
+    /// Identifier used by a `tg://photo`, `tg://video`, `tg://audio`, or
+    /// `tg://document` link.
     pub id: String,
     /// The referenced media.
     pub media: InputRichMessageMediaContent,
@@ -149,6 +150,7 @@ impl InputRichMessageMedia {
 pub enum InputRichMessageMediaContent {
     Animation(InputMediaAnimation),
     Audio(InputMediaAudio),
+    Document(InputMediaDocument),
     Photo(InputMediaPhoto),
     Video(InputMediaVideo),
     VoiceNote(InputMediaVoiceNote),
@@ -160,6 +162,10 @@ impl InputRichMessageMediaContent {
         match self {
             Self::Photo(media) => files.push(&media.media),
             Self::Audio(media) => {
+                files.push(&media.media);
+                files.extend(media.thumbnail.iter());
+            }
+            Self::Document(media) => {
                 files.push(&media.media);
                 files.extend(media.thumbnail.iter());
             }
@@ -182,6 +188,10 @@ impl InputRichMessageMediaContent {
         match self {
             Self::Photo(media) => files.push(&mut media.media),
             Self::Audio(media) => {
+                files.push(&mut media.media);
+                files.extend(media.thumbnail.iter_mut());
+            }
+            Self::Document(media) => {
                 files.push(&mut media.media);
                 files.extend(media.thumbnail.iter_mut());
             }
@@ -636,5 +646,33 @@ mod tests {
         assert_eq!(value["id"], "voice");
         assert_eq!(value["media"]["type"], "voice_note");
         assert_eq!(value["media"]["media"], "voice-file");
+    }
+
+    #[test]
+    fn document_media_collects_media_and_thumbnail_files() {
+        let media = InputRichMessageMedia::new(
+            "document",
+            InputRichMessageMediaContent::Document(
+                InputMediaDocument::new(InputFile::memory("document"))
+                    .thumbnail(InputFile::memory("thumbnail")),
+            ),
+        );
+        let message =
+            InputRichMessage::html(r#"<img src="tg://document?id=document">"#).media([media]);
+        let mut files = Vec::new();
+        message.copy_into(&mut |file| files.push(file));
+        assert_eq!(files.len(), 2);
+    }
+
+    #[test]
+    fn message_generation_stopped_accepts_numeric_and_string_draft_ids() {
+        let chat = serde_json::json!({"id": 7, "type": "private", "first_name": "User"});
+        for draft_id in [serde_json::json!(42), serde_json::json!("42")] {
+            let value = serde_json::from_value::<crate::types::MessageGenerationStopped>(
+                serde_json::json!({"chat": chat.clone(), "draft_id": draft_id}),
+            )
+            .unwrap();
+            assert_eq!(value.draft_id, 42);
+        }
     }
 }

@@ -1816,16 +1816,14 @@ pub trait Requester {
     type EditEphemeralMessageText: Request<Payload = EditEphemeralMessageText, Err = Self::Err>;
 
     /// For Telegram documentation see [`EditEphemeralMessageText`].
-    fn edit_ephemeral_message_text<C, T>(
+    fn edit_ephemeral_message_text<C>(
         &self,
         chat_id: C,
         receiver_user_id: UserId,
         ephemeral_message_id: i32,
-        text: T,
     ) -> Self::EditEphemeralMessageText
     where
-        C: Into<Recipient>,
-        T: Into<String>;
+        C: Into<Recipient>;
 
     type EditEphemeralMessageMedia: Request<Payload = EditEphemeralMessageMedia, Err = Self::Err>;
 

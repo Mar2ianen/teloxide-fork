@@ -2229,16 +2229,14 @@ impl Requester for Bot {
 
     type EditEphemeralMessageText = JsonRequest<payloads::EditEphemeralMessageText>;
 
-    fn edit_ephemeral_message_text<C, T>(
+    fn edit_ephemeral_message_text<C>(
         &self,
         chat_id: C,
         receiver_user_id: UserId,
         ephemeral_message_id: i32,
-        text: T,
     ) -> Self::EditEphemeralMessageText
     where
         C: Into<Recipient>,
-        T: Into<String>,
     {
         Self::EditEphemeralMessageText::new(
             self.clone(),
@@ -2246,7 +2244,6 @@ impl Requester for Bot {
                 chat_id,
                 receiver_user_id,
                 ephemeral_message_id,
-                text,
             ),
         )
     }

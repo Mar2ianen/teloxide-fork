@@ -11911,11 +11911,20 @@
         },
         {
           "name": "text",
-          "description": "New text",
-          "required": true,
+          "description": "New text; required if rich_message isn't specified",
+          "required": false,
           "type_info": {
             "type": "string",
             "enumeration": []
+          }
+        },
+        {
+          "name": "rich_message",
+          "description": "New rich message content; required if text isn't specified",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "InputRichMessage"
           }
         },
         {

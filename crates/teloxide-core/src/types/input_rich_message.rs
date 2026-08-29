@@ -428,6 +428,7 @@ impl InputFileLike for InputRichBlockListItem {
     }
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockBlockQuotation {
@@ -503,6 +504,7 @@ pub struct InputRichBlockDocument {
     pub caption: Option<RichBlockCaption>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockDetails {
@@ -658,6 +660,28 @@ mod tests {
         assert!(value["blocks"][0]["cells"][0][0]
             .get("is_header")
             .is_none());
+    }
+
+    #[test]
+    fn callout_and_details_omit_unset_optional_fields() {
+        let message = InputRichMessage::blocks([
+            InputRichBlock::Blockquote(InputRichBlockBlockQuotation {
+                blocks: vec![InputRichBlock::Paragraph(InputRichBlockParagraph {
+                    text: RichText::from("status"),
+                })],
+                credit: None,
+            }),
+            InputRichBlock::Details(InputRichBlockDetails {
+                summary: RichText::from("Moves"),
+                blocks: vec![InputRichBlock::Paragraph(InputRichBlockParagraph {
+                    text: RichText::from("e2-e4"),
+                })],
+                is_open: Some(false),
+            }),
+        ]);
+        let value = serde_json::to_value(message).unwrap();
+        assert!(value["blocks"][0].get("credit").is_none());
+        assert_eq!(value["blocks"][1]["is_open"], false);
     }
 
     #[test]

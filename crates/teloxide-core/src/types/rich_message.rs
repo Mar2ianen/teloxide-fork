@@ -481,6 +481,7 @@ pub struct RichBlockCaption {
     pub credit: Option<RichText>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct RichBlockTableCell {
@@ -694,6 +695,7 @@ pub struct RichBlockSlideshow {
     pub caption: Option<RichBlockCaption>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct RichBlockTable {
@@ -837,5 +839,30 @@ mod tests {
         }))
         .unwrap();
         assert!(matches!(block, RichBlock::Known(_)));
+    }
+
+    #[test]
+    fn outgoing_table_omits_unset_optional_fields() {
+        let cell = RichBlockTableCell {
+            text: Some(RichText::from("cell")),
+            is_header: None,
+            colspan: None,
+            rowspan: None,
+            align: "center".to_owned(),
+            valign: "middle".to_owned(),
+        };
+        let table = RichBlockTable {
+            cells: vec![vec![cell]],
+            is_bordered: None,
+            is_striped: None,
+            is_compact: Some(true),
+            caption: None,
+        };
+        let encoded = serde_json::to_value(table).unwrap();
+        assert_eq!(encoded["cells"][0][0]["align"], "center");
+        assert_eq!(encoded["cells"][0][0]["valign"], "middle");
+        assert!(encoded["cells"][0][0].get("is_header").is_none());
+        assert!(encoded.get("is_bordered").is_none());
+        assert_eq!(encoded["is_compact"], true);
     }
 }

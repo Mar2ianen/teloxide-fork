@@ -68,6 +68,7 @@ impl_payload! {
     }
 }
 
+#[cfg(feature = "outbound")]
 impl crate::outbound::OutboundPayload for SendDocument {
     fn outbound_hint(&self) -> crate::outbound::OutboundHint {
         crate::outbound::OutboundHint {

@@ -31,8 +31,11 @@ native-tls = ["reqwest/native-tls"]
 # which allow implementing `Future`s without boxing.
 nightly = []
 
+# Outbound scheduler and queue adaptor.
+outbound = ["tokio/macros", "tokio/rt", "tokio/sync"]
+
 # Throttling bot adaptor
-throttle = ["vecrem"]
+throttle = ["outbound"]
 
 # Trace bot adaptor
 trace_adaptor = []
@@ -44,13 +47,13 @@ erased = []
 cache_me = []
 
 # All features except nightly and tls-related
-full = ["throttle", "trace_adaptor", "erased", "cache_me"]
+full = ["outbound", "throttle", "trace_adaptor", "erased", "cache_me"]
 
 
 [dependencies]
 schemars = { version = "1.0.4", features = ["chrono04", "url2"]}
 futures = "0.3.5"
-tokio = { version = "1.39", features = ["fs", "io-util", "macros", "sync", "time"] }
+tokio = { version = "1.39", default-features = false, features = ["fs", "io-util", "time"] }
 tokio-util = { version = "0.7.0", features = ["codec"] }
 pin-project = "1.0.12"
 bytes = "1.0.0"
@@ -80,9 +83,6 @@ chrono = { version = "0.4.32", default-features = false }
 either = "1.6.1"
 bitflags = "2"
 rgb = "0.8.48"
-
-vecrem = { version = "0.1", optional = true }
-
 
 [dev-dependencies]
 pretty_env_logger = "0.5"

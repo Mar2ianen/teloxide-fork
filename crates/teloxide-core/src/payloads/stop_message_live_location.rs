@@ -32,6 +32,7 @@ impl_payload! {
     }
 }
 
+#[cfg(feature = "outbound")]
 impl crate::outbound::OutboundPayload for StopMessageLiveLocation {
     fn outbound_hint(&self) -> crate::outbound::OutboundHint {
         crate::outbound::OutboundHint {

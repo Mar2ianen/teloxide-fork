@@ -46,6 +46,7 @@ features documented below.
 This fork includes opt-in application layers that stay outside the default Telegram transport:
 
 - `drafter` provides asynchronous latest-wins preview delivery, shared rate limiting, native-draft and edit-in-place backends, segment commits, finalization, abort cleanup, delivery certainty and update-driven Stop control
+- `outbound` provides the shared outbound scheduler, bounded queue, ordering lanes and generated request classification
 - `rich-text` provides the shared semantic Rich Text pipeline: HTML, developer Markdown and LLM Markdown frontends with bound links, custom emoji and time normalization
 - `time-rendering` is a feature-level compatibility alias that also enables the Rich Text pipeline; the former formatter API was replaced by the shared semantic API
 - the outbound scheduler is available through `OutboundQueue` and `Bot::outbound(queue)`; it is opt-in and does not change ordinary `Bot` request behavior
@@ -67,6 +68,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     Ok(())
 }
 ```
+
+Enable it explicitly in the application manifest:
+
+```toml
+teloxide = { version = "0.20.0", features = ["outbound"] }
+```
+
+The `throttle` and `drafter` features enable `outbound` transitively because
+their compatibility/runtime layers use the shared queue.
 
 The `rich-text` context is shared by all three frontends and contains both
 `TimeBindings` and `RichTextBindings`. Use `RichTextRenderContext::for_developer`
@@ -152,7 +162,7 @@ never the raw request error or preview payload.
 
 ### Release checks for optional features
 
-Changes to `drafter`, `time-rendering` or `rich-text` should be checked with the pinned formatter and with both feature combinations enabled and disabled:
+Changes to `outbound`, `drafter`, `time-rendering` or `rich-text` should be checked with the pinned formatter and with both feature combinations enabled and disabled:
 
 ```bash
 cargo +nightly-2025-06-12 fmt --all -- --check
@@ -161,6 +171,7 @@ cargo test -p teloxide --no-default-features --features drafter --lib
 cargo test -p teloxide --no-default-features --features time-rendering --lib
 cargo test -p teloxide --no-default-features --features rich-text --lib
 cargo check -p teloxide --no-default-features
+cargo check -p teloxide --no-default-features --features outbound
 cargo clippy -p teloxide --all-targets --features "drafter,rich-text" -- -D warnings
 cargo check -p teloxide --example drafter --features drafter
 ```

@@ -1,9 +1,15 @@
 # Outbound scheduler
 
 The outbound scheduler is a deterministic admission, rate-limit and ordering
-layer for Telegram requests. It is opt-in: construct an `OutboundQueue` and
+layer for Telegram requests. Enable the `outbound` Cargo feature, then
+construct an `OutboundQueue` and
 wrap a requester with `Outbound` (or use `Bot::outbound(queue)`). An ordinary
 `Bot` keeps its existing behavior.
+
+For the high-level `teloxide` crate, use `features = ["outbound"]`. The
+`throttle` and `drafter` features enable `outbound` transitively because their
+implementations use the shared queue. The core `throttle` feature does the
+same for `teloxide-core`.
 
 The queue combines bounded ingress, global/per-chat rolling windows, exact-class
 windows, priority aging, explicit ordering lanes and completion-aware permits.

@@ -6,6 +6,7 @@
 | `webhooks-axum`      | Enables webhook implementation based on axum framework. |
 | `macros`             | Re-exports macros from [`teloxide-macros`]. |
 | `ctrlc_handler`      | Enables the [`DispatcherBuilder::enable_ctrlc_handler`] function (**enabled by default**). |
+| `outbound`           | Enables the shared outbound scheduler, queue adaptor and generated request classification. |
 | `throttle`           | Enables the [`Throttle`](adaptors::Throttle) bot adaptor. |
 | `cache-me`           | Enables the [`CacheMe`](adaptors::CacheMe) bot adaptor. |
 | `trace-adaptor`      | Enables the [`Trace`](adaptors::Trace) bot adaptor. |
@@ -19,7 +20,7 @@
 | `sqlite-storage-rustls`     | Enables the [Sqlite] storage support for dialogues (depends on `rustls`, conflicts with `sqlite-storage-nativetls`). |
 | `cbor-serializer`    | Enables the [CBOR] serializer for dialogues. |
 | `bincode-serializer` | Enables the [Bincode] serializer for dialogues. |
-| `drafter`            | Enables asynchronous latest-wins preview/final delivery with Telegram Drafter backends. |
+| `drafter`            | Enables asynchronous latest-wins preview/final delivery with Telegram Drafter backends; also enables `outbound` for the queue-backed limiter. |
 | `rich-text`          | Opts into the semantic Rich Text pipeline with HTML, developer Markdown and LLM Markdown frontends, shared time/link/emoji bindings and policies. The canonical API is under `utils::rich_text`. |
 | `time-rendering`     | Feature-level compatibility alias for `rich-text`; formatter source compatibility is not promised after the semantic Rich Text API migration. |
 

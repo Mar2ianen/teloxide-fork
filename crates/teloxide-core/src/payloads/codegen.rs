@@ -131,8 +131,8 @@ impl EditMessageTextInline {
 
         let policy = method_policy(&method.names.2);
         let outbound_impl = format!(
-            "\n\nimpl crate::outbound::OutboundPayload for {Method} {{\n    fn \
-             outbound_hint(&self) -> crate::outbound::OutboundHint {{\n        \
+            "\n\n#[cfg(feature = \"outbound\")]\nimpl crate::outbound::OutboundPayload for \
+             {Method} {{\n    fn outbound_hint(&self) -> crate::outbound::OutboundHint {{\n        \
              crate::outbound::OutboundHint {{\n            scope: {scope},\n            class: \
              crate::outbound::OutboundClass::new(crate::outbound::class::{class}),\n            \
              priority: crate::outbound::OutboundPriority::{priority},\n            weight: \

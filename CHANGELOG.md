@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## unreleased
 
+### Changed
+
+- Gate the outbound scheduler, queue, outbox and generated request classification behind the opt-in `outbound` feature. The `throttle` and `drafter` features enable it transitively.
+- Remove the unused `vecrem` dependency and make core's direct Tokio scheduler features conditional on outbound scheduling.
+
 ## 0.20.0 - 2026-08-24
 
 ### Added

@@ -227,6 +227,8 @@ impl Bot {
     ///
     /// The returned requester classifies each final payload at send time and
     /// acquires permits from the supplied shared queue before executing it.
+    #[cfg(feature = "outbound")]
+    #[cfg_attr(all(any(docsrs, dep_docsrs), feature = "nightly"), doc(cfg(feature = "outbound")))]
     pub fn outbound(
         self,
         queue: crate::outbound::OutboundQueue,

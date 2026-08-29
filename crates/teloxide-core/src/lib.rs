@@ -41,6 +41,8 @@
 //! - `rustls` — use [`rustls`] tls implementation
 //! - `trace_adaptor` — enables [`Trace`] bot adaptor
 //! - `erased` — enables [`ErasedRequester`] bot adaptor
+//! - `outbound` — enables the outbound scheduler, queue and payload
+//!   classification
 //! - `throttle` — enables [`Throttle`] bot adaptor
 //! - `cache_me` — enables [`CacheMe`] bot adaptor
 //! - `full` — enables all features except `nightly` and tls-related
@@ -128,6 +130,8 @@ pub mod types;
 mod bot;
 
 // implementation details
+#[cfg(feature = "outbound")]
+#[cfg_attr(all(any(docsrs, dep_docsrs), feature = "nightly"), doc(cfg(feature = "outbound")))]
 pub mod outbound;
 mod serde_multipart;
 mod util;

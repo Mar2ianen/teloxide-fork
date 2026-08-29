@@ -23,6 +23,7 @@ impl_payload! {
     }
 }
 
+#[cfg(feature = "outbound")]
 impl crate::outbound::OutboundPayload for GetUserProfilePhotos {
     fn outbound_hint(&self) -> crate::outbound::OutboundHint {
         crate::outbound::OutboundHint {

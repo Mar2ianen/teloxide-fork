@@ -3,6 +3,19 @@ Note that the list of required changes is not fully exhaustive and it may lack s
 
 ## unreleased
 
+### Outbound scheduler feature
+
+The outbound scheduler is now behind the opt-in `outbound` feature. Applications
+that use `OutboundQueue`, `Outbound`, `Bot::outbound` or the generated
+`OutboundPayload` classification should enable it explicitly:
+
+```toml
+teloxide = { version = "0.20.0", features = ["outbound"] }
+```
+
+The existing `throttle` and `drafter` features enable `outbound` transitively.
+Applications that only use ordinary `Bot` requests do not need to enable it.
+
 ### Bot API 10.3
 
 This fork now exposes Telegram Bot API 10.3. The generated send methods use

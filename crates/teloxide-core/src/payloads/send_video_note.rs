@@ -63,6 +63,7 @@ impl_payload! {
     }
 }
 
+#[cfg(feature = "outbound")]
 impl crate::outbound::OutboundPayload for SendVideoNote {
     fn outbound_hint(&self) -> crate::outbound::OutboundHint {
         crate::outbound::OutboundHint {

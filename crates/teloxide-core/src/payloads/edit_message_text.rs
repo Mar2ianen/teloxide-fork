@@ -61,6 +61,7 @@ impl EditMessageText {
     }
 }
 
+#[cfg(feature = "outbound")]
 impl crate::outbound::OutboundPayload for EditMessageText {
     fn outbound_hint(&self) -> crate::outbound::OutboundHint {
         crate::outbound::OutboundHint {

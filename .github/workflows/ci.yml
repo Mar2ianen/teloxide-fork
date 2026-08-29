@@ -213,6 +213,11 @@ jobs:
       - name: Check with no default features
         run: |
           cargo +stable check --no-default-features
+          cargo +stable check -p teloxide-core --no-default-features
+          cargo +stable check -p teloxide-core --no-default-features --features outbound
+          cargo +stable check -p teloxide-core --no-default-features --features throttle
+          cargo +stable check -p teloxide --no-default-features --features outbound
+          cargo +stable check -p teloxide --no-default-features --features drafter
 
   clippy:
     name: Run linter

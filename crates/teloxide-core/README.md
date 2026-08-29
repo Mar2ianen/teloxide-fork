@@ -29,6 +29,9 @@ teloxide-core = "0.16.0"
 ```
 _Compiler support: requires rustc 1.85+_.
 
+The outbound scheduler is available with the opt-in `outbound` feature. The
+`throttle` feature enables it transitively.
+
 The current development line exposes Telegram Bot API 10.3, including rich-message
 buttons and document blocks, expandable quotations, compact tables, ephemeral
 message parameters and editing methods, native draft Stop controls, disabled

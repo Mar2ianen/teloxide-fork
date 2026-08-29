@@ -473,6 +473,7 @@ pub struct InputRichBlockTable {
     pub caption: Option<RichText>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockButtons {
@@ -613,6 +614,23 @@ mod tests {
                 "html": "<b>hello</b>",
                 "is_rtl": true,
                 "skip_entity_detection": true
+            })
+        );
+    }
+
+    #[test]
+    fn buttons_omit_optional_alignment_when_unset() {
+        let message =
+            InputRichMessage::blocks([InputRichBlock::Buttons(InputRichBlockButtons::new([
+                RichMessageButton::callback("Open", "open"),
+            ]))]);
+        assert_eq!(
+            serde_json::to_value(message).unwrap(),
+            serde_json::json!({
+                "blocks": [{
+                    "type": "buttons",
+                    "buttons": [{"text": "Open", "callback_data": "open"}]
+                }]
             })
         );
     }

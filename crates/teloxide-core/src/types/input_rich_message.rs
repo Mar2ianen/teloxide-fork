@@ -463,6 +463,7 @@ pub struct InputRichBlockSlideshow {
     pub caption: Option<RichBlockCaption>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct InputRichBlockTable {
@@ -633,6 +634,30 @@ mod tests {
                 }]
             })
         );
+    }
+
+    #[test]
+    fn table_omits_optional_fields_when_unset() {
+        let message = InputRichMessage::blocks([InputRichBlock::Table(InputRichBlockTable {
+            cells: vec![vec![RichBlockTableCell {
+                text: Some(RichText::from("cell")),
+                is_header: None,
+                colspan: None,
+                rowspan: None,
+                align: "center".to_owned(),
+                valign: "middle".to_owned(),
+            }]],
+            is_bordered: None,
+            is_striped: None,
+            is_compact: Some(true),
+            caption: None,
+        })]);
+        let value = serde_json::to_value(message).unwrap();
+        assert_eq!(value["blocks"][0]["is_compact"], true);
+        assert!(value["blocks"][0].get("is_striped").is_none());
+        assert!(value["blocks"][0]["cells"][0][0]
+            .get("is_header")
+            .is_none());
     }
 
     #[test]

@@ -371,11 +371,14 @@ impl UpdateId {
     /// Returns the offset for the **next** update that can be used for polling.
     ///
     /// I.e. `self.0 + 1`.
+    ///
+    /// The result is `i64` because `update_id` is a `u32`: the next offset
+    /// after `u32::MAX` (4294967296) does not fit in an `i32`, and a wrapped
+    /// negative value would be misread by Telegram as an offset from the end
+    /// of the update queue.
     #[must_use]
-    pub fn as_offset(self) -> i32 {
-        debug_assert!(self.0 < i32::MAX as u32);
-
-        self.0 as i32 + 1
+    pub fn as_offset(self) -> i64 {
+        self.0 as i64 + 1
     }
 }
 
@@ -602,6 +605,24 @@ mod test {
 
     use chrono::DateTime;
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn update_id_as_offset_never_wraps() {
+        assert_eq!(UpdateId(0).as_offset(), 1);
+        assert_eq!(UpdateId(i32::MAX as u32).as_offset(), i32::MAX as i64 + 1);
+        assert_eq!(UpdateId(u32::MAX).as_offset(), 4_294_967_296);
+    }
+
+    #[test]
+    fn get_updates_offset_serializes_full_i64_range() {
+        use crate::payloads::GetUpdates;
+
+        let payload = GetUpdates { offset: Some(4_294_967_296_i64), ..Default::default() };
+        assert_eq!(
+            serde_json::to_value(&payload).unwrap(),
+            serde_json::json!({ "offset": 4_294_967_296_i64 })
+        );
+    }
 
     // TODO: more tests for deserialization
     #[test]

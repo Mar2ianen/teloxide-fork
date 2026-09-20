@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## unreleased
 
+## 0.20.0 - 2026-08-24
+
 ### Added
 
 - Support for Telegram Bot API 10.3: rich-message buttons, documents, expandable quote blocks and compact tables; ephemeral message parameters and rich ephemeral editing; native Stop-button draft parameters; disabled inline buttons; force-reply markup flags; stopped-generation updates; and community-joined service messages.
@@ -26,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Validate rich-message button actions, styles, callback-data byte limits, button counts and alignment before dispatch.
 - Keep rich document media multipart-aware, allow rich-only ephemeral text edits, and accept numeric or string draft IDs in stopped-generation updates.
 - Clear native drafter generations on every terminal worker path so stopped handles cannot match stale updates.
+- Validate rich-text button objects recursively, restrict button labels to the Bot API's supported forms, reject URL-backed rich draft media, and enforce inline-button styles and rich-media link identifiers before dispatch.
 
 ## 0.19.0 - 2026-08-14
 

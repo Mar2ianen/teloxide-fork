@@ -446,13 +446,13 @@ A complete GitHub CI run should cover:
 
 `master` is the release line. Use the latest immutable package tags to
 identify the released code; do not treat the current branch head as a release
-without a matching tag and version entry. The next API update targets Bot API
-10.2 and should be integrated on `next` before a versioned promotion to
-`master`.
+without a matching tag and version entry. Bot API 10.3 shipped on the release
+line as `teloxide` 0.20.0 / `teloxide-core` 0.16.0 (2026-08-24); the next API
+update target is tracked on `next` before a versioned promotion to `master`.
 
-Do not state complete Bot API 10.0 coverage without an independent external audit against the official documentation. Treat the 10.0 coverage claim as qualified until that audit is recorded.
+Do not state complete Bot API 10.0 coverage without an independent external audit against the official documentation. Treat the 10.0 coverage claim as qualified until that audit is recorded. The same qualification applies to the 10.3 core-surface claim until a frozen-snapshot external audit is recorded.
 
-For the 10.2 update, separate work into reviewable layers:
+For Bot API updates, separate work into reviewable layers:
 
 1. API/object audit
 2. leaf types and IDs
@@ -464,7 +464,7 @@ For the 10.2 update, separate work into reviewable layers:
 8. renderers and lossy fallback reporting
 9. final external diff
 
-Do not combine the entire 10.2 update and a renderer rewrite into one unreviewable commit.
+Do not combine an entire API update and a renderer rewrite into one unreviewable commit.
 
 ## Code style
 
@@ -504,7 +504,7 @@ Do not change existing public behavior outside the task scope without calling it
 Use clear imperative commit subjects, for example:
 
 ```text
-feat: add Bot API 10.2 rich message types
+feat: add Bot API rich message types
 fix: preserve video covers in multipart requests
 test: verify sendPoll attachment mapping
 docs: document agent development workflow

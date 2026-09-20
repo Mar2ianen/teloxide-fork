@@ -54,6 +54,7 @@ pub(crate) fn mentioned_users_from_entities(
         | DateTime { .. }
         | Pre { language: _ }
         | TextLink { url: _ }
-        | CustomEmoji { custom_emoji_id: _ } => None,
+        | CustomEmoji { custom_emoji_id: _ }
+        | Unknown => None,
     })
 }

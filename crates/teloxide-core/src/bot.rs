@@ -163,6 +163,12 @@ impl Bot {
     ///
     /// [tbas]: https://github.com/tdlib/telegram-bot-api
     ///
+    /// # Panics
+    ///
+    /// If `url` cannot be a base URL (for example an opaque `data:` URL).
+    /// Request URL construction appends path segments, so the check fails
+    /// here at configuration time instead of panicking on every request.
+    ///
     /// ## Examples
     ///
     /// ```
@@ -195,7 +201,11 @@ impl Bot {
     /// assert_eq!(bot.clone().api_url().as_str(), "https://example.com/");
     /// assert_ne!(bot2.api_url().as_str(), "https://example.com/");
     /// ```
-    pub fn set_api_url(mut self, url: reqwest::Url) -> Self {
+    pub fn set_api_url(mut self, mut url: reqwest::Url) -> Self {
+        assert!(
+            url.path_segments_mut().is_ok(),
+            "API URL cannot be a cannot-be-a-base URL, request construction appends path segments"
+        );
         self.api_url = Arc::new(url);
         self
     }
@@ -249,10 +259,12 @@ impl Bot {
         let timeout_hint = payload.timeout_hint();
         let params = match payload.validate() {
             Ok(()) => {
-                Ok(stacker::maybe_grow(256 * 1024, 1024 * 1024, || serde_json::to_vec(payload))
-                    // this `expect` should be ok since we don't write request those may trigger
-                    // error here
-                    .expect("serialization of request to be infallible"))
+                stacker::maybe_grow(256 * 1024, 1024 * 1024, || serde_json::to_vec(payload))
+                    // Current payloads serialize infallibly in practice, but a
+                    // future payload shape may fail. The request never reaches
+                    // the network, so surface that as a local serialization
+                    // error instead of panicking.
+                    .map_err(|err| RequestError::Serialization(Arc::new(err)))
             }
             Err(error) => Err(RequestError::Validation(error)),
         };
@@ -341,4 +353,42 @@ impl Bot {
 
 fn get_env(env: &'static str) -> String {
     std::env::var(env).unwrap_or_else(|_| panic!("Cannot get the {env} env variable"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn serialization_failure_reports_serialization_error() {
+        use crate::requests::Payload;
+        use serde::ser::{Serialize, Serializer};
+
+        struct Unserializable;
+
+        impl Serialize for Unserializable {
+            fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                Err(serde::ser::Error::custom("intentionally unserializable"))
+            }
+        }
+
+        impl Payload for Unserializable {
+            type Output = crate::types::True;
+            const NAME: &'static str = "testMethod";
+        }
+
+        let bot = Bot::new("TOKEN");
+        let result = bot.execute_json(&Unserializable).await;
+        assert!(matches!(result, Err(RequestError::Serialization(_))));
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot-be-a-base")]
+    fn opaque_api_url_is_rejected_at_configuration_time() {
+        let url = reqwest::Url::parse("data:text/plain,hello").unwrap();
+        let _ = Bot::new("TOKEN").set_api_url(url);
+    }
 }

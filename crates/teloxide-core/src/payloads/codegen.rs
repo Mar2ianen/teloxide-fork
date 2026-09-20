@@ -1597,7 +1597,11 @@ fn multipart_input_file_fields(m: &Method) -> Option<Vec<&str>> {
     let mut fields: Vec<_> =
         m.params.iter().filter(|&p| ty_is_multiparty(&p.ty)).map(|p| &*p.name).collect();
 
-    fields.extend(m.multipart.iter().map(String::as_str));
+    for field in m.multipart.iter().map(String::as_str) {
+        if !fields.contains(&field) {
+            fields.push(field);
+        }
+    }
 
     if fields.is_empty() {
         None
@@ -1607,6 +1611,45 @@ fn multipart_input_file_fields(m: &Method) -> Option<Vec<&str>> {
 }
 
 fn ty_is_multiparty(ty: &Type) -> bool {
+    // NOTE: only leaf file types are auto-detected here. Composite
+    // file-bearing types (`InputMedia`, `InputPaidMedia`, `InputPollMedia`,
+    // `InputPollOptionMedia`, `InputStoryContent`, `InputMessageContent`,
+    // `InputRichMessage`) implement `InputFileLike` but must be listed in the
+    // method's explicit `multipart` schema attribute: several payloads using
+    // them (e.g. `SendPoll`, `PostStory`, `EditMessageMedia`) carry hand-written
+    // `MultipartPayload` impls in `requests/multipart_payload.rs`, and
+    // auto-detecting them would generate conflicting impls (E0119).
     matches!(ty, Type::RawTy(x) if x == "InputFile" || x == "InputSticker" || x == "InputProfilePhoto")
         || matches!(ty, Type::Option(inner) if ty_is_multiparty(inner))
+}
+
+#[cfg(test)]
+mod multipart_dedup_tests {
+    use super::*;
+
+    fn empty_doc() -> Doc {
+        Doc { md: String::new(), md_links: Default::default() }
+    }
+
+    #[test]
+    fn autodetected_and_explicit_multipart_fields_are_not_duplicated() {
+        let method = Method {
+            names: (String::new(), String::new(), String::new()),
+            return_ty: Type::True,
+            doc: empty_doc(),
+            tg_doc: String::new(),
+            tg_category: String::new(),
+            notes: Vec::new(),
+            multipart: vec!["media".to_owned()],
+            validation: None,
+            params: vec![Param {
+                name: "media".to_owned(),
+                ty: Type::RawTy("InputFile".to_owned()),
+                descr: empty_doc(),
+            }],
+            sibling: None,
+        };
+
+        assert_eq!(multipart_input_file_fields(&method), Some(vec!["media"]));
+    }
 }

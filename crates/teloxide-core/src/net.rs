@@ -82,7 +82,9 @@ pub fn default_reqwest_settings() -> reqwest::ClientBuilder {
 fn method_url(base: reqwest::Url, token: &str, method_name: &str) -> reqwest::Url {
     let mut url = base;
     {
-        let mut segments = url.path_segments_mut().expect("base URL cannot be a cannot-be-a-base");
+        // `Bot::set_api_url` rejects cannot-be-a-base URLs at configuration
+        // time, so this expect guards a documented invariant.
+        let mut segments = url.path_segments_mut().expect("API URL must be a base URL");
         segments.push(&format!("bot{token}"));
         segments.push(method_name);
     }
@@ -95,7 +97,9 @@ fn method_url(base: reqwest::Url, token: &str, method_name: &str) -> reqwest::Ur
 fn file_url(base: reqwest::Url, token: &str, file_path: &str) -> reqwest::Url {
     let mut url = base;
     {
-        let mut segments = url.path_segments_mut().expect("base URL cannot be a cannot-be-a-base");
+        // See `method_url`: cannot-be-a-base URLs are rejected in
+        // `Bot::set_api_url`.
+        let mut segments = url.path_segments_mut().expect("API URL must be a base URL");
         segments.push("file");
         segments.push(&format!("bot{token}"));
         segments.push(file_path);

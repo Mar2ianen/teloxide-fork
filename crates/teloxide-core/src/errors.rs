@@ -57,6 +57,13 @@ pub enum RequestError {
     /// multipart serialization failures from file I/O errors.
     #[error("An I/O error: {0}")]
     Io(#[from] Arc<io::Error>),
+
+    /// A request could not be serialized locally.
+    ///
+    /// No HTTP request was sent to Telegram: retrying the same payload will
+    /// fail the same way, so fix the payload instead.
+    #[error("An error while serializing a request: {0}")]
+    Serialization(#[source] Arc<serde_json::Error>),
 }
 
 /// An error caused by downloading a file.

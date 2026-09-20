@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::types::{
-    Animation, Audio, Document, InputFile, LivePhoto, Location, PhotoSize, Sticker, Venue, Video,
+    Animation, Audio, Document, InputFile, InputFileLike, LivePhoto, Location, PhotoSize, Sticker,
+    Venue, Video,
 };
 
 /// This object describes media attached to a poll description, quiz
@@ -59,6 +60,20 @@ pub enum InputPollOptionMedia {
     Sticker(crate::types::InputMediaSticker),
     Venue(crate::types::InputMediaVenue),
     Video(crate::types::InputMediaVideo),
+}
+
+impl InputFileLike for InputPollMedia {
+    fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
+        for file in self.files() {
+            file.copy_into(into);
+        }
+    }
+
+    fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
+        for file in self.files_mut() {
+            file.move_into(into);
+        }
+    }
 }
 
 impl InputPollMedia {
@@ -127,6 +142,20 @@ impl InputPollMedia {
     }
 }
 
+impl InputFileLike for InputPollOptionMedia {
+    fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
+        for file in self.files() {
+            file.copy_into(into);
+        }
+    }
+
+    fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
+        for file in self.files_mut() {
+            file.move_into(into);
+        }
+    }
+}
+
 impl InputPollOptionMedia {
     pub(crate) fn files(&self) -> impl Iterator<Item = &InputFile> {
         let mut files = Vec::new();
@@ -176,5 +205,48 @@ impl InputPollOptionMedia {
         }
 
         files.into_iter()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{InputFile, InputFileLike, InputMediaLocation, InputMediaVideo};
+
+    fn video_media() -> InputPollMedia {
+        let mut video = InputMediaVideo::new(InputFile::file_id("1".into()));
+        video.thumbnail = Some(InputFile::file_id("2".into()));
+        video.cover = Some(InputFile::file_id("3".into()));
+        InputPollMedia::Video(video)
+    }
+
+    #[test]
+    fn poll_media_files_include_thumbnail_and_cover() {
+        assert_eq!(video_media().files().count(), 3);
+    }
+
+    #[test]
+    fn poll_media_input_file_like_traverses_all_attachments() {
+        let media = video_media();
+
+        let mut copied = Vec::new();
+        media.copy_into(&mut |file| copied.push(file));
+        assert_eq!(copied.len(), 3);
+
+        let mut media = media;
+        let mut moved_count = 0;
+        media.move_into(&mut |_| moved_count += 1);
+        assert_eq!(moved_count, 3);
+    }
+
+    #[test]
+    fn poll_option_media_location_has_no_files() {
+        let media = InputPollOptionMedia::Location(InputMediaLocation {
+            latitude: 0.0,
+            longitude: 0.0,
+            horizontal_accuracy: None,
+        });
+
+        assert_eq!(media.files().count(), 0);
     }
 }

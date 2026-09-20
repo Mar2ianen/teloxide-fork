@@ -63,7 +63,7 @@ fn classify_request_error(
             },
             DeliveryCertainty::Unknown,
         ),
-        RequestError::Validation(_) => {
+        RequestError::Validation(_) | RequestError::Serialization(_) => {
             (DrafterErrorClass::InvalidPayload, DeliveryCertainty::NotAttempted)
         }
         RequestError::Api(_) | RequestError::MigrateToChatId(_) => {
@@ -2388,6 +2388,18 @@ mod tests {
 
         assert_eq!(disposition.delivery, DeliveryCertainty::Unknown);
         assert_eq!(disposition.class, DrafterErrorClass::Transient { retry_safe: false });
+    }
+
+    #[test]
+    fn local_serialization_failure_is_invalid_and_not_attempted() {
+        let error = RequestError::Serialization(
+            serde_json::from_slice::<serde_json::Value>(b"\xff").unwrap_err().into(),
+        );
+        let disposition =
+            classify_request_error(DrafterOperation::Final, &DrafterRequestError::Inner(error));
+
+        assert_eq!(disposition.delivery, DeliveryCertainty::NotAttempted);
+        assert_eq!(disposition.class, DrafterErrorClass::InvalidPayload);
     }
 
     #[test]

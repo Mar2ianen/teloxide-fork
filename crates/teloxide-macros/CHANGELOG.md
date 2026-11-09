@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Avoid unreachable-code diagnostics for infallible command argument parsers on newer compilers, preserving error conversion for fallible parsers.
+- Avoid unreachable-code diagnostics for infallible command argument parsers on newer compilers, preserving error conversion for fallible parsers ([upstream #1486](https://github.com/teloxide/teloxide/pull/1486)).
 
 ## 0.11.1 - 2026-08-14
 

@@ -125,8 +125,9 @@ fn parser_with_separator<'a>(
                             message: format!("Expected but not found arg number {}", #found + 1),
                         })?;
 
-                        <#types>::from_str(s).map_err(::std::convert::Into::into)
-                                .map_err(teloxide::utils::command::ParseError::IncorrectFormat)?
+                        <#types>::from_str(s)
+                            .map_err(::std::convert::Into::into)
+                            .map_err(teloxide::utils::command::ParseError::IncorrectFormat)?
                     },
                 )*
             )

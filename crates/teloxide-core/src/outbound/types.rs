@@ -48,7 +48,10 @@ pub enum OutboundScope {
     ///
     /// A resource RetryAfter penalizes only that resource, but this request
     /// also consumes per-chat windows and observes chat penalties.
-    ResourceInChat { resource: OutboundResourceKey, chat: OutboundChatKey },
+    ResourceInChat {
+        resource: OutboundResourceKey,
+        chat: OutboundChatKey,
+    },
 }
 
 impl OutboundScope {

@@ -1985,8 +1985,8 @@ impl SchedulerState {
                 }
             }
         }
-        if let OutboundScope::Resource(resource)
-        | OutboundScope::ResourceInChat { resource, .. } = &candidate.scope
+        if let OutboundScope::Resource(resource) | OutboundScope::ResourceInChat { resource, .. } =
+            &candidate.scope
         {
             if let Some(&deadline) = self.penalties.get(&PenaltyKey::Resource(resource.clone())) {
                 until = until.max(deadline);
@@ -2492,8 +2492,9 @@ impl SchedulerState {
         let key = match scope {
             OutboundScope::Global => PenaltyKey::Global,
             OutboundScope::Chat(chat) => PenaltyKey::Chat(chat),
-            OutboundScope::Resource(resource)
-            | OutboundScope::ResourceInChat { resource, .. } => PenaltyKey::Resource(resource),
+            OutboundScope::Resource(resource) | OutboundScope::ResourceInChat { resource, .. } => {
+                PenaltyKey::Resource(resource)
+            }
         };
         let entry = self.penalties.entry(key).or_insert(until);
         if until > *entry {
@@ -5170,11 +5171,8 @@ mod tests {
         let later = t0 + Duration::from_secs(10);
         assert_eq!(jobs(&s.grant_ready(later)), vec![edit]);
         s.complete(edit, OutboundCompletion::NoRequest, later, later);
-        let next = fifo(
-            &mut s,
-            meta(OutboundScope::Chat(chat), None, OutboundPriority::NORMAL),
-            later,
-        );
+        let next =
+            fifo(&mut s, meta(OutboundScope::Chat(chat), None, OutboundPriority::NORMAL), later);
         assert_eq!(jobs(&s.grant_ready(later)), vec![next]);
     }
 }

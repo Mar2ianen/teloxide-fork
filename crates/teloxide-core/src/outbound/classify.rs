@@ -92,10 +92,7 @@ pub(crate) fn widget_message_scope(
         Recipient::ChannelUsername(name) => OutboundChatKey::username(name),
     };
     OutboundScope::ResourceInChat {
-        resource: crate::outbound::OutboundResourceKey::widget_message(
-            chat.clone(),
-            message_id.0,
-        ),
+        resource: crate::outbound::OutboundResourceKey::widget_message(chat.clone(), message_id.0),
         chat,
     }
 }

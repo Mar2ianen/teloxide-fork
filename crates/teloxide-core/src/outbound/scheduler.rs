@@ -762,7 +762,7 @@ impl SchedulerState {
                 capacity: window.capacity,
             });
         }
-        if let OutboundScope::Chat(chat) = &meta.scope {
+        if let Some(chat) = meta.scope.chat_key() {
             let kind = chat.window_chat_kind();
             if let Some(window) = self
                 .chat_limits
@@ -777,7 +777,7 @@ impl SchedulerState {
                 });
             }
         }
-        if let OutboundScope::Chat(_) = &meta.scope {
+        if meta.scope.chat_key().is_some() {
             if let Some(window) = self
                 .class_limits
                 .chat
@@ -1600,7 +1600,7 @@ impl SchedulerState {
             OutboundScope::Global | OutboundScope::Resource(_) => {
                 vec![WindowRef::Global, WindowRef::ClassGlobal(class)]
             }
-            OutboundScope::Chat(chat) => vec![
+            OutboundScope::Chat(chat) | OutboundScope::ResourceInChat { chat, .. } => vec![
                 WindowRef::Global,
                 WindowRef::ClassGlobal(class),
                 WindowRef::Chat(chat.clone()),
@@ -1985,12 +1985,14 @@ impl SchedulerState {
                 }
             }
         }
-        if let OutboundScope::Resource(resource) = &candidate.scope {
+        if let OutboundScope::Resource(resource)
+        | OutboundScope::ResourceInChat { resource, .. } = &candidate.scope
+        {
             if let Some(&deadline) = self.penalties.get(&PenaltyKey::Resource(resource.clone())) {
                 until = until.max(deadline);
             }
         }
-        if let OutboundScope::Chat(chat) = &candidate.scope {
+        if let Some(chat) = candidate.scope.chat_key() {
             if self.penalty_active(PenaltyKey::Chat(chat.clone()), now) {
                 until = until.max(self.penalties[&PenaltyKey::Chat(chat.clone())]);
             }
@@ -2062,7 +2064,7 @@ impl SchedulerState {
         if let Some(windows) = self.class_global_windows.get_mut(&job.meta.class) {
             windows.consume(now, job.meta.weight.get(), candidate.job);
         }
-        if let OutboundScope::Chat(chat) = &job.meta.scope {
+        if let Some(chat) = job.meta.scope.chat_key() {
             self.chat_window_sets
                 .entry(chat.clone())
                 .or_insert_with(|| WindowSet::new(&self.chat_limits, chat.window_chat_kind()))
@@ -2181,7 +2183,7 @@ impl SchedulerState {
             {
                 refunded_windows.push(WindowRef::ClassGlobal(in_flight.class));
             }
-            if let OutboundScope::Chat(chat) = &in_flight.scope {
+            if let Some(chat) = in_flight.scope.chat_key() {
                 let remove_chat_window =
                     self.chat_window_sets.get_mut(chat).is_some_and(|windows| {
                         let refunded = windows.refund(now, job, in_flight.weight);
@@ -2279,7 +2281,7 @@ impl SchedulerState {
                     capacity: window.capacity,
                 });
             }
-            if let OutboundScope::Chat(chat) = &job.meta.scope {
+            if let Some(chat) = job.meta.scope.chat_key() {
                 let kind = chat.window_chat_kind();
                 if let Some(window) = limits
                     .chat
@@ -2433,7 +2435,7 @@ impl SchedulerState {
                     capacity: window.capacity,
                 });
             }
-            if matches!(job.meta.scope, OutboundScope::Chat(_)) {
+            if job.meta.scope.chat_key().is_some() {
                 if let Some(window) = limits
                     .chat
                     .iter()
@@ -2490,7 +2492,8 @@ impl SchedulerState {
         let key = match scope {
             OutboundScope::Global => PenaltyKey::Global,
             OutboundScope::Chat(chat) => PenaltyKey::Chat(chat),
-            OutboundScope::Resource(resource) => PenaltyKey::Resource(resource),
+            OutboundScope::Resource(resource)
+            | OutboundScope::ResourceInChat { resource, .. } => PenaltyKey::Resource(resource),
         };
         let entry = self.penalties.entry(key).or_insert(until);
         if until > *entry {
@@ -5091,5 +5094,87 @@ mod tests {
         // Отмена владельца снимает hold и немедленно будит light.
         s.cancel(heavy_job, t0);
         assert_eq!(jobs(&s.grant_ready(t0)), vec![light]);
+    }
+
+    #[test]
+    fn widget_resource_in_chat_observes_chat_penalty_but_not_other_chats() {
+        let mut s = scheduler(
+            OutboundLimits {
+                global: Vec::new(),
+                chat: vec![WindowLimit::new(10, Duration::from_secs(60))],
+            },
+            aging(),
+        );
+        let t0 = base();
+        let chat = OutboundChatKey::id(7);
+        s.penalize(OutboundScope::Chat(chat.clone()), t0 + Duration::from_secs(5));
+        let blocked = fifo(
+            &mut s,
+            meta(
+                OutboundScope::ResourceInChat {
+                    resource: OutboundResourceKey::shared_widget("target"),
+                    chat,
+                },
+                None,
+                OutboundPriority::NORMAL,
+            ),
+            t0,
+        );
+        let other = fifo(
+            &mut s,
+            meta(
+                OutboundScope::ResourceInChat {
+                    resource: OutboundResourceKey::shared_widget("other"),
+                    chat: OutboundChatKey::id(8),
+                },
+                None,
+                OutboundPriority::NORMAL,
+            ),
+            t0,
+        );
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![other]);
+        assert_eq!(jobs(&s.grant_ready(t0 + Duration::from_secs(5))), vec![blocked]);
+    }
+
+    #[test]
+    fn widget_resource_in_chat_shares_chat_window_and_refunds_no_request() {
+        let mut s = scheduler(
+            OutboundLimits {
+                global: Vec::new(),
+                chat: vec![WindowLimit::new(1, Duration::from_secs(10))],
+            },
+            aging(),
+        );
+        let t0 = base();
+        let chat = OutboundChatKey::id(7);
+        let send = fifo(
+            &mut s,
+            meta(OutboundScope::Chat(chat.clone()), None, OutboundPriority::NORMAL),
+            t0,
+        );
+        assert_eq!(jobs(&s.grant_ready(t0)), vec![send]);
+        s.complete(send, OutboundCompletion::Success, t0, t0);
+        let edit = fifo(
+            &mut s,
+            meta(
+                OutboundScope::ResourceInChat {
+                    resource: OutboundResourceKey::shared_widget("target"),
+                    chat: chat.clone(),
+                },
+                None,
+                OutboundPriority::NORMAL,
+            ),
+            t0,
+        );
+        assert!(s.grant_ready(t0).is_empty());
+        let later = t0 + Duration::from_secs(10);
+        assert_eq!(jobs(&s.grant_ready(later)), vec![edit]);
+        s.complete(edit, OutboundCompletion::NoRequest, later, later);
+        let next = fifo(
+            &mut s,
+            meta(OutboundScope::Chat(chat), None, OutboundPriority::NORMAL),
+            later,
+        );
+        assert_eq!(jobs(&s.grant_ready(later)), vec![next]);
     }
 }

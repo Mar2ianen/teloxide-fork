@@ -44,6 +44,21 @@ pub enum OutboundScope {
     Chat(OutboundChatKey),
     /// An independently limited widget or widget message.
     Resource(OutboundResourceKey),
+    /// Widget resource with an additional chat rate-limit dimension.
+    ///
+    /// A resource RetryAfter penalizes only that resource, but this request
+    /// also consumes per-chat windows and observes chat penalties.
+    ResourceInChat { resource: OutboundResourceKey, chat: OutboundChatKey },
+}
+
+impl OutboundScope {
+    /// Parent chat participating in admission, if this target has one.
+    pub(crate) fn chat_key(&self) -> Option<&OutboundChatKey> {
+        match self {
+            Self::Chat(chat) | Self::ResourceInChat { chat, .. } => Some(chat),
+            Self::Global | Self::Resource(_) => None,
+        }
+    }
 }
 
 /// Opaque widget resource identity. IDs are preserved exactly, including case.

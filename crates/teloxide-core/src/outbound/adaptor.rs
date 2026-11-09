@@ -492,7 +492,13 @@ req_future! {
 fn widget_bound_hint(payload: &impl OutboundPayload, widget_id: Option<&str>) -> OutboundHint {
     let mut hint = payload.outbound_hint();
     if let Some(id) = widget_id {
-        hint.scope = crate::outbound::classify::shared_widget_scope(id);
+        let resource = crate::outbound::OutboundResourceKey::shared_widget(id);
+        hint.scope = match hint.scope {
+            OutboundScope::ResourceInChat { chat, .. } => {
+                OutboundScope::ResourceInChat { resource, chat }
+            }
+            _ => OutboundScope::Resource(resource),
+        };
     }
     hint
 }
@@ -2632,7 +2638,10 @@ mod tests {
                 .shared_widget("Shared")
                 .metadata()
                 .scope,
-            shared
+            OutboundScope::ResourceInChat {
+                resource: OutboundResourceKey::shared_widget("Shared"),
+                chat: crate::outbound::OutboundChatKey::id(7),
+            }
         );
         assert_eq!(
             second

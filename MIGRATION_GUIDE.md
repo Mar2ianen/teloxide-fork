@@ -1,9 +1,11 @@
 This document describes breaking changes of `teloxide` crate, as well as the ways to update code.
 Note that the list of required changes is not fully exhaustive and it may lack something in rare cases.
 
-## unreleased
+## 0.21.0-rc.1 - 2026-11-09
 
 ### Bot API 10.4
+
+Upgrade from `teloxide 0.20.x` to `0.21.0-rc.1` and from `teloxide-core 0.16.x` to `0.17.0-rc.1`. The `teloxide-macros` beta-compatibility fix is released as `0.11.2-rc.1`.
 
 The chat target is now optional on the 14 methods that support ephemeral replies.
 Move the first argument to `.chat_id(...)` for normal or receiver-targeted sends:

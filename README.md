@@ -18,7 +18,7 @@
 </div>
 
 This repository is a maintained fork of [`teloxide`](https://github.com/teloxide/teloxide).
-The fork release line is `0.20.0`; fork-specific runtime layers remain opt-in
+The Bot API 10.4 release candidate is `teloxide 0.21.0-rc.1` with `teloxide-core 0.17.0-rc.1`; fork-specific runtime layers remain opt-in
 features documented below.
 
 ## Highlights
@@ -77,7 +77,7 @@ parser landmarks, not safe message-segmentation boundaries.
 Enable only the layer an application needs:
 
 ```toml
-teloxide = { version = "0.20.0", features = ["macros", "drafter", "rich-text"] }
+teloxide = { version = "0.21.0-rc.1", features = ["macros", "drafter", "rich-text"] }
 ```
 
 The Drafter example requires the feature explicitly:
@@ -203,7 +203,7 @@ $ rustup override set nightly
  5. Run `cargo new my_bot`, enter the directory and put these lines into your `Cargo.toml`:
 ```toml
 [dependencies]
-teloxide = { version = "0.20.0", features = ["macros"] }
+teloxide = { version = "0.21.0-rc.1", features = ["macros"] }
 log = "0.4"
 pretty_env_logger = "0.5"
 tokio = { version =  "1.39", features = ["rt-multi-thread", "macros"] }

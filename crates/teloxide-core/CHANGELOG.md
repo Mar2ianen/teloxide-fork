@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Isolate widget edit `RetryAfter` penalties by resource; add typed `.shared_widget(id)` binding for message-addressed shared-state edits and preserve unrelated sends/answers. Successful-update pacing remains application-managed.
+
 - Reject widget inline contents mixed with `rich_message` instead of dropping the rich content.
 - Validate conditional chat targets and non-empty ephemeral parameters on all 14 send payloads before JSON/multipart dispatch; retain rich-message validation.
 

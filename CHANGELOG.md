@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Isolate widget edit retry-after penalties using resource identities; bind message-addressed shared edits with `.shared_widget(id)` and demonstrate queued answer cancellation by deadline.
+
 - Support the Telegram Bot API 10.4 delta: HTML widgets, widget queries and edits, TON wallets, rich quotes, share themes, gift methods, verification formatting and service/entity types. See `docs/bot-api-10.4/README.md` for the official-source audit and sandbox check.
 - Route widget updates through dispatcher filters and update subscription hints; forward new methods through all request adaptors.
 

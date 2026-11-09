@@ -44,8 +44,8 @@ use super::types::{
     AgingPolicy, EnqueueError, EnqueueOutcome, Grant, JobId, OutboundChatKey, OutboundClass,
     OutboundClassLimits, OutboundClassWindowLimit, OutboundCompletion, OutboundCorrelationId,
     OutboundEnqueueMode, OutboundLaneKey, OutboundLaneMode, OutboundLimits, OutboundMeta,
-    OutboundPriority, OutboundScope, OutboundSnapshot, SchedulerConfigError, SchedulerWakeup,
-    WindowChatKind, WindowLimit,
+    OutboundPriority, OutboundResourceKey, OutboundScope, OutboundSnapshot, SchedulerConfigError,
+    SchedulerWakeup, WindowChatKind, WindowLimit,
 };
 
 /// A granted job whose permit is still in flight. Its lane may already be
@@ -381,6 +381,7 @@ impl WindowSet {
 enum PenaltyKey {
     Global,
     Chat(OutboundChatKey),
+    Resource(OutboundResourceKey),
 }
 
 /// A job that is ready to be granted: either an unlaned job or the head of
@@ -1596,7 +1597,9 @@ impl SchedulerState {
         let Some(job) = self.jobs.get(&candidate.job) else { return vec![WindowRef::Global] };
         let class = job.meta.class;
         match &candidate.scope {
-            OutboundScope::Global => vec![WindowRef::Global, WindowRef::ClassGlobal(class)],
+            OutboundScope::Global | OutboundScope::Resource(_) => {
+                vec![WindowRef::Global, WindowRef::ClassGlobal(class)]
+            }
             OutboundScope::Chat(chat) => vec![
                 WindowRef::Global,
                 WindowRef::ClassGlobal(class),
@@ -1980,6 +1983,11 @@ impl SchedulerState {
                 if reserve.is_none() {
                     reserve = Some(WindowRef::ClassGlobal(class));
                 }
+            }
+        }
+        if let OutboundScope::Resource(resource) = &candidate.scope {
+            if let Some(&deadline) = self.penalties.get(&PenaltyKey::Resource(resource.clone())) {
+                until = until.max(deadline);
             }
         }
         if let OutboundScope::Chat(chat) = &candidate.scope {
@@ -2482,6 +2490,7 @@ impl SchedulerState {
         let key = match scope {
             OutboundScope::Global => PenaltyKey::Global,
             OutboundScope::Chat(chat) => PenaltyKey::Chat(chat),
+            OutboundScope::Resource(resource) => PenaltyKey::Resource(resource),
         };
         let entry = self.penalties.entry(key).or_insert(until);
         if until > *entry {

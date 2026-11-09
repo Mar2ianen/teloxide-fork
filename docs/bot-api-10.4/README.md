@@ -31,7 +31,7 @@ the external audit in the formatting job.
 | Wallets | Wallet card, NFT, attributes, positioned stickers, transfers and chat field; balances, amounts and NFT indices remain decimal strings |
 | Area positions | Canonical `AreaPosition`; `StoryAreaPosition` remains a compatibility alias |
 | Ephemeral replies | Optional receiver and chat on all 14 send methods; explicit callback-only constructor; JSON and actual uploaded-file multipart tests |
-| Outbound routing | Optional target handling; callback-only replies use global scope even if a now-ignored chat was supplied. New sends, edits and reads get their existing scheduler classes; widget answers use interactive priority |
+| Outbound routing | Optional target handling; callback-only replies use global scope even if a now-ignored chat was supplied. New sends, edits and reads retain their scheduler classes; widget answers use interactive priority. Resource-scoped edit penalties, explicit shared bindings, concurrent isolation and deadline-cancellation tests |
 | Rich quotes | `TextQuote::rich_texts`, `ReplyParameters::quote_rich_texts`; preserve truthful `Eq`/`Hash` through the rich-text tree |
 | Share themes | Emoji/custom-emoji variants, unique-gift variant, backdrops and getter; chat field and serde/schema tests |
 | Gifts | Generated `get_unique_gift` and `delete_business_account_gift`; typed results and HTTP tests |
@@ -56,12 +56,32 @@ change state, while normal caption methods change captions. Send plain HTML:
 the server checks the 32768-byte raw / 4096-byte zlib-level-9 limits and packs it.
 The library preserves HTML and data without sanitizing or reinterpreting them.
 
-Queries carry 1–64 bytes, answers 0–1024 bytes. Answer within 15 seconds; users
-can send at most 5 queries per 5 seconds. Answer data is private to the querying
+Queries carry 1–64 bytes, answers 0–1024 bytes. Answer within 15 seconds; each user
+can send at most 5 queries per 5 seconds across widgets. This incoming limit is
+not a global outbound-answer limit. Answer data is private to the querying
 widget and does not update stored state. Shared public-data changes are limited
-to once per second; `cache_time` is 5–3600 seconds, initially 30. The generic
-scheduler does not infer a per-widget throttle from `widget_id`; applications
-must pace shared-state edits and continue handling Telegram errors/retry-after.
+to once per second; `cache_time` is 5–3600 seconds, initially 30. Successful shared-state edits must be paced by the application across all
+producers; a serial lane alone does not enforce one-second spacing.
+
+`OutboundQueue` isolates edit `RetryAfter` penalties by widget resource.
+`edit_shared_widget_data` uses its exact, case-sensitive `widget_id`. The two
+message-addressed edit methods cannot infer that ID from their wire parameters:
+use `.shared_widget(widget_id)` when editing shared public data. This scheduling
+annotation joins their penalty scope to the shared endpoint without changing
+the HTTP body. Keep the binding consistent with the final message target.
+Without it, edits use their chat/message or inline-message address, isolating
+unrelated traffic but providing no cross-message shared-widget coordination.
+Multiple bot instances share penalties when using the same queue and ID;
+separate queues/processes require an application-level coordinator. Resource
+requests still consume configured global/class windows and obey actual global
+penalties. The queue does not retry a failed edit automatically.
+
+The runnable example captures a 14-second local answer budget at handler entry
+and uses `timeout_at` around the entire scheduled answer, including queue wait
+and HTTP. Telegram delivery latency has already spent part of the server
+deadline, so applications should reduce the budget further when appropriate.
+Dropping an answer while it waits cancels admission and prevents a late send;
+cancellation after HTTP dispatch cannot retract a request already transmitted.
 
 Wallet query types describe data received from Telegram. Signature/domain checks
 (`bot<bot_id>`) and transaction confirmation belong to application logic; a

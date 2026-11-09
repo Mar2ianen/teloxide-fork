@@ -1348,19 +1348,19 @@ fn method_policy(name: &str) -> MethodPolicy {
             weight: WeightPolicy::One,
         },
         "edit_message_widget_data" => MethodPolicy {
-            scope: ScopePolicy::RecipientField("chat_id"),
+            scope: ScopePolicy::WidgetMessage,
             class: "MESSAGE_MUTATION",
             priority: "NORMAL",
             weight: WeightPolicy::One,
         },
         "edit_message_widget_data_inline" => MethodPolicy {
-            scope: ScopePolicy::Global,
+            scope: ScopePolicy::Custom("inline_widget_message_scope", "inline_message_id"),
             class: "MESSAGE_MUTATION",
             priority: "NORMAL",
             weight: WeightPolicy::One,
         },
         "edit_shared_widget_data" => MethodPolicy {
-            scope: ScopePolicy::Global,
+            scope: ScopePolicy::Custom("shared_widget_scope", "widget_id"),
             class: "MESSAGE_MUTATION",
             priority: "NORMAL",
             weight: WeightPolicy::One,
@@ -1398,6 +1398,8 @@ enum ScopePolicy {
     RecipientField(&'static str),
     /// Chat ID is optional and ignored for callback-only ephemeral replies.
     EphemeralRecipient,
+    /// A widget identified by a chat/message address.
+    WidgetMessage,
     /// A numeric `ChatId` field.
     ChatIdField(&'static str),
     /// An optional numeric `ChatId` field: `None` falls back to global.
@@ -1439,6 +1441,9 @@ impl MethodPolicy {
     fn scope_expr(&self) -> String {
         match self.scope {
             ScopePolicy::Global => "crate::outbound::OutboundScope::Global".to_owned(),
+            ScopePolicy::WidgetMessage => "crate::outbound::classify::widget_message_scope(&self.\
+                                           chat_id, self.message_id)"
+                .to_owned(),
             ScopePolicy::EphemeralRecipient => {
                 "crate::outbound::classify::ephemeral_recipient_scope(&self.chat_id, \
                  &self.ephemeral_message_parameters)"

@@ -46,6 +46,13 @@ sibling return `True`, as does `edit_shared_widget_data`. Empty data removes it;
 omitted data leaves it unchanged. See the [10.4 audit](docs/bot-api-10.4/README.md)
 for production restrictions, query deadlines and shared-widget pacing.
 
+`Outbound` now isolates widget edit penalties using `OutboundScope::Resource`.
+For message-addressed shared public-data edits, call `.shared_widget(widget_id)`
+to coordinate with `edit_shared_widget_data` on the same queue. Without that
+annotation only the message address is known. The annotation must match the
+final payload target; it never changes Telegram parameters. Pace successful
+shared public-data updates in application code.
+
 ### Bot API 10.3
 
 This fork now exposes Telegram Bot API 10.3. The generated send methods use

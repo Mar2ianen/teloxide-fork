@@ -9,6 +9,7 @@ use crate::types::{
 
 impl_payload! {
     @[multipart = photo]
+    @[validate = crate::requests::validation::validate_ephemeral_send_target]
     /// Use this method to send photos. On success, the sent [`Message`] is returned.
     ///
     /// [`Message`]: crate::types::Message

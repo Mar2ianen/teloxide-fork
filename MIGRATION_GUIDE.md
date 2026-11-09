@@ -28,6 +28,9 @@ their payload constructors. Import the relevant setters or `prelude::*`. Code
 mutating payload fields directly must set `chat_id` and `receiver_user_id` to
 `Some(...)`. `EphemeralMessageParameters::new(user_id)` still constructs a
 receiver-targeted message. Bots must still answer the original callback query.
+A missing chat target is valid only for a callback-only reply. Empty ephemeral
+parameters and receiver-targeted sends without a chat fail locally with
+`RequestError::Validation`, including through `send_ref()`.
 
 New enum variants require updating exhaustive matches on `UpdateKind`,
 `AllowedUpdate`, `MediaKind`, `MessageKind`, `ExternalReplyInfoKind`,

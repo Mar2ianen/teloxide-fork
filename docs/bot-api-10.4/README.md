@@ -70,7 +70,9 @@ converted to machine-sized integers.
 
 For ephemeral callback replies, omit `receiver_user_id`; `chat_id` is ignored,
 and `answer_callback_query` is still required. Channel direct-message chats do
-not support these replies. When a receiver is specified, supply the target chat;
+not support these replies. Missing chat targets and ephemeral objects with
+neither receiver nor callback are rejected by `Payload::validate()` before JSON/multipart preparation or HTTP
+dispatch. When a receiver is specified, supply the target chat;
 when both receiver and callback are specified, the receiver must be the user who
 pressed the button. Those identity/membership facts remain server-validated.
 

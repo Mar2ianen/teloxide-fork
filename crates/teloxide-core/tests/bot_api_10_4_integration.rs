@@ -10,7 +10,7 @@ use teloxide_core::{
     outbound::{OutboundPayload, OutboundScope},
     payloads::*,
     prelude::*,
-    requests::Payload,
+    requests::{InvalidValueReason, Payload, RequestFieldPath, RequestValidationError},
     types::*,
     RequestError,
 };
@@ -372,6 +372,8 @@ fn malformed_widget_input_never_falls_back_to_another_message_shape() {
         json!({"html":"<p>Widget</p>","message_text":"text"}),
         json!({"widget_id":null,"message_text":"text"}),
         json!({"html":123}),
+        json!({"html":"<p>Widget</p>","rich_message":{"html":"<b>Rich</b>"}}),
+        json!({"widget_id":"shared","rich_message":{"html":"<b>Rich</b>"}}),
     ] {
         assert!(serde_json::from_value::<InputMessageContent>(value).is_err());
     }
@@ -385,4 +387,136 @@ fn unique_gift_theme_and_external_widget_reply_decode() {
     assert!(matches!(theme, ChatShareTheme::UniqueGift(_)));
     let reply:ExternalReplyInfo=serde_json::from_value(json!({"origin":{"type":"user","date":0,"sender_user":{"id":7,"is_bot":false,"first_name":"User"}},"widget":{"html":"<p>Widget</p>"}})).unwrap();
     assert!(matches!(reply.kind, ExternalReplyInfoKind::Widget(_)));
+}
+
+// Exercise the generated Payload::validate hooks, not just the common
+// predicate.
+macro_rules! for_each_ephemeral_send {
+    ($bot:ident, $check:ident) => {{
+        let file = || InputFile::memory("upload bytes").file_name("media.bin");
+        $check!($bot.send_message("Hello"));
+        $check!($bot.send_rich_message(InputRichMessage::html("<b>Hello</b>")));
+        $check!($bot.send_animation(file()));
+        $check!($bot.send_audio(file()));
+        $check!($bot.send_contact("+123", "User"));
+        $check!($bot.send_document(file()));
+        $check!($bot.send_live_photo(file(), file()));
+        $check!($bot.send_location(0.0, 0.0));
+        $check!($bot.send_photo(file()));
+        $check!($bot.send_sticker(file()));
+        $check!($bot.send_venue(0.0, 0.0, "Venue", "Address"));
+        $check!($bot.send_video(file()));
+        $check!($bot.send_video_note(file()));
+        $check!($bot.send_voice(file()));
+    }};
+}
+
+#[test]
+fn all_ephemeral_sends_accept_normal_targeted_and_callback_only_delivery() {
+    use teloxide_core::requests::HasPayload;
+    let bot = Bot::new("123:test");
+    macro_rules! check {
+        ($request:expr) => {{
+            let request = $request.chat_id(ChatId(7));
+            assert_eq!(Payload::validate(request.payload_ref()), Ok(()));
+            let request = $request
+                .chat_id(ChatId(7))
+                .ephemeral_message_parameters(EphemeralMessageParameters::new(UserId(7)));
+            assert_eq!(Payload::validate(request.payload_ref()), Ok(()));
+            let request = $request.chat_id(ChatId(7)).ephemeral_message_parameters(
+                EphemeralMessageParameters::new(UserId(7)).callback_query_id("callback"),
+            );
+            assert_eq!(Payload::validate(request.payload_ref()), Ok(()));
+            let request = $request
+                .ephemeral_message_parameters(EphemeralMessageParameters::reply("callback"));
+            assert_eq!(Payload::validate(request.payload_ref()), Ok(()));
+            let request = $request
+                .chat_id(ChatId(7))
+                .ephemeral_message_parameters(EphemeralMessageParameters::reply("callback"));
+            assert_eq!(Payload::validate(request.payload_ref()), Ok(()));
+        }};
+    }
+    for_each_ephemeral_send!(bot, check);
+}
+
+fn assert_target_rejected<R: Request<Err = RequestError>>(
+    request: R,
+    path: &'static str,
+    reason: InvalidValueReason,
+) -> impl std::future::Future<Output = ()> {
+    // Bound the matrix test's async frame on default test-thread stacks.
+    Box::pin(async move {
+        let expected =
+            RequestValidationError::InvalidValue { path: RequestFieldPath::field(path), reason };
+        // Both immutable and consuming transports must validate before serialization,
+        // attachment preparation or HTTP dispatch (JSON and multipart).
+        let result = tokio::time::timeout(Duration::from_secs(1), request.send_ref())
+            .await
+            .expect("send_ref must fail preflight without waiting for HTTP");
+        match result {
+            Err(RequestError::Validation(error)) => assert_eq!(error, expected),
+            _ => panic!("expected send_ref validation error at {path}"),
+        }
+        let result = tokio::time::timeout(Duration::from_secs(1), request.send())
+            .await
+            .expect("send must fail preflight without waiting for HTTP");
+        match result {
+            Err(RequestError::Validation(error)) => assert_eq!(error, expected),
+            _ => panic!("expected send validation error at {path}"),
+        }
+    })
+}
+
+#[tokio::test]
+async fn all_ephemeral_sends_reject_invalid_targets_without_contacting_http() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let bot = Bot::new("123:test")
+        .set_api_url(format!("http://{}", listener.local_addr().unwrap()).parse().unwrap());
+    macro_rules! check {
+        ($request:expr) => {{
+            assert_target_rejected(
+                $request,
+                "chat_id",
+                InvalidValueReason::MustHaveChatOrCallbackReply,
+            )
+            .await;
+            assert_target_rejected(
+                $request.ephemeral_message_parameters(EphemeralMessageParameters::new(UserId(7))),
+                "chat_id",
+                InvalidValueReason::MustHaveChatOrCallbackReply,
+            )
+            .await;
+            assert_target_rejected(
+                $request.ephemeral_message_parameters(
+                    EphemeralMessageParameters::new(UserId(7)).callback_query_id("callback"),
+                ),
+                "chat_id",
+                InvalidValueReason::MustHaveChatOrCallbackReply,
+            )
+            .await;
+            let empty = EphemeralMessageParameters {
+                receiver_user_id: None,
+                callback_query_id: None,
+                replace_callback_query_message: None,
+            };
+            assert_target_rejected(
+                $request.ephemeral_message_parameters(empty.clone()),
+                "ephemeral_message_parameters",
+                InvalidValueReason::MustHaveReceiverOrCallback,
+            )
+            .await;
+            assert_target_rejected(
+                $request.chat_id(ChatId(7)).ephemeral_message_parameters(empty),
+                "ephemeral_message_parameters",
+                InvalidValueReason::MustHaveReceiverOrCallback,
+            )
+            .await;
+        }};
+    }
+    for_each_ephemeral_send!(bot, check);
+    match listener.accept() {
+        Err(error) => assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock),
+        Ok(_) => panic!("an invalid send reached the HTTP listener"),
+    }
 }

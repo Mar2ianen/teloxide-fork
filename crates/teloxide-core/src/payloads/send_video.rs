@@ -10,6 +10,7 @@ use crate::types::{
 
 impl_payload! {
     @[multipart = video, thumbnail, cover]
+    @[validate = crate::requests::validation::validate_ephemeral_send_target]
     /// Use this method to send video files, Telegram clients support mp4 videos (other formats may be sent as [`Document`]). On success, the sent [`Message`] is returned. Bots can currently send video files of up to 50 MB in size, this limit may be changed in the future.
     ///
     /// [`Document`]: crate::types::Document

@@ -9,6 +9,7 @@ use crate::types::{
 
 impl_payload! {
     @[multipart = sticker]
+    @[validate = crate::requests::validation::validate_ephemeral_send_target]
     /// Use this method to send static .WEBP, .TGS or .WEBM stickers. On success, the sent Message is returned.
     ///
     /// [animated]: https://telegram.org/blog/animated-stickers

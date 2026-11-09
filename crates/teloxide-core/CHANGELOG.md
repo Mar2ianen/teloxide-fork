@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## unreleased
 
+### Fixed
+
+- Reject widget inline contents mixed with `rich_message` instead of dropping the rich content.
+- Validate conditional chat targets and non-empty ephemeral parameters on all 14 send payloads before JSON/multipart dispatch; retain rich-message validation.
+
 ### Added
 
 - Add Bot API 10.4 widget/query/wallet/NFT/share-theme types, rich quote fields, TON rich text, TON/bank-card entities, and wallet-transfer/paid-message-waiver service messages.

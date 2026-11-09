@@ -8,6 +8,7 @@ use crate::types::{
 };
 
 impl_payload! {
+    @[validate = crate::requests::validation::validate_ephemeral_send_target]
     /// Use this method to send phone contacts. On success, the sent [`Message`] is returned.
     ///
     /// [`Message`]: crate::types::Message

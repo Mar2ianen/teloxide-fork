@@ -55,9 +55,10 @@ impl<'de> Deserialize<'de> for InputMessageContent {
         let value = serde_json::Value::deserialize(deserializer)?;
         let html = value.get("html").is_some();
         let shared = value.get("widget_id").is_some();
-        let legacy = ["message_text", "latitude", "longitude", "phone_number", "prices"]
-            .iter()
-            .any(|key| value.get(key).is_some());
+        let legacy =
+            ["message_text", "latitude", "longitude", "phone_number", "prices", "rich_message"]
+                .iter()
+                .any(|key| value.get(key).is_some());
         if (html && shared) || ((html || shared) && legacy) {
             return Err(D::Error::custom("widget content must select exactly one message shape"));
         }

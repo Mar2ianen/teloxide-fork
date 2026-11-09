@@ -356,6 +356,7 @@ Schema(
         ),
         Method(
             names: ("sendMessage", "SendMessage", "send_message"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send text messages. On success, the sent [Message] is returned.",
@@ -743,6 +744,7 @@ Schema(
         ),
         Method(
             names: ("sendPhoto", "SendPhoto", "send_photo"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send photos. On success, the sent [Message] is returned.",
@@ -856,6 +858,7 @@ Schema(
         ),
         Method(
             names: ("sendAudio", "SendAudio", "send_audio"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send audio files, if you want Telegram clients to display them in the music player. Your audio must be in the .MP3 or .M4A format. On success, the sent [Message] is returned. Bots can currently send audio files of up to 50 MB in size, this limit may be changed in the future.\n\nFor sending voice messages, use the [sendVoice] method instead.",
@@ -985,6 +988,7 @@ Schema(
         ),
         Method(
             names: ("sendDocument", "SendDocument", "send_document"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send general files. On success, the sent [Message] is returned. Bots can currently send files of any type of up to 50 MB in size, this limit may be changed in the future.",
@@ -1101,6 +1105,7 @@ Schema(
         ),
         Method(
             names: ("sendVideo", "SendVideo", "send_video"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send video files, Telegram clients support mp4 videos (other formats may be sent as [Document]). On success, the sent [Message] is returned. Bots can currently send video files of up to 50 MB in size, this limit may be changed in the future.",
@@ -1259,6 +1264,7 @@ Schema(
         ),
         Method(
             names: ("sendAnimation", "SendAnimation", "send_animation"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send animation files (GIF or H.264/MPEG-4 AVC video without sound). On success, the sent [Message] is returned. Bots can currently send animation files of up to 50 MB in size, this limit may be changed in the future.",
@@ -1395,6 +1401,7 @@ Schema(
         ),
         Method(
             names: ("sendVoice", "SendVoice", "send_voice"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send audio files, if you want Telegram clients to display the file as a playable voice message. For this to work, your audio must be in an .OGG file encoded with OPUS, or in .MP3 format, or in .M4A format (other formats may be sent as [Audio] or [Document]). On success, the sent [Message] is returned. Bots can currently send voice messages of up to 50 MB in size, this limit may be changed in the future.",
@@ -1507,6 +1514,7 @@ Schema(
         ),
         Method(
             names: ("sendVideoNote", "SendVideoNote", "send_video_note"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "As of [v.4.0], Telegram clients support rounded square mp4 videos of up to 1 minute long. Use this method to send video messages. On success, the sent [Message] is returned.",
@@ -1788,6 +1796,7 @@ Schema(
         ),
         Method(
             names: ("sendLocation", "SendLocation", "send_location"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send point on the map. On success, the sent [Message] is returned.",
@@ -2144,6 +2153,7 @@ Schema(
         ),
         Method(
             names: ("sendVenue", "SendVenue", "send_venue"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send information about a venue. On success, the sent [Message] is returned.",
@@ -2264,6 +2274,7 @@ Schema(
         ),
         Method(
             names: ("sendContact", "SendContact", "send_contact"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send phone contacts. On success, the sent [Message] is returned.",
@@ -4815,6 +4826,7 @@ Schema(
         ),
         Method(
             names: ("sendSticker", "SendSticker", "send_sticker"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send static .WEBP, .TGS or .WEBM stickers. On success, the sent Message is returned.",
@@ -6611,6 +6623,7 @@ Schema(
 
         Method(
             names: ("sendLivePhoto", "SendLivePhoto", "send_live_photo"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(md: "Use this method to send live photos. On success, the sent [Message] is returned.", md_links: {"Message": "https://core.telegram.org/bots/api#message"}),
             tg_doc: "https://core.telegram.org/bots/api#sendlivephoto",

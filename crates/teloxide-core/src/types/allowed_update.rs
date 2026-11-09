@@ -32,4 +32,6 @@ pub enum AllowedUpdate {
     ChatBoost,
     RemovedChatBoost,
     StoppedMessageGeneration,
+    WidgetQuery,
+    SharedWidgetQuery,
 }

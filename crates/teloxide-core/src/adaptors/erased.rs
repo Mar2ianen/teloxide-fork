@@ -380,6 +380,15 @@ where
         edit_ephemeral_message_reply_markup,
         delete_ephemeral_message,
         send_rich_message,
+                send_widget,
+                send_shared_widget,
+                answer_widget_query,
+                edit_message_widget_data,
+                edit_message_widget_data_inline,
+                edit_shared_widget_data,
+                get_chat_share_theme_backdrops,
+                get_unique_gift,
+                delete_business_account_gift,
         send_rich_message_draft,
         approve_chat_join_request,
         decline_chat_join_request
@@ -391,6 +400,43 @@ where
 trait ErasableRequester<'a> {
     /// Error type returned by all requests.
     type Err: std::error::Error + Send;
+    fn delete_business_account_gift(
+        &self,
+        business_connection_id: BusinessConnectionId,
+        owned_gift_id: OwnedGiftId,
+    ) -> ErasedRequest<'a, DeleteBusinessAccountGift, Self::Err>;
+    fn get_unique_gift(&self, name: String) -> ErasedRequest<'a, GetUniqueGift, Self::Err>;
+    fn get_chat_share_theme_backdrops(
+        &self,
+    ) -> ErasedRequest<'a, GetChatShareThemeBackdrops, Self::Err>;
+    fn edit_shared_widget_data(
+        &self,
+        widget_id: String,
+        public_data: String,
+    ) -> ErasedRequest<'a, EditSharedWidgetData, Self::Err>;
+    fn edit_message_widget_data_inline(
+        &self,
+        inline_message_id: String,
+    ) -> ErasedRequest<'a, EditMessageWidgetDataInline, Self::Err>;
+    fn edit_message_widget_data(
+        &self,
+        chat_id: Recipient,
+        message_id: MessageId,
+    ) -> ErasedRequest<'a, EditMessageWidgetData, Self::Err>;
+    fn answer_widget_query(
+        &self,
+        widget_query_id: String,
+    ) -> ErasedRequest<'a, AnswerWidgetQuery, Self::Err>;
+    fn send_shared_widget(
+        &self,
+        chat_id: Recipient,
+        widget_id: String,
+    ) -> ErasedRequest<'a, SendSharedWidget, Self::Err>;
+    fn send_widget(
+        &self,
+        chat_id: Recipient,
+        html: String,
+    ) -> ErasedRequest<'a, SendWidget, Self::Err>;
 
     fn get_updates(&self) -> ErasedRequest<'a, GetUpdates, Self::Err>;
 
@@ -406,11 +452,7 @@ trait ErasableRequester<'a> {
 
     fn close(&self) -> ErasedRequest<'a, Close, Self::Err>;
 
-    fn send_message(
-        &self,
-        chat_id: Recipient,
-        text: String,
-    ) -> ErasedRequest<'a, SendMessage, Self::Err>;
+    fn send_message(&self, text: String) -> ErasedRequest<'a, SendMessage, Self::Err>;
 
     fn forward_message(
         &self,
@@ -440,47 +482,20 @@ trait ErasableRequester<'a> {
         message_ids: Vec<MessageId>,
     ) -> ErasedRequest<'a, CopyMessages, Self::Err>;
 
-    fn send_photo(
-        &self,
-        chat_id: Recipient,
-        photo: InputFile,
-    ) -> ErasedRequest<'a, SendPhoto, Self::Err>;
+    fn send_photo(&self, photo: InputFile) -> ErasedRequest<'a, SendPhoto, Self::Err>;
 
-    fn send_audio(
-        &self,
-        chat_id: Recipient,
-        audio: InputFile,
-    ) -> ErasedRequest<'a, SendAudio, Self::Err>;
+    fn send_audio(&self, audio: InputFile) -> ErasedRequest<'a, SendAudio, Self::Err>;
 
-    fn send_document(
-        &self,
-        chat_id: Recipient,
-        document: InputFile,
-    ) -> ErasedRequest<'a, SendDocument, Self::Err>;
+    fn send_document(&self, document: InputFile) -> ErasedRequest<'a, SendDocument, Self::Err>;
 
-    fn send_video(
-        &self,
-        chat_id: Recipient,
-        video: InputFile,
-    ) -> ErasedRequest<'a, SendVideo, Self::Err>;
+    fn send_video(&self, video: InputFile) -> ErasedRequest<'a, SendVideo, Self::Err>;
 
-    fn send_animation(
-        &self,
-        chat_id: Recipient,
-        animation: InputFile,
-    ) -> ErasedRequest<'a, SendAnimation, Self::Err>;
+    fn send_animation(&self, animation: InputFile) -> ErasedRequest<'a, SendAnimation, Self::Err>;
 
-    fn send_voice(
-        &self,
-        chat_id: Recipient,
-        voice: InputFile,
-    ) -> ErasedRequest<'a, SendVoice, Self::Err>;
+    fn send_voice(&self, voice: InputFile) -> ErasedRequest<'a, SendVoice, Self::Err>;
 
-    fn send_video_note(
-        &self,
-        chat_id: Recipient,
-        video_note: InputFile,
-    ) -> ErasedRequest<'a, SendVideoNote, Self::Err>;
+    fn send_video_note(&self, video_note: InputFile)
+        -> ErasedRequest<'a, SendVideoNote, Self::Err>;
 
     fn send_paid_media(
         &self,
@@ -497,7 +512,6 @@ trait ErasableRequester<'a> {
 
     fn send_location(
         &self,
-        chat_id: Recipient,
         latitude: f64,
         longitude: f64,
     ) -> ErasedRequest<'a, SendLocation, Self::Err>;
@@ -538,7 +552,6 @@ trait ErasableRequester<'a> {
 
     fn send_venue(
         &self,
-        chat_id: Recipient,
         latitude: f64,
         longitude: f64,
         title: String,
@@ -547,7 +560,6 @@ trait ErasableRequester<'a> {
 
     fn send_contact(
         &self,
-        chat_id: Recipient,
         phone_number: String,
         first_name: String,
     ) -> ErasedRequest<'a, SendContact, Self::Err>;
@@ -987,11 +999,7 @@ trait ErasableRequester<'a> {
         message_ids: Vec<MessageId>,
     ) -> ErasedRequest<'a, DeleteMessages, Self::Err>;
 
-    fn send_sticker(
-        &self,
-        chat_id: Recipient,
-        sticker: InputFile,
-    ) -> ErasedRequest<'a, SendSticker, Self::Err>;
+    fn send_sticker(&self, sticker: InputFile) -> ErasedRequest<'a, SendSticker, Self::Err>;
 
     fn get_sticker_set(&self, name: String) -> ErasedRequest<'a, GetStickerSet, Self::Err>;
 
@@ -1261,7 +1269,6 @@ trait ErasableRequester<'a> {
 
     fn send_rich_message(
         &self,
-        chat_id: Recipient,
         rich_message: InputRichMessage,
     ) -> ErasedRequest<'a, SendRichMessage, Self::Err>;
 
@@ -1328,7 +1335,6 @@ trait ErasableRequester<'a> {
 
     fn send_live_photo(
         &self,
-        chat_id: Recipient,
         live_photo: InputFile,
         photo: InputFile,
     ) -> ErasedRequest<'a, SendLivePhoto, Self::Err>;
@@ -1452,6 +1458,61 @@ where
     B: Requester + 'a,
 {
     type Err = B::Err;
+    fn delete_business_account_gift(
+        &self,
+        business_connection_id: BusinessConnectionId,
+        owned_gift_id: OwnedGiftId,
+    ) -> ErasedRequest<'a, DeleteBusinessAccountGift, Self::Err> {
+        Requester::delete_business_account_gift(self, business_connection_id, owned_gift_id).erase()
+    }
+    fn get_unique_gift(&self, name: String) -> ErasedRequest<'a, GetUniqueGift, Self::Err> {
+        Requester::get_unique_gift(self, name).erase()
+    }
+    fn get_chat_share_theme_backdrops(
+        &self,
+    ) -> ErasedRequest<'a, GetChatShareThemeBackdrops, Self::Err> {
+        Requester::get_chat_share_theme_backdrops(self).erase()
+    }
+    fn edit_shared_widget_data(
+        &self,
+        widget_id: String,
+        public_data: String,
+    ) -> ErasedRequest<'a, EditSharedWidgetData, Self::Err> {
+        Requester::edit_shared_widget_data(self, widget_id, public_data).erase()
+    }
+    fn edit_message_widget_data_inline(
+        &self,
+        inline_message_id: String,
+    ) -> ErasedRequest<'a, EditMessageWidgetDataInline, Self::Err> {
+        Requester::edit_message_widget_data_inline(self, inline_message_id).erase()
+    }
+    fn edit_message_widget_data(
+        &self,
+        chat_id: Recipient,
+        message_id: MessageId,
+    ) -> ErasedRequest<'a, EditMessageWidgetData, Self::Err> {
+        Requester::edit_message_widget_data(self, chat_id, message_id).erase()
+    }
+    fn answer_widget_query(
+        &self,
+        widget_query_id: String,
+    ) -> ErasedRequest<'a, AnswerWidgetQuery, Self::Err> {
+        Requester::answer_widget_query(self, widget_query_id).erase()
+    }
+    fn send_shared_widget(
+        &self,
+        chat_id: Recipient,
+        widget_id: String,
+    ) -> ErasedRequest<'a, SendSharedWidget, Self::Err> {
+        Requester::send_shared_widget(self, chat_id, widget_id).erase()
+    }
+    fn send_widget(
+        &self,
+        chat_id: Recipient,
+        html: String,
+    ) -> ErasedRequest<'a, SendWidget, Self::Err> {
+        Requester::send_widget(self, chat_id, html).erase()
+    }
 
     fn get_updates(&self) -> ErasedRequest<'a, GetUpdates, Self::Err> {
         Requester::get_updates(self).erase()
@@ -1481,12 +1542,8 @@ where
         Requester::close(self).erase()
     }
 
-    fn send_message(
-        &self,
-        chat_id: Recipient,
-        text: String,
-    ) -> ErasedRequest<'a, SendMessage, Self::Err> {
-        Requester::send_message(self, chat_id, text).erase()
+    fn send_message(&self, text: String) -> ErasedRequest<'a, SendMessage, Self::Err> {
+        Requester::send_message(self, text).erase()
     }
 
     fn forward_message(
@@ -1525,60 +1582,35 @@ where
         Requester::copy_messages(self, chat_id, from_chat_id, message_ids).erase()
     }
 
-    fn send_photo(
-        &self,
-        chat_id: Recipient,
-        photo: InputFile,
-    ) -> ErasedRequest<'a, SendPhoto, Self::Err> {
-        Requester::send_photo(self, chat_id, photo).erase()
+    fn send_photo(&self, photo: InputFile) -> ErasedRequest<'a, SendPhoto, Self::Err> {
+        Requester::send_photo(self, photo).erase()
     }
 
-    fn send_audio(
-        &self,
-        chat_id: Recipient,
-        audio: InputFile,
-    ) -> ErasedRequest<'a, SendAudio, Self::Err> {
-        Requester::send_audio(self, chat_id, audio).erase()
+    fn send_audio(&self, audio: InputFile) -> ErasedRequest<'a, SendAudio, Self::Err> {
+        Requester::send_audio(self, audio).erase()
     }
 
-    fn send_document(
-        &self,
-        chat_id: Recipient,
-        document: InputFile,
-    ) -> ErasedRequest<'a, SendDocument, Self::Err> {
-        Requester::send_document(self, chat_id, document).erase()
+    fn send_document(&self, document: InputFile) -> ErasedRequest<'a, SendDocument, Self::Err> {
+        Requester::send_document(self, document).erase()
     }
 
-    fn send_video(
-        &self,
-        chat_id: Recipient,
-        video: InputFile,
-    ) -> ErasedRequest<'a, SendVideo, Self::Err> {
-        Requester::send_video(self, chat_id, video).erase()
+    fn send_video(&self, video: InputFile) -> ErasedRequest<'a, SendVideo, Self::Err> {
+        Requester::send_video(self, video).erase()
     }
 
-    fn send_animation(
-        &self,
-        chat_id: Recipient,
-        animation: InputFile,
-    ) -> ErasedRequest<'a, SendAnimation, Self::Err> {
-        Requester::send_animation(self, chat_id, animation).erase()
+    fn send_animation(&self, animation: InputFile) -> ErasedRequest<'a, SendAnimation, Self::Err> {
+        Requester::send_animation(self, animation).erase()
     }
 
-    fn send_voice(
-        &self,
-        chat_id: Recipient,
-        voice: InputFile,
-    ) -> ErasedRequest<'a, SendVoice, Self::Err> {
-        Requester::send_voice(self, chat_id, voice).erase()
+    fn send_voice(&self, voice: InputFile) -> ErasedRequest<'a, SendVoice, Self::Err> {
+        Requester::send_voice(self, voice).erase()
     }
 
     fn send_video_note(
         &self,
-        chat_id: Recipient,
         video_note: InputFile,
     ) -> ErasedRequest<'a, SendVideoNote, Self::Err> {
-        Requester::send_video_note(self, chat_id, video_note).erase()
+        Requester::send_video_note(self, video_note).erase()
     }
 
     fn send_paid_media(
@@ -1600,11 +1632,10 @@ where
 
     fn send_location(
         &self,
-        chat_id: Recipient,
         latitude: f64,
         longitude: f64,
     ) -> ErasedRequest<'a, SendLocation, Self::Err> {
-        Requester::send_location(self, chat_id, latitude, longitude).erase()
+        Requester::send_location(self, latitude, longitude).erase()
     }
 
     fn edit_message_live_location(
@@ -1662,22 +1693,20 @@ where
 
     fn send_venue(
         &self,
-        chat_id: Recipient,
         latitude: f64,
         longitude: f64,
         title: String,
         address: String,
     ) -> ErasedRequest<'a, SendVenue, Self::Err> {
-        Requester::send_venue(self, chat_id, latitude, longitude, title, address).erase()
+        Requester::send_venue(self, latitude, longitude, title, address).erase()
     }
 
     fn send_contact(
         &self,
-        chat_id: Recipient,
         phone_number: String,
         first_name: String,
     ) -> ErasedRequest<'a, SendContact, Self::Err> {
-        Requester::send_contact(self, chat_id, phone_number, first_name).erase()
+        Requester::send_contact(self, phone_number, first_name).erase()
     }
 
     fn send_poll(
@@ -2291,12 +2320,8 @@ where
         Requester::delete_messages(self, chat_id, message_ids).erase()
     }
 
-    fn send_sticker(
-        &self,
-        chat_id: Recipient,
-        sticker: InputFile,
-    ) -> ErasedRequest<'a, SendSticker, Self::Err> {
-        Requester::send_sticker(self, chat_id, sticker).erase()
+    fn send_sticker(&self, sticker: InputFile) -> ErasedRequest<'a, SendSticker, Self::Err> {
+        Requester::send_sticker(self, sticker).erase()
     }
 
     fn get_sticker_set(&self, name: String) -> ErasedRequest<'a, GetStickerSet, Self::Err> {
@@ -2698,10 +2723,9 @@ where
 
     fn send_rich_message(
         &self,
-        chat_id: Recipient,
         rich_message: InputRichMessage,
     ) -> ErasedRequest<'a, SendRichMessage, Self::Err> {
-        Requester::send_rich_message(self, chat_id, rich_message).erase()
+        Requester::send_rich_message(self, rich_message).erase()
     }
 
     fn send_rich_message_draft(
@@ -2794,11 +2818,10 @@ where
 
     fn send_live_photo(
         &self,
-        chat_id: Recipient,
         live_photo: InputFile,
         photo: InputFile,
     ) -> ErasedRequest<'a, SendLivePhoto, Self::Err> {
-        Requester::send_live_photo(self, chat_id, live_photo, photo).erase()
+        Requester::send_live_photo(self, live_photo, photo).erase()
     }
 
     fn send_message_draft(

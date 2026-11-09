@@ -15,6 +15,9 @@ pub struct TextQuote {
     /// _custom_emoji_ entities are kept in quotes.
     #[serde(default)]
     pub entities: Vec<MessageEntity>,
+    /// Rich texts selected from a rich message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rich_texts: Option<Vec<crate::types::RichText>>,
     /// Approximate quote position in the original message in UTF-16 code units
     /// as specified by the sender
     pub position: u32,

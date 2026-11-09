@@ -557,6 +557,9 @@ fn validate_rich_text_at(
             RichTextObject::BankCardNumber(value) => {
                 validate_nested_rich_text(&value.text, context, path, "bank_card_number")?;
             }
+            RichTextObject::TonAddress(value) => {
+                validate_nested_rich_text(&value.text, context, path, "ton_address")?;
+            }
             RichTextObject::Mention(value) => {
                 validate_nested_rich_text(&value.text, context, path, "mention")?;
             }
@@ -1053,8 +1056,8 @@ mod tests {
         payloads::{
             AnswerGuestQuery, AnswerInlineQuery, AnswerWebAppQuery, EditEphemeralMessageText,
             EditEphemeralMessageTextSetters, EditMessageText, EditMessageTextInline,
-            SavePreparedInlineMessage, SendMessage, SendMessageDraft, SendRichMessage,
-            SendRichMessageDraft,
+            SavePreparedInlineMessage, SendMessage, SendMessageDraft, SendMessageSetters,
+            SendRichMessage, SendRichMessageDraft, SendRichMessageSetters,
         },
         requests::{Payload, Request, Requester},
         types::{
@@ -1214,7 +1217,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_rich_payload_is_rejected_before_dispatch() {
         let result =
-            Bot::new("token").send_rich_message(UserId(1), thinking_message()).send().await;
+            Bot::new("token").send_rich_message(thinking_message()).chat_id(UserId(1)).send().await;
 
         assert!(matches!(
             result,
@@ -1495,7 +1498,7 @@ mod tests {
 
     #[test]
     fn inline_keyboard_styles_are_validated_before_dispatch() {
-        let mut payload = SendMessage::new(UserId(1), "text");
+        let mut payload = SendMessage::new("text").chat_id(UserId(1));
         payload.reply_markup =
             Some(ReplyMarkup::inline_kb([[
                 InlineKeyboardButton::callback("button", "callback").style("link")
@@ -1605,7 +1608,7 @@ mod tests {
     fn rich_payload_hooks_use_their_declared_contexts() {
         let thinking = thinking_message();
         assert!(matches!(
-            Payload::validate(&SendRichMessage::new(UserId(1), thinking.clone())),
+            Payload::validate(&SendRichMessage::new(thinking.clone()).chat_id(UserId(1))),
             Err(RequestValidationError::UnsupportedInContext {
                 context: RichMessageContext::Send,
                 ..

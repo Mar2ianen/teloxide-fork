@@ -15,8 +15,6 @@ impl_payload! {
     #[derive(Debug, Clone, Serialize)]
     pub SendLivePhoto (SendLivePhotoSetters) => Message {
         required {
-            /// Unique identifier for the target chat or username of the target channel
-            pub chat_id: Recipient [into],
             /// Live photo video to send
             pub live_photo: InputFile,
             /// The static photo to send
@@ -25,6 +23,8 @@ impl_payload! {
         optional {
             /// Unique identifier of the business connection on behalf of which the message will be sent
             pub business_connection_id: BusinessConnectionId,
+            /// Unique identifier for the target chat or username of the target channel. Required unless sending a callback-only ephemeral reply; ignored when ephemeral_message_parameters.receiver_user_id is omitted.
+            pub chat_id: Recipient [into],
             /// Unique identifier for the target message thread
             pub message_thread_id: ThreadId,
             /// Identifier of the direct messages topic to which the message will be sent
@@ -62,7 +62,10 @@ impl_payload! {
 impl crate::outbound::OutboundPayload for SendLivePhoto {
     fn outbound_hint(&self) -> crate::outbound::OutboundHint {
         crate::outbound::OutboundHint {
-            scope: crate::outbound::classify::scope_of_recipient(&self.chat_id),
+            scope: crate::outbound::classify::ephemeral_recipient_scope(
+                &self.chat_id,
+                &self.ephemeral_message_parameters,
+            ),
             class: crate::outbound::OutboundClass::new(crate::outbound::class::MESSAGE_SEND),
             priority: crate::outbound::OutboundPriority::NORMAL,
             weight: std::num::NonZeroU32::new(1).unwrap(),

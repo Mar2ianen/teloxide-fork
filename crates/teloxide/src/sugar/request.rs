@@ -120,9 +120,10 @@ mod tests {
         let bot = Bot::new("TOKEN");
 
         let real_reply_req = bot
-            .send_message(ChatId(1234), "test")
+            .send_message("test")
+            .chat_id(ChatId(1234))
             .reply_parameters(ReplyParameters::new(MessageId(1)));
-        let sugar_reply_req = bot.send_message(ChatId(1234), "test").reply_to(MessageId(1));
+        let sugar_reply_req = bot.send_message("test").chat_id(ChatId(1234)).reply_to(MessageId(1));
 
         assert_eq!(real_reply_req.deref(), sugar_reply_req.deref())
     }
@@ -133,9 +134,11 @@ mod tests {
         let document = InputFile::memory("hello world!");
 
         let real_reply_req = bot
-            .send_document(ChatId(1234), document.clone())
+            .send_document(document.clone())
+            .chat_id(ChatId(1234))
             .reply_parameters(ReplyParameters::new(MessageId(1)));
-        let sugar_reply_req = bot.send_document(ChatId(1234), document).reply_to(MessageId(1));
+        let sugar_reply_req =
+            bot.send_document(document).chat_id(ChatId(1234)).reply_to(MessageId(1));
 
         assert_eq!(
             real_reply_req.deref().reply_parameters,
@@ -151,9 +154,10 @@ mod tests {
         let bot = Bot::new("TOKEN").trace(Settings::empty()).parse_mode(ParseMode::Html);
 
         let real_reply_req = bot
-            .send_message(ChatId(1234), "test")
+            .send_message("test")
+            .chat_id(ChatId(1234))
             .reply_parameters(ReplyParameters::new(MessageId(1)));
-        let sugar_reply_req = bot.send_message(ChatId(1234), "test").reply_to(MessageId(1));
+        let sugar_reply_req = bot.send_message("test").chat_id(ChatId(1234)).reply_to(MessageId(1));
 
         assert_eq!(
             real_reply_req.payload_ref().payload_ref().reply_parameters,
@@ -172,9 +176,12 @@ mod tests {
         };
         let bot = Bot::new("TOKEN");
 
-        let real_link_req =
-            bot.send_message(ChatId(1234), "test").link_preview_options(link_preview_options);
-        let sugar_link_req = bot.send_message(ChatId(1234), "test").disable_link_preview(true);
+        let real_link_req = bot
+            .send_message("test")
+            .chat_id(ChatId(1234))
+            .link_preview_options(link_preview_options);
+        let sugar_link_req =
+            bot.send_message("test").chat_id(ChatId(1234)).disable_link_preview(true);
 
         assert_eq!(real_link_req.deref(), sugar_link_req.deref())
     }
@@ -193,9 +200,12 @@ mod tests {
         };
         let bot = Bot::new("TOKEN").trace(Settings::empty()).parse_mode(ParseMode::Html);
 
-        let real_link_req =
-            bot.send_message(ChatId(1234), "test").link_preview_options(link_preview_options);
-        let sugar_link_req = bot.send_message(ChatId(1234), "test").disable_link_preview(true);
+        let real_link_req = bot
+            .send_message("test")
+            .chat_id(ChatId(1234))
+            .link_preview_options(link_preview_options);
+        let sugar_link_req =
+            bot.send_message("test").chat_id(ChatId(1234)).disable_link_preview(true);
 
         assert_eq!(
             real_link_req.payload_ref().payload_ref().reply_parameters,

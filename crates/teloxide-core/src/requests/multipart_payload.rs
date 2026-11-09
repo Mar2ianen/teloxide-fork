@@ -121,7 +121,7 @@ mod tests {
     use crate::{
         payloads::{
             AnswerGuestQuery, AnswerInlineQuery, AnswerWebAppQuery, EditStory, PostStory,
-            SavePreparedInlineMessage, SendPoll, SendRichMessage,
+            SavePreparedInlineMessage, SendPoll, SendRichMessage, SendRichMessageSetters,
         },
         requests::{MultipartPayload, MultipartRequest, Requester},
         types::{
@@ -309,7 +309,7 @@ mod tests {
                 InputRichMessageMediaContent::Photo(crate::types::InputMediaPhoto::new(file())),
             ),
         ]);
-        let mut payload = SendRichMessage::new(ChatId(1), rich.clone());
+        let mut payload = SendRichMessage::new(rich.clone()).chat_id(ChatId(1));
 
         let mut copied = 0;
         payload.copy_files(&mut |_| copied += 1);
@@ -319,7 +319,7 @@ mod tests {
         payload.move_files(&mut |_| moved += 1);
         assert_eq!(moved, 1);
 
-        assert_multipart(Bot::new("token").send_rich_message(ChatId(1), rich));
+        assert_multipart(Bot::new("token").send_rich_message(rich).chat_id(ChatId(1)));
     }
 
     #[test]
@@ -334,12 +334,12 @@ mod tests {
                 ),
             ),
         ]);
-        let payload = SendRichMessage::new(ChatId(1), rich.clone());
+        let payload = SendRichMessage::new(rich.clone()).chat_id(ChatId(1));
 
         let mut copied = 0;
         payload.copy_files(&mut |_| copied += 1);
         assert_eq!(copied, 2);
 
-        assert_multipart(Bot::new("token").send_rich_message(ChatId(1), rich));
+        assert_multipart(Bot::new("token").send_rich_message(rich).chat_id(ChatId(1)));
     }
 }

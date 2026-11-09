@@ -936,6 +936,32 @@ where
     <B::SendMediaGroup as HasPayload>::Payload:
         Payload<Output: std::marker::Send> + OutboundPayload,
     B::SendMessage: Clone + std::marker::Send + 'static,
+    B::SendWidget: Clone + std::marker::Send + 'static,
+    <B::SendWidget as HasPayload>::Payload: Payload<Output: std::marker::Send> + OutboundPayload,
+    B::SendSharedWidget: Clone + std::marker::Send + 'static,
+    <B::SendSharedWidget as HasPayload>::Payload:
+        Payload<Output: std::marker::Send> + OutboundPayload,
+    B::AnswerWidgetQuery: Clone + std::marker::Send + 'static,
+    <B::AnswerWidgetQuery as HasPayload>::Payload:
+        Payload<Output: std::marker::Send> + OutboundPayload,
+    B::EditMessageWidgetData: Clone + std::marker::Send + 'static,
+    <B::EditMessageWidgetData as HasPayload>::Payload:
+        Payload<Output: std::marker::Send> + OutboundPayload,
+    B::EditMessageWidgetDataInline: Clone + std::marker::Send + 'static,
+    <B::EditMessageWidgetDataInline as HasPayload>::Payload:
+        Payload<Output: std::marker::Send> + OutboundPayload,
+    B::EditSharedWidgetData: Clone + std::marker::Send + 'static,
+    <B::EditSharedWidgetData as HasPayload>::Payload:
+        Payload<Output: std::marker::Send> + OutboundPayload,
+    B::GetChatShareThemeBackdrops: Clone + std::marker::Send + 'static,
+    <B::GetChatShareThemeBackdrops as HasPayload>::Payload:
+        Payload<Output: std::marker::Send> + OutboundPayload,
+    B::GetUniqueGift: Clone + std::marker::Send + 'static,
+    <B::GetUniqueGift as HasPayload>::Payload: Payload<Output: std::marker::Send> + OutboundPayload,
+    B::DeleteBusinessAccountGift: Clone + std::marker::Send + 'static,
+    <B::DeleteBusinessAccountGift as HasPayload>::Payload:
+        Payload<Output: std::marker::Send> + OutboundPayload,
+
     <B::SendMessage as HasPayload>::Payload: Payload<Output: std::marker::Send> + OutboundPayload,
     B::SendMessageDraft: Clone + std::marker::Send + 'static,
     <B::SendMessageDraft as HasPayload>::Payload:
@@ -1242,6 +1268,15 @@ where
                 send_photo,
                 send_poll,
                 send_rich_message,
+                send_widget,
+                send_shared_widget,
+                answer_widget_query,
+                edit_message_widget_data,
+                edit_message_widget_data_inline,
+                edit_shared_widget_data,
+                get_chat_share_theme_backdrops,
+                get_unique_gift,
+                delete_business_account_gift,
                 send_rich_message_draft,
                 send_sticker,
                 send_venue,
@@ -1647,6 +1682,15 @@ mod tests {
             send_photo,
             send_poll,
             send_rich_message,
+                send_widget,
+                send_shared_widget,
+                answer_widget_query,
+                edit_message_widget_data,
+                edit_message_widget_data_inline,
+                edit_shared_widget_data,
+                get_chat_share_theme_backdrops,
+                get_unique_gift,
+                delete_business_account_gift,
             send_rich_message_draft,
             send_sticker,
             send_venue,

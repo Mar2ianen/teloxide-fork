@@ -264,3 +264,7 @@ required-features = ["ctrlc_handler"]
 [[example]]
 name = "middlewares"
 required-features = ["ctrlc_handler"]
+
+[[example]]
+name = "widgets"
+required-features = ["ctrlc_handler", "tokio/macros", "tokio/rt-multi-thread"]

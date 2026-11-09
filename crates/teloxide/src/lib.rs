@@ -1,6 +1,6 @@
 //! A full-featured framework that empowers you to easily build [Telegram bots]
 //! using [Rust]. It handles all the difficult stuff so you can focus only on
-//! your business logic. Currently, version `10.3` of [Telegram Bot API] is
+//! your business logic. Currently, version `10.4` of [Telegram Bot API] is
 //! supported.
 //!
 //! For a high-level overview, see [our GitHub repository](https://github.com/teloxide/teloxide).
@@ -91,7 +91,7 @@
 //!        - User is provided by the (1)
 //!        - String is provided by the (2)
 //!     */
-//!     let _ = bot.send_message(user.id, format!("Hi! You sent: {message_text}")).await?;
+//!     let _ = bot.send_message(format!("Hi! You sent: {message_text}")).chat_id(user.id).await?;
 //!     Ok(())
 //! }
 //! ```

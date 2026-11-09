@@ -43,6 +43,8 @@ pub struct BotAccessSettings {
 pub struct KeyboardButtonRequestManagedBot {
     pub request_id: RequestId,
     pub suggested_name: Option<String>,
+    /// Suggested username. Premium owners may assign secondary usernames ending
+    /// in `agent`, `ai`, `app`, `game` or `gay` to up to two owned bots.
     pub suggested_username: Option<String>,
 }
 

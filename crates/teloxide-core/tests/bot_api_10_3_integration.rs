@@ -1,5 +1,5 @@
 use teloxide_core::{
-    payloads::SendRichMessage,
+    payloads::{SendRichMessage, SendRichMessageSetters},
     requests::MultipartPayload,
     types::{
         ChatId, CommunityChatJoined, EphemeralMessageParameters, InlineKeyboardButton,
@@ -83,7 +83,7 @@ fn rich_document_collects_uploaded_files() {
         caption: None,
     })]);
 
-    let payload = SendRichMessage::new(ChatId(1), rich);
+    let payload = SendRichMessage::new(rich).chat_id(ChatId(1));
     let mut copied = 0;
     payload.copy_files(&mut |_| copied += 1);
     assert_eq!(copied, 1);

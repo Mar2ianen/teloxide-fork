@@ -107,6 +107,22 @@ pub struct TelegramSendOptions {
 }
 
 impl TelegramSendOptions {
+    fn effective_ephemeral_parameters(&self) -> Option<EphemeralMessageParameters> {
+        self.ephemeral_message_parameters.clone().or_else(|| {
+            if let Some(receiver) = self.receiver_user_id {
+                let mut value = EphemeralMessageParameters::new(receiver);
+                if let Some(callback) = &self.callback_query_id {
+                    value = value.callback_query_id(callback.0.clone());
+                }
+                Some(value)
+            } else {
+                self.callback_query_id
+                    .as_ref()
+                    .map(|callback| EphemeralMessageParameters::reply(callback.0.clone()))
+            }
+        })
+    }
+
     fn preview_safe(&self) -> Self {
         let mut options = self.clone();
         // An ephemeral send is not a regular status message: the returned
@@ -333,13 +349,7 @@ where
     if let Some(value) = options.direct_messages_topic_id {
         request = request.direct_messages_topic_id(value);
     }
-    if let Some(value) = options.ephemeral_message_parameters.clone() {
-        request = request.ephemeral_message_parameters(value);
-    } else if let Some(receiver_user_id) = options.receiver_user_id {
-        let mut value = EphemeralMessageParameters::new(receiver_user_id);
-        if let Some(callback_query_id) = options.callback_query_id.as_ref() {
-            value = value.callback_query_id(callback_query_id.0.clone());
-        }
+    if let Some(value) = options.effective_ephemeral_parameters() {
         request = request.ephemeral_message_parameters(value);
     }
     if let Some(value) = options.parse_mode {
@@ -388,13 +398,7 @@ where
     if let Some(value) = options.direct_messages_topic_id {
         request = request.direct_messages_topic_id(value);
     }
-    if let Some(value) = options.ephemeral_message_parameters.clone() {
-        request = request.ephemeral_message_parameters(value);
-    } else if let Some(receiver_user_id) = options.receiver_user_id {
-        let mut value = EphemeralMessageParameters::new(receiver_user_id);
-        if let Some(callback_query_id) = options.callback_query_id.as_ref() {
-            value = value.callback_query_id(callback_query_id.0.clone());
-        }
+    if let Some(value) = options.effective_ephemeral_parameters() {
         request = request.ephemeral_message_parameters(value);
     }
     if let Some(value) = options.disable_notification {
@@ -514,7 +518,7 @@ where
     R::SendMessage: Send,
 {
     execute_request(context, super::DrafterRequestClass::Send, || async {
-        apply_text_send_options(bot.send_message(chat_id, text), options).await
+        apply_text_send_options(bot.send_message(text).chat_id(chat_id), options).await
     })
     .await
 }
@@ -531,7 +535,7 @@ where
     R::SendRichMessage: Send,
 {
     execute_request(context, super::DrafterRequestClass::Send, || async {
-        apply_rich_send_options(bot.send_rich_message(chat_id, rich_message), options).await
+        apply_rich_send_options(bot.send_rich_message(rich_message).chat_id(chat_id), options).await
     })
     .await
 }
@@ -2225,8 +2229,10 @@ mod tests {
             .ephemeral_message_parameters(
                 EphemeralMessageParameters::new(UserId(7)).callback_query_id("query"),
             );
-        let request =
-            apply_text_send_options(Bot::new("token").send_message(ChatId(1), "preview"), &options);
+        let request = apply_text_send_options(
+            Bot::new("token").send_message("preview").chat_id(ChatId(1)),
+            &options,
+        );
 
         assert_eq!(request.message_thread_id, Some(ThreadId(MessageId(9))));
         assert_eq!(request.disable_notification, Some(true));
@@ -2242,12 +2248,35 @@ mod tests {
             .receiver_user_id(UserId(8))
             .callback_query_id(CallbackQueryId("legacy".to_owned()));
         let rich_request = apply_rich_send_options(
-            Bot::new("token").send_rich_message(ChatId(1), InputRichMessage::html("preview")),
+            Bot::new("token")
+                .send_rich_message(InputRichMessage::html("preview"))
+                .chat_id(ChatId(1)),
             &legacy,
         );
         assert_eq!(
             rich_request.ephemeral_message_parameters,
             Some(EphemeralMessageParameters::new(UserId(8)).callback_query_id("legacy"))
+        );
+    }
+
+    #[test]
+    fn callback_only_send_options_apply_to_both_backends_and_keep_explicit_precedence() {
+        let options = TelegramSendOptions::default()
+            .callback_query_id(CallbackQueryId("callback".to_owned()));
+        let text = apply_text_send_options(Bot::new("token").send_message("reply"), &options);
+        let rich = apply_rich_send_options(
+            Bot::new("token").send_rich_message(InputRichMessage::html("reply")),
+            &options,
+        );
+        let expected = Some(EphemeralMessageParameters::reply("callback"));
+        assert_eq!(text.ephemeral_message_parameters, expected);
+        assert_eq!(rich.ephemeral_message_parameters, expected);
+        let explicit =
+            options.ephemeral_message_parameters(EphemeralMessageParameters::new(UserId(7)));
+        let text = apply_text_send_options(Bot::new("token").send_message("reply"), &explicit);
+        assert_eq!(
+            text.ephemeral_message_parameters,
+            Some(EphemeralMessageParameters::new(UserId(7)))
         );
     }
 

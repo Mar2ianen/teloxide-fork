@@ -132,6 +132,8 @@ pub enum MessageKind {
     ChecklistTasksAdded(MessageChecklistTasksAdded),
     CommunityChatAdded(MessageCommunityChatAdded),
     CommunityChatJoined(MessageCommunityChatJoined),
+    TonWalletTransfer(MessageTonWalletTransfer),
+    PaidMessagesWaived(MessagePaidMessagesWaived),
     CommunityChatRemoved(MessageCommunityChatRemoved),
     DirectMessagePriceChanged(MessageDirectMessagePriceChanged),
     ForumTopicCreated(MessageForumTopicCreated),
@@ -221,6 +223,8 @@ impl<'de> Deserialize<'de> for MessageKind {
             ChecklistTasksAdded,
             MessageChecklistTasksAdded
         );
+        deserialize_variant!("ton_wallet_transfer", TonWalletTransfer, MessageTonWalletTransfer);
+        deserialize_variant!("paid_messages_waived", PaidMessagesWaived, MessagePaidMessagesWaived);
         deserialize_variant!("community_chat_added", CommunityChatAdded, MessageCommunityChatAdded);
         deserialize_variant!(
             "community_chat_joined",
@@ -626,6 +630,7 @@ pub enum MediaKind {
     Photo(MediaPhoto),
     LivePhoto(MediaLivePhoto),
     RichMessage(MediaRichMessage),
+    Widget(MediaWidget),
     Poll(MediaPoll),
     Checklist(MediaChecklist),
     Sticker(MediaSticker),
@@ -1268,7 +1273,7 @@ mod getters {
         MaybeInaccessibleMessage, MediaAnimation, MediaAudio, MediaChecklist, MediaContact,
         MediaDocument, MediaGame, MediaKind, MediaLivePhoto, MediaLocation, MediaPaid, MediaPhoto,
         MediaPoll, MediaSticker, MediaStory, MediaText, MediaVenue, MediaVideo, MediaVideoNote,
-        MediaVoice, Message, MessageChannelChatCreated, MessageChatShared,
+        MediaVoice, MediaWidget, Message, MessageChannelChatCreated, MessageChatShared,
         MessageChecklistTasksAdded, MessageChecklistTasksDone, MessageCommon,
         MessageCommunityChatAdded, MessageCommunityChatRemoved, MessageConnectedWebsite,
         MessageDeleteChatPhoto, MessageDice, MessageDirectMessagePriceChanged, MessageEntity,
@@ -1535,6 +1540,10 @@ mod getters {
                     ..
                 })
                 | Common(MessageCommon {
+                    media_kind: MediaKind::Widget(MediaWidget { caption_entities, .. }),
+                    ..
+                })
+                | Common(MessageCommon {
                     media_kind: MediaKind::Voice(MediaVoice { caption_entities, .. }),
                     ..
                 }) => Some(caption_entities),
@@ -1554,6 +1563,7 @@ mod getters {
                     MediaKind::Animation(MediaAnimation { show_caption_above_media, .. })
                     | MediaKind::LivePhoto(MediaLivePhoto { show_caption_above_media, .. })
                     | MediaKind::Photo(MediaPhoto { show_caption_above_media, .. })
+                    | MediaKind::Widget(MediaWidget { show_caption_above_media, .. })
                     | MediaKind::Video(MediaVideo { show_caption_above_media, .. }) => {
                         show_caption_above_media
                     }
@@ -1598,6 +1608,7 @@ mod getters {
                     | MediaKind::Game(_)
                     | MediaKind::Venue(_)
                     | MediaKind::Location(_)
+                    | MediaKind::Widget(_)
                     | MediaKind::RichMessage(_)
                     | MediaKind::Poll(_)
                     | MediaKind::Checklist(_)
@@ -1754,7 +1765,8 @@ mod getters {
                         | MediaKind::LivePhoto(MediaLivePhoto { caption, .. })
                         | MediaKind::Photo(MediaPhoto { caption, .. })
                         | MediaKind::Video(MediaVideo { caption, .. })
-                        | MediaKind::Voice(MediaVoice { caption, .. }),
+                        | MediaKind::Voice(MediaVoice { caption, .. })
+                        | MediaKind::Widget(MediaWidget { caption, .. }),
                     ..
                 }) => caption.as_ref().map(Deref::deref),
                 _ => None,
@@ -2121,6 +2133,32 @@ mod getters {
         }
 
         /// Returns the community-joined service message payload, if present.
+        #[must_use]
+        pub fn widget(&self) -> Option<&types::Widget> {
+            match &self.kind {
+                Common(MessageCommon { media_kind: MediaKind::Widget(media), .. }) => {
+                    Some(&media.widget)
+                }
+                _ => None,
+            }
+        }
+
+        #[must_use]
+        pub fn ton_wallet_transfer(&self) -> Option<&types::TonWalletTransfer> {
+            match &self.kind {
+                TonWalletTransfer(media) => Some(&media.ton_wallet_transfer),
+                _ => None,
+            }
+        }
+
+        #[must_use]
+        pub fn paid_messages_waived(&self) -> Option<&types::PaidMessagesWaived> {
+            match &self.kind {
+                PaidMessagesWaived(media) => Some(&media.paid_messages_waived),
+                _ => None,
+            }
+        }
+
         #[must_use]
         pub fn community_chat_joined(&self) -> Option<&types::CommunityChatJoined> {
             match &self.kind {
@@ -3850,4 +3888,31 @@ mod tests {
         let message: Message = from_str(json).unwrap();
         assert!(message.show_caption_above_media())
     }
+}
+
+/// A message with an HTML widget.
+#[serde_with::skip_serializing_none]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct MediaWidget {
+    pub widget: crate::types::Widget,
+    pub caption: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub caption_entities: Vec<MessageEntity>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub show_caption_above_media: bool,
+}
+
+/// A service message about a TON wallet transfer.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct MessageTonWalletTransfer {
+    pub ton_wallet_transfer: crate::types::TonWalletTransfer,
+}
+
+/// A service message about using a link waiving paid messages.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct MessagePaidMessagesWaived {
+    pub paid_messages_waived: crate::types::PaidMessagesWaived,
 }

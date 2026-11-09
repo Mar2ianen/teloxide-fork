@@ -71,14 +71,12 @@ pub async fn start(
 ) -> HandlerResult {
     if start.is_empty() {
         // This means that it is just a regular link like https://t.me/some_bot, or a /start command
-        bot.send_message(
-            msg.chat.id,
-            format!(
-                "Hello!\n\nThis link allows anyone to message you secretly: {}?start={}",
-                me.tme_url(),
-                msg.chat.id
-            ),
-        )
+        bot.send_message(format!(
+            "Hello!\n\nThis link allows anyone to message you secretly: {}?start={}",
+            me.tme_url(),
+            msg.chat.id
+        ))
+        .chat_id(msg.chat.id)
         .await?;
         dialogue.exit().await?;
     } else {
@@ -86,11 +84,11 @@ pub async fn start(
         // or a /start 123456789 command
         match start.parse::<i64>() {
             Ok(id) => {
-                bot.send_message(msg.chat.id, "Send your message:").await?;
+                bot.send_message("Send your message:").chat_id(msg.chat.id).await?;
                 dialogue.update(State::WriteToSomeone { id: ChatId(id) }).await?;
             }
             Err(_) => {
-                bot.send_message(msg.chat.id, "Bad link!").await?;
+                bot.send_message("Bad link!").chat_id(msg.chat.id).await?;
                 dialogue.exit().await?;
             }
         }
@@ -109,29 +107,29 @@ pub async fn send_message(
         Some(text) => {
             // Trying to send a message to the user
             let sent_result = bot
-                .send_message(id, format!("You have a new message!\n\n<i>{text}</i>"))
+                .send_message(format!("You have a new message!\n\n<i>{text}</i>"))
+                .chat_id(id)
                 .parse_mode(ParseMode::Html)
                 .await;
 
             // And if no error is returned, success!
             if sent_result.is_ok() {
-                bot.send_message(
-                    msg.chat.id,
-                    format!(
-                        "Message sent!\n\nYour link is: {}?start={}",
-                        me.tme_url(),
-                        msg.chat.id
-                    ),
-                )
+                bot.send_message(format!(
+                    "Message sent!\n\nYour link is: {}?start={}",
+                    me.tme_url(),
+                    msg.chat.id
+                ))
+                .chat_id(msg.chat.id)
                 .await?;
             } else {
-                bot.send_message(msg.chat.id, "Error sending message! Maybe user blocked the bot?")
+                bot.send_message("Error sending message! Maybe user blocked the bot?")
+                    .chat_id(msg.chat.id)
                     .await?;
             }
             dialogue.exit().await?;
         }
         None => {
-            bot.send_message(msg.chat.id, "This bot can send only text.").await?;
+            bot.send_message("This bot can send only text.").chat_id(msg.chat.id).await?;
         }
     };
     Ok(())

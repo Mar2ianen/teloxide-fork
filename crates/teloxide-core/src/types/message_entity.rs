@@ -253,6 +253,10 @@ pub enum MessageEntityKind {
     Url,
     Email,
     PhoneNumber,
+    /// An address in the TON blockchain.
+    TonAddress,
+    /// A bank card number.
+    BankCardNumber,
     Bold,
     Blockquote,
     ExpandableBlockquote,

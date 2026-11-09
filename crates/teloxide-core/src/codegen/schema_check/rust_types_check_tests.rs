@@ -99,6 +99,195 @@ fn test_rust_objects() {
 
     check_object(
         api_schema.clone(),
+        schema_for!(AreaPosition),
+        "AreaPosition".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(Widget),
+        "Widget".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(PaidMessagesWaived),
+        "PaidMessagesWaived".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(TonWalletTransfer),
+        "TonWalletTransfer".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(WidgetQueryType),
+        "WidgetQueryType".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(WidgetQueryTypeData),
+        "WidgetQueryTypeData".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(WidgetQueryTypeSignData),
+        "WidgetQueryTypeSignData".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(WidgetQueryTypeSentTransaction),
+        "WidgetQueryTypeSentTransaction".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(WidgetQueryWallet),
+        "WidgetQueryWallet".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(WidgetQuery),
+        "WidgetQuery".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(SharedWidgetQuery),
+        "SharedWidgetQuery".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(TonNft),
+        "TonNft".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(TonNftAttribute),
+        "TonNftAttribute".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(TonWalletCardSticker),
+        "TonWalletCardSticker".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(TonWalletCard),
+        "TonWalletCard".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(EmojiType),
+        "EmojiType".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(EmojiTypeEmoji),
+        "EmojiTypeEmoji".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(EmojiTypeCustomEmoji),
+        "EmojiTypeCustomEmoji".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(ChatShareTheme),
+        "ChatShareTheme".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(ChatShareThemeEmoji),
+        "ChatShareThemeEmoji".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(ChatShareThemeUniqueGift),
+        "ChatShareThemeUniqueGift".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(ChatShareThemeBackdrops),
+        "ChatShareThemeBackdrops".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(ChatShareThemeBackdrop),
+        "ChatShareThemeBackdrop".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(RichTextTonAddress),
+        "RichTextTonAddress".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(InputWidgetMessageContent),
+        "InputWidgetMessageContent".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(InputSharedWidgetMessageContent),
+        "InputSharedWidgetMessageContent".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(EphemeralMessageParameters),
+        "EphemeralMessageParameters".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
         schema_for!(WebhookInfo),
         "WebhookInfo".to_owned(),
         &mut errors,
@@ -878,13 +1067,6 @@ fn test_rust_objects() {
         api_schema.clone(),
         schema_for!(BusinessOpeningHours),
         "BusinessOpeningHours".to_owned(),
-        &mut errors,
-        &exceptions,
-    );
-    check_object(
-        api_schema.clone(),
-        schema_for!(StoryAreaPosition),
-        "StoryAreaPosition".to_owned(),
         &mut errors,
         &exceptions,
     );

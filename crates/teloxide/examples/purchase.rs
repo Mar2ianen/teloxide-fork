@@ -85,24 +85,25 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
 }
 
 async fn start(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
-    bot.send_message(msg.chat.id, "Let's start! What's your full name?").await?;
+    bot.send_message("Let's start! What's your full name?").chat_id(msg.chat.id).await?;
     dialogue.update(State::ReceiveFullName).await?;
     Ok(())
 }
 
 async fn help(bot: Bot, msg: Message) -> HandlerResult {
-    bot.send_message(msg.chat.id, Command::descriptions().to_string()).await?;
+    bot.send_message(Command::descriptions().to_string()).chat_id(msg.chat.id).await?;
     Ok(())
 }
 
 async fn cancel(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
-    bot.send_message(msg.chat.id, "Cancelling the dialogue.").await?;
+    bot.send_message("Cancelling the dialogue.").chat_id(msg.chat.id).await?;
     dialogue.exit().await?;
     Ok(())
 }
 
 async fn invalid_state(bot: Bot, msg: Message) -> HandlerResult {
-    bot.send_message(msg.chat.id, "Unable to handle the message. Type /help to see the usage.")
+    bot.send_message("Unable to handle the message. Type /help to see the usage.")
+        .chat_id(msg.chat.id)
         .await?;
     Ok(())
 }
@@ -113,13 +114,14 @@ async fn receive_full_name(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
             let products = ["Apple", "Banana", "Orange", "Potato"]
                 .map(|product| InlineKeyboardButton::callback(product, product));
 
-            bot.send_message(msg.chat.id, "Select a product:")
+            bot.send_message("Select a product:")
+                .chat_id(msg.chat.id)
                 .reply_markup(InlineKeyboardMarkup::new([products]))
                 .await?;
             dialogue.update(State::ReceiveProductChoice { full_name }).await?;
         }
         None => {
-            bot.send_message(msg.chat.id, "Please, send me your full name.").await?;
+            bot.send_message("Please, send me your full name.").chat_id(msg.chat.id).await?;
         }
     }
 
@@ -133,10 +135,10 @@ async fn receive_product_selection(
     q: CallbackQuery,
 ) -> HandlerResult {
     if let Some(product) = &q.data {
-        bot.send_message(
-            dialogue.chat_id(),
-            format!("{full_name}, product '{product}' has been purchased successfully!"),
-        )
+        bot.send_message(format!(
+            "{full_name}, product '{product}' has been purchased successfully!"
+        ))
+        .chat_id(dialogue.chat_id())
         .await?;
         dialogue.exit().await?;
     }

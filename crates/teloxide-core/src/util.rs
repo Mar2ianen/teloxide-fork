@@ -42,6 +42,8 @@ pub(crate) fn mentioned_users_from_entities(
         | BotCommand
         | Url
         | Email
+        | TonAddress
+        | BankCardNumber
         | PhoneNumber
         | Bold
         | Blockquote

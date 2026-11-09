@@ -65,14 +65,12 @@ async fn start(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
     match msg.text().map(|text| text.parse::<i32>()) {
         Some(Ok(n)) => {
             dialogue.update(State::GotNumber(n)).await?;
-            bot.send_message(
-                msg.chat.id,
-                format!("Remembered number {n}. Now use /get or /reset."),
-            )
-            .await?;
+            bot.send_message(format!("Remembered number {n}. Now use /get or /reset."))
+                .chat_id(msg.chat.id)
+                .await?;
         }
         _ => {
-            bot.send_message(msg.chat.id, "Please, send me a number.").await?;
+            bot.send_message("Please, send me a number.").chat_id(msg.chat.id).await?;
         }
     }
 
@@ -88,17 +86,17 @@ async fn got_number(
 ) -> HandlerResult {
     match cmd {
         Command::Get => {
-            bot.send_message(msg.chat.id, format!("Here is your number: {num}.")).await?;
+            bot.send_message(format!("Here is your number: {num}.")).chat_id(msg.chat.id).await?;
         }
         Command::Reset => {
             dialogue.reset().await?;
-            bot.send_message(msg.chat.id, "Number reset.").await?;
+            bot.send_message("Number reset.").chat_id(msg.chat.id).await?;
         }
     }
     Ok(())
 }
 
 async fn invalid_command(bot: Bot, msg: Message) -> HandlerResult {
-    bot.send_message(msg.chat.id, "Please, send /get or /reset.").await?;
+    bot.send_message("Please, send /get or /reset.").chat_id(msg.chat.id).await?;
     Ok(())
 }

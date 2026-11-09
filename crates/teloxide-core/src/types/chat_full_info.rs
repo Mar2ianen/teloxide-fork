@@ -49,6 +49,11 @@ pub struct ChatFullInfo {
     /// Community to which the chat belongs, if any.
     pub community: Option<Community>,
 
+    /// Public TON wallet card of the user.
+    pub ton_wallet_card: Option<crate::types::TonWalletCard>,
+    /// Theme of the screen for sharing a link to the chat.
+    pub share_theme: Option<crate::types::ChatShareTheme>,
+
     /// The time after which all messages sent to the chat will be automatically
     /// deleted; in seconds.
     pub message_auto_delete_time: Option<Seconds>,
@@ -772,6 +777,8 @@ mod tests {
             pinned_message: None,
             guard_bot: None,
             community: None,
+            ton_wallet_card: None,
+            share_theme: None,
             message_auto_delete_time: None,
             has_hidden_members: false,
             has_aggressive_anti_spam_enabled: false,
@@ -841,6 +848,8 @@ mod tests {
             pinned_message: None,
             guard_bot: None,
             community: None,
+            ton_wallet_card: None,
+            share_theme: None,
             message_auto_delete_time: None,
             has_hidden_members: false,
             has_aggressive_anti_spam_enabled: false,
@@ -908,6 +917,8 @@ mod tests {
             pinned_message: None,
             guard_bot: None,
             community: None,
+            ton_wallet_card: None,
+            share_theme: None,
             message_auto_delete_time: None,
             has_hidden_members: false,
             has_aggressive_anti_spam_enabled: false,

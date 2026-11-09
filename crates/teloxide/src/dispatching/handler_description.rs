@@ -89,6 +89,8 @@ impl EventKind for Kind {
             ChatBoost,
             RemovedChatBoost,
             StoppedMessageGeneration,
+            WidgetQuery,
+            SharedWidgetQuery,
         ]
         .into_iter()
         .map(Kind)
@@ -160,6 +162,8 @@ mod tests {
             InlineQuery,
             ChosenInlineResult,
             CallbackQuery,
+            WidgetQuery,
+            SharedWidgetQuery,
             ShippingQuery,
             PreCheckoutQuery,
             PurchasedPaidMedia,
@@ -197,6 +201,8 @@ mod tests {
                 | ChatJoinRequest
                 | ChatBoost
                 | RemovedChatBoost
+                | WidgetQuery
+                | SharedWidgetQuery
                 | StoppedMessageGeneration
                 | BusinessMessage
                 | BusinessConnection
@@ -206,5 +212,19 @@ mod tests {
                 }
             }
         }
+    }
+    #[test]
+    fn widget_filters_subscribe_to_both_query_kinds() {
+        use crate::{
+            dispatching::UpdateFilterExt,
+            types::{AllowedUpdate, Update},
+        };
+        let handler = dptree::entry()
+            .branch(Update::filter_widget_query().endpoint(|| async {}))
+            .branch(Update::filter_shared_widget_query().endpoint(|| async {}));
+        let observed = handler.description().allowed_updates();
+        assert_eq!(observed.len(), 2);
+        assert!(observed.contains(&AllowedUpdate::WidgetQuery));
+        assert!(observed.contains(&AllowedUpdate::SharedWidgetQuery));
     }
 }

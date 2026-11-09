@@ -67,3 +67,17 @@ pub(crate) fn new_owner_chat_id_scope(chat_id: &ChatId) -> OutboundScope {
 pub(crate) fn canonical_username(username: &str) -> String {
     username.strip_prefix('@').unwrap_or(username).to_ascii_lowercase()
 }
+
+/// Callback-only replies ignore chat_id, even when callers supplied it.
+pub(crate) fn ephemeral_recipient_scope(
+    recipient: &Option<Recipient>,
+    ephemeral: &Option<crate::types::EphemeralMessageParameters>,
+) -> OutboundScope {
+    if ephemeral
+        .as_ref()
+        .is_some_and(|p| p.receiver_user_id.is_none() && p.callback_query_id.is_some())
+    {
+        return OutboundScope::Global;
+    }
+    recipient.as_ref().map_or(OutboundScope::Global, scope_of_recipient)
+}

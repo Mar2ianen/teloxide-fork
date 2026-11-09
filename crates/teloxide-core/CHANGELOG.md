@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## unreleased
 
+### Added
+
+- Add Bot API 10.4 widget/query/wallet/NFT/share-theme types, rich quote fields, TON rich text, TON/bank-card entities, and wallet-transfer/paid-message-waiver service messages.
+- Generate `send_widget`, `send_shared_widget`, `answer_widget_query`, normal/inline `edit_message_widget_data`, `edit_shared_widget_data`, `get_chat_share_theme_backdrops`, `get_unique_gift` and `delete_business_account_gift` from the method schema.
+- Add verification-description formatting parameters, widget inline contents/builders and subscription-aware update variants.
+- Audit the 10.4 delta against a hash-pinned official snapshot; cover JSON, multipart, endpoint dispatch, malformed updates and parse-mode adaptors with behavioral tests.
+
+### Changed
+
+- [**BC**] Make `chat_id` optional on all 14 ephemeral-capable send methods and `receiver_user_id` optional in `EphemeralMessageParameters`. Use `.chat_id(...)` for normal sends or `EphemeralMessageParameters::reply(callback_id)` for callback-only replies.
+- [**BC**] Add fields and enum variants for Bot API 10.4. Rename the canonical story-area position type to `AreaPosition`, retaining `StoryAreaPosition` as an alias.
+- Preserve `Eq`/`Hash` on reply parameters by deriving them across the rich-text tree; traverse TON-address nodes during rich validation.
+- Update all requester adaptors and scheduler policies; ignore the chat scope of callback-only ephemeral replies even when a chat ID was supplied.
+
 ## 0.16.0 - 2026-08-24
 
 ### Added

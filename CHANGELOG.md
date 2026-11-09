@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## unreleased
 
+### Added
+
+- Support the Telegram Bot API 10.4 delta: HTML widgets, widget queries and edits, TON wallets, rich quotes, share themes, gift methods, verification formatting and service/entity types. See `docs/bot-api-10.4/README.md` for the official-source audit and sandbox check.
+- Route widget updates through dispatcher filters and update subscription hints; forward new methods through all request adaptors.
+
+### Changed
+
+- [**BC**] The 14 ephemeral-capable send methods/payload constructors now take the chat target through an optional `.chat_id(...)` setter; callback-only replies can omit it. See `MIGRATION_GUIDE.md`.
+- [**BC**] Add public fields/enum variants for Bot API 10.4. Preserve `StoryAreaPosition` as an alias for `AreaPosition` and preserve `ReplyParameters` equality/hash traits.
+
 ## 0.20.0 - 2026-08-24
 
 ### Added

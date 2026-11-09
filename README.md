@@ -5,7 +5,7 @@
     <img src="https://github.com/Mar2ianen/teloxide-fork/actions/workflows/ci.yml/badge.svg?branch=master">
   </a>
   <a href="https://core.telegram.org/bots/api">
-    <img src="https://img.shields.io/badge/API%20coverage-Bot%20API%2010.3%20core-yellowgreen.svg">
+    <img src="https://img.shields.io/badge/API%20coverage-Bot%20API%2010.4%20core-yellowgreen.svg">
   </a>
   <a href="https://t.me/teloxide">
     <img src="https://img.shields.io/badge/support-t.me%2Fteloxide-blueviolet">
@@ -63,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let queue = OutboundQueue::new_spawn(OutboundSettings::default())?;
     let bot = Bot::from_env().outbound(queue);
 
-    bot.send_message(ChatId(1), "scheduled request").await?;
+    bot.send_message("scheduled request").chat_id(ChatId(1)).await?;
     Ok(())
 }
 ```
@@ -95,9 +95,15 @@ shared semantic API. For the full public API and feature matrix see
 The implementation-specific delivery contract is documented in the Drafter
 module rustdoc and the time renderer API docs.
 
-### Telegram Bot API 10.3
+### Telegram Bot API 10.4
 
-The current development line exposes the Bot API 10.3 surface in `teloxide-core`, including rich
+Bot API 10.4 adds HTML widgets and query updates, shared widget state, TON wallet
+cards and transfers, callback-only ephemeral replies, rich quotes, share themes
+and new gift methods. See the [official-source audit](docs/bot-api-10.4/README.md)
+and [migration notes](MIGRATION_GUIDE.md#bot-api-104). The runnable
+[`widgets` example](crates/teloxide/examples/widgets.rs) includes a sandbox-checkable HTML widget.
+
+The current development line exposes the Bot API 10.4 surface in `teloxide-core`, including rich
 message buttons/documents, expandable quotations, compact tables, ephemeral
 message editing, native draft Stop controls, disabled buttons and the
 `stopped_message_generation` update. Existing inline-button code can opt into
@@ -282,12 +288,12 @@ enum Command {
 
 async fn answer(bot: Bot, msg: Message, cmd: Command) -> ResponseResult<()> {
     match cmd {
-        Command::Help => bot.send_message(msg.chat.id, Command::descriptions().to_string()).await?,
+        Command::Help => bot.send_message(Command::descriptions().to_string()).chat_id(msg.chat.id).await?,
         Command::Username(username) => {
-            bot.send_message(msg.chat.id, format!("Your username is @{username}.")).await?
+            bot.send_message(format!("Your username is @{username}.")).chat_id(msg.chat.id).await?
         }
         Command::UsernameAndAge { username, age } => {
-            bot.send_message(msg.chat.id, format!("Your username is @{username} and age is {age}."))
+            bot.send_message(format!("Your username is @{username} and age is {age}.")).chat_id(msg.chat.id)
                 .await?
         }
     };
@@ -356,7 +362,7 @@ async fn main() {
 }
 
 async fn start(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
-    bot.send_message(msg.chat.id, "Let's start! What's your full name?").await?;
+    bot.send_message("Let's start! What's your full name?").chat_id(msg.chat.id).await?;
     dialogue.update(State::ReceiveFullName).await?;
     Ok(())
 }
@@ -364,11 +370,11 @@ async fn start(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
 async fn receive_full_name(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
     match msg.text() {
         Some(text) => {
-            bot.send_message(msg.chat.id, "How old are you?").await?;
+            bot.send_message("How old are you?").chat_id(msg.chat.id).await?;
             dialogue.update(State::ReceiveAge { full_name: text.into() }).await?;
         }
         None => {
-            bot.send_message(msg.chat.id, "Send me plain text.").await?;
+            bot.send_message("Send me plain text.").chat_id(msg.chat.id).await?;
         }
     }
 
@@ -383,11 +389,11 @@ async fn receive_age(
 ) -> HandlerResult {
     match msg.text().map(|text| text.parse::<u8>()) {
         Some(Ok(age)) => {
-            bot.send_message(msg.chat.id, "What's your location?").await?;
+            bot.send_message("What's your location?").chat_id(msg.chat.id).await?;
             dialogue.update(State::ReceiveLocation { full_name, age }).await?;
         }
         _ => {
-            bot.send_message(msg.chat.id, "Send me a number.").await?;
+            bot.send_message("Send me a number.").chat_id(msg.chat.id).await?;
         }
     }
 
@@ -403,11 +409,11 @@ async fn receive_location(
     match msg.text() {
         Some(location) => {
             let report = format!("Full name: {full_name}\nAge: {age}\nLocation: {location}");
-            bot.send_message(msg.chat.id, report).await?;
+            bot.send_message(report).chat_id(msg.chat.id).await?;
             dialogue.exit().await?;
         }
         None => {
-            bot.send_message(msg.chat.id, "Send me plain text.").await?;
+            bot.send_message("Send me plain text.").chat_id(msg.chat.id).await?;
         }
     }
 

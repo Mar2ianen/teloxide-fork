@@ -3,6 +3,46 @@ Note that the list of required changes is not fully exhaustive and it may lack s
 
 ## unreleased
 
+### Bot API 10.4
+
+The chat target is now optional on the 14 methods that support ephemeral replies.
+Move the first argument to `.chat_id(...)` for normal or receiver-targeted sends:
+
+```rust,ignore
+// Before:
+bot.send_message(chat_id, "Hello").await?;
+bot.send_photo(chat_id, photo).await?;
+// After:
+bot.send_message("Hello").chat_id(chat_id).await?;
+bot.send_photo(photo).chat_id(chat_id).await?;
+// A callback-only reply has no chat target or receiver:
+bot.send_message("Only you can see this")
+    .ephemeral_message_parameters(EphemeralMessageParameters::reply(callback.id.0))
+    .await?;
+```
+
+This applies to `send_message`, `send_rich_message`, `send_animation`, `send_audio`,
+`send_contact`, `send_document`, `send_live_photo`, `send_location`, `send_photo`,
+`send_sticker`, `send_venue`, `send_video`, `send_video_note` and `send_voice`, plus
+their payload constructors. Import the relevant setters or `prelude::*`. Code
+mutating payload fields directly must set `chat_id` and `receiver_user_id` to
+`Some(...)`. `EphemeralMessageParameters::new(user_id)` still constructs a
+receiver-targeted message. Bots must still answer the original callback query.
+
+New enum variants require updating exhaustive matches on `UpdateKind`,
+`AllowedUpdate`, `MediaKind`, `MessageKind`, `ExternalReplyInfoKind`,
+`InputMessageContent`, `MessageEntityKind` and `RichTextObject`. Struct literals
+for `ChatFullInfo`, `TextQuote` and `ReplyParameters` need their new optional
+fields. `AreaPosition` is the canonical name; `StoryAreaPosition` remains an
+alias. Rich-text types now implement truthful `Eq` and `Hash`, preserving those
+traits on `ReplyParameters` and existing payloads.
+
+Use `Update::filter_widget_query()` and `Update::filter_shared_widget_query()`
+for subscription-aware dispatch. `edit_message_widget_data` and its `_inline`
+sibling return `True`, as does `edit_shared_widget_data`. Empty data removes it;
+omitted data leaves it unchanged. See the [10.4 audit](docs/bot-api-10.4/README.md)
+for production restrictions, query deadlines and shared-widget pacing.
+
 ### Bot API 10.3
 
 This fork now exposes Telegram Bot API 10.3. The generated send methods use

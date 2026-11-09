@@ -49,7 +49,7 @@ pub struct WidgetQueryTypeData {
 }
 
 /// The query contains data signed by a TON wallet of the user who sent the
-/// query. The data is signed for the domain bot<bot_id> , where <bot_id> is the
+/// query. The data is signed for the domain `bot<bot_id>`, where `bot_id` is the
 /// identifier of the bot.
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

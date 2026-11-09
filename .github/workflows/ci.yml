@@ -78,6 +78,9 @@ jobs:
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
+      - name: Audit Bot API 10.4 against the frozen official specification
+        run: python3 docs/bot-api-10.4/audit.py
+
       - name: Check formatting
         run: |
           cargo fmt --all -- --check

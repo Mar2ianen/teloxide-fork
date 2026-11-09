@@ -40,11 +40,11 @@ number and points to its own reviewed release merge commit.
 ## Publishing
 
 Publish only from the tagged release commit, in dependency order. The
-`cargo publish --dry-run` checks above validate the packages without uploading
-them. Once the release tags are in place, publish `teloxide-core`, then
-`teloxide-macros`, then `teloxide`, waiting for each dependency to become
-available on crates.io before publishing the next package. The `teloxide` manifest must contain
-versioned dependencies for the candidate core and macros packages.
+`cargo publish --dry-run` checks validate packages without uploading them.
+Once the release tags are in place, publish `teloxide-core`, then
+`teloxide-macros`, waiting for each dependency to become available on crates.io.
+Then dry-run and publish `teloxide`. Its manifest must contain versioned
+dependencies for the candidate core and macros packages.
 
 Publish the GitHub release as a prerelease with the root changelog entry and
 links to the matching crates.io versions. Keep the previous stable release

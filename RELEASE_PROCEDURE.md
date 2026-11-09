@@ -16,8 +16,11 @@ from a feature branch or directly from an untagged worktree.
 3. Update each affected manifest, path dependency version, lockfile, changelog,
    `MIGRATION_GUIDE.md`, README install examples and release notes.
 4. Run formatting, the complete workspace test/lint matrix, documentation
-   builds and `cargo package --list` plus `cargo package --dry-run` for every
-   publishable crate. Validate package dependencies in dependency order.
+   builds and `cargo package --list` for every publishable crate. Run
+   `cargo publish --dry-run` for packages whose candidate dependencies are
+   already available on crates.io. A downstream RC cannot resolve unpublished
+   candidate dependencies from the registry; validate it with workspace checks
+   and package-list inspection, then dry-run it after publishing its dependencies.
 5. Open a versioned release pull request against `master` with the target
    versions, Bot API version, package impact and exact tag plan. Wait for every
    required status check before merging.

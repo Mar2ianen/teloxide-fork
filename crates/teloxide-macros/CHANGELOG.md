@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## unreleased
 
+### Fixed
+
+- Avoid unreachable-code diagnostics for infallible command argument parsers on newer compilers, preserving error conversion for fallible parsers.
+
 ## 0.11.1 - 2026-08-14
 
 ### Changed

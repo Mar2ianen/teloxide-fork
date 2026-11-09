@@ -1,0 +1,18 @@
+<h3>Bot API 10.4</h3>
+<p id="status">Tap to request fresh data from the bot.</p>
+<button id="refresh">Refresh</button>
+<script>
+const status = document.getElementById('status');
+const refresh = document.getElementById('refresh');
+refresh.addEventListener('click', () => {
+  if (typeof TelegramWidget.request !== 'function') {
+    status.textContent = 'Please update Telegram to use widget requests.';
+    return;
+  }
+  TelegramWidget.request('refresh').then(
+    answer => { status.textContent = answer.result || 'Refreshed'; },
+    error => { status.textContent = 'Request failed: ' + error.code; }
+  );
+});
+TelegramWidget.ready();
+</script>

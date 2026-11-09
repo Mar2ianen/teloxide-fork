@@ -45,7 +45,7 @@ bitflags::bitflags! {
         /// Set if the user is allowed to send polls
         const SEND_POLLS = 1 << 1;
 
-        /// Set if the user is allowed to send animations, games, stickers and
+        /// Set if the user is allowed to send animations, games, stickers, widgets and
         /// use inline bots.
         const SEND_OTHER_MESSAGES = 1 << 2;
 

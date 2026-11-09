@@ -67,3 +67,40 @@ pub(crate) fn new_owner_chat_id_scope(chat_id: &ChatId) -> OutboundScope {
 pub(crate) fn canonical_username(username: &str) -> String {
     username.strip_prefix('@').unwrap_or(username).to_ascii_lowercase()
 }
+
+/// Callback-only replies ignore chat_id, even when callers supplied it.
+pub(crate) fn ephemeral_recipient_scope(
+    recipient: &Option<Recipient>,
+    ephemeral: &Option<crate::types::EphemeralMessageParameters>,
+) -> OutboundScope {
+    if ephemeral
+        .as_ref()
+        .is_some_and(|p| p.receiver_user_id.is_none() && p.callback_query_id.is_some())
+    {
+        return OutboundScope::Global;
+    }
+    recipient.as_ref().map_or(OutboundScope::Global, scope_of_recipient)
+}
+
+/// Message addresses are an isolated fallback, not a guessed shared identity.
+pub(crate) fn widget_message_scope(
+    chat: &Recipient,
+    message_id: crate::types::MessageId,
+) -> OutboundScope {
+    let chat = match chat {
+        Recipient::Id(id) => OutboundChatKey::id(id.0),
+        Recipient::ChannelUsername(name) => OutboundChatKey::username(name),
+    };
+    OutboundScope::ResourceInChat {
+        resource: crate::outbound::OutboundResourceKey::widget_message(chat.clone(), message_id.0),
+        chat,
+    }
+}
+
+pub(crate) fn inline_widget_message_scope(id: &str) -> OutboundScope {
+    OutboundScope::Resource(crate::outbound::OutboundResourceKey::inline_widget_message(id))
+}
+
+pub(crate) fn shared_widget_scope(id: &str) -> OutboundScope {
+    OutboundScope::Resource(crate::outbound::OutboundResourceKey::shared_widget(id))
+}

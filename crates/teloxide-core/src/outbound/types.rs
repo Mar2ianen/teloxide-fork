@@ -42,7 +42,72 @@ impl OutboundPriority {
 pub enum OutboundScope {
     Global,
     Chat(OutboundChatKey),
+    /// An independently limited widget or widget message.
+    Resource(OutboundResourceKey),
+    /// Widget resource with an additional chat rate-limit dimension.
+    ///
+    /// A resource RetryAfter penalizes only that resource, but this request
+    /// also consumes per-chat windows and observes chat penalties.
+    ResourceInChat {
+        resource: OutboundResourceKey,
+        chat: OutboundChatKey,
+    },
 }
+
+impl OutboundScope {
+    /// Parent chat participating in admission, if this target has one.
+    pub(crate) fn chat_key(&self) -> Option<&OutboundChatKey> {
+        match self {
+            Self::Chat(chat) | Self::ResourceInChat { chat, .. } => Some(chat),
+            Self::Global | Self::Resource(_) => None,
+        }
+    }
+}
+
+/// Opaque widget resource identity. IDs are preserved exactly, including case.
+/// Shared IDs and message addresses occupy separate namespaces.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct OutboundResourceKey(WidgetResource);
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum WidgetResource {
+    Shared(Arc<str>),
+    Message { chat: OutboundChatKey, message_id: i32 },
+    Inline(Arc<str>),
+}
+
+impl OutboundResourceKey {
+    /// One shared widget, across all messages and bot instances sharing a
+    /// queue.
+    #[must_use]
+    pub fn shared_widget(id: impl AsRef<str>) -> Self {
+        Self(WidgetResource::Shared(Arc::from(id.as_ref())))
+    }
+
+    /// A widget message whose shared identity is not known to the caller.
+    #[must_use]
+    pub fn widget_message(chat: OutboundChatKey, message_id: i32) -> Self {
+        Self(WidgetResource::Message { chat, message_id })
+    }
+
+    /// A widget in an inline message whose shared identity is unknown.
+    #[must_use]
+    pub fn inline_widget_message(id: impl AsRef<str>) -> Self {
+        Self(WidgetResource::Inline(Arc::from(id.as_ref())))
+    }
+}
+
+/// Payloads of the two message-addressed widget data edit methods.
+/// This sealed marker permits supplying their otherwise unavailable shared ID
+/// to the scheduling adaptor without adding a field to the Telegram request.
+pub trait WidgetDataEditPayload: OutboundPayload + widget_edit_sealed::Sealed {}
+mod widget_edit_sealed {
+    pub trait Sealed {}
+    impl Sealed for crate::payloads::EditMessageWidgetData {}
+    impl Sealed for crate::payloads::EditMessageWidgetDataInline {}
+}
+impl WidgetDataEditPayload for crate::payloads::EditMessageWidgetData {}
+impl WidgetDataEditPayload for crate::payloads::EditMessageWidgetDataInline {}
 
 /// Chat identity used for per-chat windows and penalties.
 ///
@@ -177,7 +242,7 @@ pub trait OutboundPayload {
 /// What a payload says about itself to the scheduler.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutboundHint {
-    /// The chat (or user) identity the request applies to.
+    /// The chat, user, or widget resource the request applies to.
     pub scope: OutboundScope,
     /// Request class (message send, mutation, chat action, ...).
     pub class: OutboundClass,
@@ -208,9 +273,10 @@ pub struct OutboundMetadata {
 /// [`OutboundPayload::outbound_hint`] decides the base classification of a
 /// payload; a caller that needs different scheduling for the same payload
 /// (a Drafter preview vs a final commit, an interactive retry, ...)
-/// overrides priority/weight/class here. Scope is deliberately NOT
-/// overridable: it is tied to the actual payload target and must never
-/// drift from what is sent.
+/// overrides priority/weight/class here. Arbitrary scope overrides are not
+/// supported. Message-addressed widget edits can supply a shared identity
+/// through [`super::ScheduledRequest::shared_widget`]; it must describe the
+/// actual payload target.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct OutboundOverrides {
     /// Overrides [`OutboundHint::priority`].

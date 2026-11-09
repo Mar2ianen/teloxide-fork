@@ -19,6 +19,8 @@ pub enum InputMessageContent {
     Venue(InputMessageContentVenue),
     Contact(InputMessageContentContact),
     Invoice(InputMessageContentInvoice),
+    Widget(crate::types::InputWidgetMessageContent),
+    SharedWidget(crate::types::InputSharedWidgetMessageContent),
     Rich(InputRichMessageContent),
 }
 
@@ -49,7 +51,26 @@ impl<'de> Deserialize<'de> for InputMessageContent {
     where
         D: serde::Deserializer<'de>,
     {
-        LegacyInputMessageContent::deserialize(deserializer).map(Into::into)
+        use serde::de::Error;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let html = value.get("html").is_some();
+        let shared = value.get("widget_id").is_some();
+        let legacy =
+            ["message_text", "latitude", "longitude", "phone_number", "prices", "rich_message"]
+                .iter()
+                .any(|key| value.get(key).is_some());
+        if (html && shared) || ((html || shared) && legacy) {
+            return Err(D::Error::custom("widget content must select exactly one message shape"));
+        }
+        if html {
+            return serde_json::from_value(value).map(Self::Widget).map_err(D::Error::custom);
+        }
+        if shared {
+            return serde_json::from_value(value).map(Self::SharedWidget).map_err(D::Error::custom);
+        }
+        serde_json::from_value::<LegacyInputMessageContent>(value)
+            .map(Into::into)
+            .map_err(D::Error::custom)
     }
 }
 

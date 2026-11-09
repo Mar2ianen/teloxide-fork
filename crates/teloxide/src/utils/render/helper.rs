@@ -39,26 +39,63 @@ pub trait RenderMessageTextHelper {
 
 impl RenderMessageTextHelper for Message {
     fn html_text(&self) -> Option<String> {
-        self.text()
-            .zip(self.entities())
-            .map(|(text, entities)| Renderer::new(text, entities).as_html())
+        self.text().map(|text| Renderer::new(text, self.entities().unwrap_or_default()).as_html())
     }
 
     fn markdown_text(&self) -> Option<String> {
         self.text()
-            .zip(self.entities())
-            .map(|(text, entities)| Renderer::new(text, entities).as_markdown())
+            .map(|text| Renderer::new(text, self.entities().unwrap_or_default()).as_markdown())
     }
 
     fn html_caption(&self) -> Option<String> {
         self.caption()
-            .zip(self.caption_entities())
-            .map(|(text, entities)| Renderer::new(text, entities).as_html())
+            .map(|text| Renderer::new(text, self.caption_entities().unwrap_or_default()).as_html())
     }
 
     fn markdown_caption(&self) -> Option<String> {
-        self.caption()
-            .zip(self.caption_entities())
-            .map(|(text, entities)| Renderer::new(text, entities).as_markdown())
+        self.caption().map(|text| {
+            Renderer::new(text, self.caption_entities().unwrap_or_default()).as_markdown()
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use teloxide_core::types::Message;
+
+    fn plain_message(json: &str) -> Message {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn plain_text_without_entities_renders_some() {
+        let message = plain_message(
+            r#"{
+                "message_id": 1,
+                "date": 0,
+                "chat": {"id": 1, "type": "private", "first_name": "A"},
+                "text": "plain"
+            }"#,
+        );
+
+        assert_eq!(message.html_text(), Some("plain".to_owned()));
+        assert_eq!(message.markdown_text(), Some("plain".to_owned()));
+    }
+
+    #[test]
+    fn plain_caption_without_entities_renders_some() {
+        let message = plain_message(
+            r#"{
+                "message_id": 1,
+                "date": 0,
+                "chat": {"id": 1, "type": "private", "first_name": "A"},
+                "photo": [{"file_id": "f", "file_unique_id": "u", "width": 1, "height": 1}],
+                "caption": "cap"
+            }"#,
+        );
+
+        assert_eq!(message.html_caption(), Some("cap".to_owned()));
+        assert_eq!(message.markdown_caption(), Some("cap".to_owned()));
     }
 }

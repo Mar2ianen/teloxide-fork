@@ -41,7 +41,7 @@ async fn main() {
                     MaintainerCommands::Rand { from, to } => {
                         let value: u64 = rand::rng().random_range(from..=to);
 
-                        bot.send_message(msg.chat.id, value.to_string()).await?;
+                        bot.send_message(value.to_string()).chat_id(msg.chat.id).await?;
 
                         Ok(())
                     }
@@ -60,7 +60,8 @@ async fn main() {
                         |bot: Bot, msg: Message, cmd: GroupCommand| async move {
                             match cmd {
                                 GroupCommand::Repeat { text } => {
-                                    bot.send_message(msg.chat.id, format!("You said: {text}"))
+                                    bot.send_message(format!("You said: {text}"))
+                                        .chat_id(msg.chat.id)
                                         .await?;
                                     Ok(())
                                 }
@@ -72,7 +73,7 @@ async fn main() {
                     // An endpoint is the last update handler.
                     dptree::endpoint(|msg: Message, bot: Bot| async move {
                         log::info!("Received a message from a group chat.");
-                        bot.send_message(msg.chat.id, "This is a group chat.").await?;
+                        bot.send_message("This is a group chat.").chat_id(msg.chat.id).await?;
                         respond(())
                     }),
                 ),
@@ -81,7 +82,8 @@ async fn main() {
             // There are some extension filtering functions on `Message`. The following filter will
             // filter only messages with dices.
             Message::filter_dice().endpoint(|bot: Bot, msg: Message, dice: Dice| async move {
-                bot.send_message(msg.chat.id, format!("Dice value: {}", dice.value))
+                bot.send_message(format!("Dice value: {}", dice.value))
+                    .chat_id(msg.chat.id)
                     .reply_to(msg)
                     .await?;
                 Ok(())
@@ -177,7 +179,7 @@ async fn simple_commands_handler(
         }
     };
 
-    bot.send_message(msg.chat.id, text).await?;
+    bot.send_message(text).chat_id(msg.chat.id).await?;
 
     Ok(())
 }

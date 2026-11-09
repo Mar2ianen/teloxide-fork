@@ -282,13 +282,12 @@ impl Requester for FakeBot {
     type ForwardMessages = FakeRequest<ForwardMessages>;
     type SendChatAction = FakeRequest<SendChatAction>;
 
-    fn send_message<C, T>(&self, chat_id: C, text: T) -> Self::SendMessage
+    fn send_message<T>(&self, text: T) -> Self::SendMessage
     where
-        C: Into<Recipient>,
         T: Into<String>,
     {
         FakeRequest {
-            payload: SendMessage::new(chat_id, text),
+            payload: SendMessage::new(text),
             send_result: Ok(fake_message(1)),
             send_ref_result: Ok(fake_message(2)),
             into_future_result: Ok(fake_message(3)),
@@ -367,6 +366,16 @@ impl Requester for FakeBot {
         send_invoice,
         send_game,
         send_rich_message,
+        send_widget,
+        send_shared_widget,
+        answer_widget_query,
+        edit_message_widget_data,
+        edit_message_widget_data_inline,
+        edit_shared_widget_data,
+        get_chat_share_theme_backdrops,
+        get_unique_gift,
+        delete_business_account_gift,
+
         forward_message,
         copy_message,
         copy_messages
@@ -674,13 +683,12 @@ impl Requester for StatefulBot {
     type Err = StatefulError;
     type SendMessage = StatefulRequest<SendMessage>;
 
-    fn send_message<C, T>(&self, chat_id: C, text: T) -> Self::SendMessage
+    fn send_message<T>(&self, text: T) -> Self::SendMessage
     where
-        C: Into<Recipient>,
         T: Into<String>,
     {
         StatefulRequest {
-            payload: SendMessage::new(chat_id, text),
+            payload: SendMessage::new(text),
             send_ref_result: Ok(fake_message(2)),
             executions: Arc::new(AtomicUsize::new(0)),
             retry_calls: Arc::new(AtomicUsize::new(0)),
@@ -689,6 +697,16 @@ impl Requester for StatefulBot {
 
     requester_forward! {
         send_rich_message,
+        send_widget,
+        send_shared_widget,
+        answer_widget_query,
+        edit_message_widget_data,
+        edit_message_widget_data_inline,
+        edit_shared_widget_data,
+        get_chat_share_theme_backdrops,
+        get_unique_gift,
+        delete_business_account_gift,
+
         forward_message,
         forward_messages,
         copy_message,
@@ -959,7 +977,7 @@ async fn public_throttle_alias_uses_outbound_scheduler() {
     let actor_task = tokio::spawn(actor);
     let result = tokio::time::timeout(
         Duration::from_secs(1),
-        throttle.send_message(ChatId(1), "public alias"),
+        throttle.send_message("public alias").chat_id(ChatId(1)),
     )
     .await
     .unwrap();
@@ -985,7 +1003,7 @@ where
     let mut futures: Vec<Pin<Box<dyn Future<Output = ()>>>> = Vec::new();
     for (i, &(chat, text)) in sends.iter().enumerate() {
         let order = Arc::clone(&order);
-        let request = bot.send_message(ChatId(chat), text);
+        let request = bot.send_message(text).chat_id(ChatId(chat));
         futures.push(Box::pin(async move {
             let _ = request.await;
             order.lock().unwrap().push((i, tokio::time::Instant::now() - start));
@@ -1060,7 +1078,7 @@ async fn compat_zero_global_rate_limit_pauses_until_reconfigured() {
     );
     let actor_task = tokio::spawn(actor);
 
-    let request = compat.send_message(ChatId(1), "paused").send();
+    let request = compat.send_message("paused").chat_id(ChatId(1)).send();
     tokio::pin!(request);
     tokio::task::yield_now().await;
     assert!(futures::poll!(request.as_mut()).is_pending());
@@ -1134,7 +1152,7 @@ async fn compat_counts_a_batch_method_as_one_message() {
         let _ = forward.await;
         order0.lock().unwrap().push((0, tokio::time::Instant::now()));
     }));
-    let send = compat.send_message(ChatId(1), "after");
+    let send = compat.send_message("after").chat_id(ChatId(1));
     let order1 = Arc::clone(&order);
     futs.push(Box::pin(async move {
         let _ = send.await;
@@ -1234,13 +1252,13 @@ async fn compat_passthrough_methods_bypass_the_queue() {
         let _ = action.await;
         order0.lock().unwrap().push(0);
     }));
-    let send1 = compat.send_message(ChatId(1), "one");
+    let send1 = compat.send_message("one").chat_id(ChatId(1));
     let order1 = Arc::clone(&order);
     futs.push(Box::pin(async move {
         let _ = send1.await;
         order1.lock().unwrap().push(1);
     }));
-    let send2 = compat.send_message(ChatId(1), "two");
+    let send2 = compat.send_message("two").chat_id(ChatId(1));
     let order2 = Arc::clone(&order);
     futs.push(Box::pin(async move {
         let _ = send2.await;
@@ -1273,7 +1291,7 @@ async fn compat_set_limits_changes_the_windows() {
     let (compat, actor) = ThrottleCompat::new(FakeBot::ok(), default_limits());
     let actor_task = tokio::spawn(actor);
 
-    let first = compat.send_message(ChatId(1), "first");
+    let first = compat.send_message("first").chat_id(ChatId(1));
     let _ = tokio::time::timeout(Duration::from_secs(1), first).await.unwrap().unwrap();
 
     // Raise the per-chat second limit: two more sends must both complete
@@ -1294,7 +1312,7 @@ async fn compat_set_limits_changes_the_windows() {
     let order = Arc::new(Mutex::new(Vec::new()));
     for i in 0..2 {
         let order = Arc::clone(&order);
-        let send = compat.send_message(ChatId(1), "more");
+        let send = compat.send_message("more").chat_id(ChatId(1));
         futs.push(Box::pin(async move {
             let _ = send.await;
             order.lock().unwrap().push(i);
@@ -1340,7 +1358,7 @@ async fn compat_distinguishes_channel_and_regular_minute_limits() {
     let regular = Arc::new(Mutex::new(0usize));
     for _ in 0..11 {
         let regular = Arc::clone(&regular);
-        let send = compat.send_message(ChatId(123), "r");
+        let send = compat.send_message("r").chat_id(ChatId(123));
         all_futs.push(Box::pin(async move {
             let _ = send.await;
             *regular.lock().unwrap() += 1;
@@ -1351,7 +1369,7 @@ async fn compat_distinguishes_channel_and_regular_minute_limits() {
     let channel_done = Arc::new(Mutex::new(0usize));
     for _ in 0..11 {
         let channel_done = Arc::clone(&channel_done);
-        let send = compat.send_message(ChatId(-1001234567890), "c");
+        let send = compat.send_message("c").chat_id(ChatId(-1001234567890));
         all_futs.push(Box::pin(async move {
             let _ = send.await;
             *channel_done.lock().unwrap() += 1;
@@ -1384,10 +1402,11 @@ async fn compat_inner_execution_path_honors_settings() {
     // `send_ref()` and 1 from `send()`.
     let (compat, actor) = ThrottleCompat::new(FakeBot::ok(), default_limits());
     let actor_task = tokio::spawn(actor);
-    let output = tokio::time::timeout(Duration::from_secs(1), compat.send_message(ChatId(1), "x"))
-        .await
-        .unwrap()
-        .unwrap();
+    let output =
+        tokio::time::timeout(Duration::from_secs(1), compat.send_message("x").chat_id(ChatId(1)))
+            .await
+            .unwrap()
+            .unwrap();
     assert_eq!(output.id.0, 2, "retry=true -> inner send_ref");
     actor_task.abort();
 
@@ -1396,10 +1415,11 @@ async fn compat_inner_execution_path_honors_settings() {
     let settings = Settings { limits: default_limits(), ..<_>::default() }.no_retry();
     let (compat, actor) = ThrottleCompat::with_settings(FakeBot::ok(), settings);
     let actor_task = tokio::spawn(actor);
-    let output = tokio::time::timeout(Duration::from_secs(1), compat.send_message(ChatId(1), "x"))
-        .await
-        .unwrap()
-        .unwrap();
+    let output =
+        tokio::time::timeout(Duration::from_secs(1), compat.send_message("x").chat_id(ChatId(1)))
+            .await
+            .unwrap()
+            .unwrap();
     assert_eq!(output.id.0, 3, "owned + retry=false -> IntoFuture");
     actor_task.abort();
 
@@ -1409,7 +1429,7 @@ async fn compat_inner_execution_path_honors_settings() {
     let actor_task = tokio::spawn(actor);
     let output = tokio::time::timeout(
         Duration::from_secs(1),
-        compat.send_message(ChatId(1), "x").send_ref(),
+        compat.send_message("x").chat_id(ChatId(1)).send_ref(),
     )
     .await
     .unwrap()
@@ -1464,7 +1484,7 @@ async fn cancelled_capacity_waiter_does_not_block_the_next() {
     let order = Arc::new(Mutex::new(Vec::new()));
     for i in 0..4 {
         let order = Arc::clone(&order);
-        let send = compat.send_message(ChatId(1), "m");
+        let send = compat.send_message("m").chat_id(ChatId(1));
         futs.push(Box::pin(async move {
             let _ = send.await;
             order.lock().unwrap().push(i);
@@ -1512,7 +1532,7 @@ async fn cancelling_a_pending_request_wakes_a_capacity_waiter() {
     let order = Arc::new(Mutex::new(Vec::new()));
     {
         let order = Arc::clone(&order);
-        let send = compat.send_message(ChatId(1), "freeze");
+        let send = compat.send_message("freeze").chat_id(ChatId(1));
         futs.push(Box::pin(async move {
             let _ = send.await;
             order.lock().unwrap().push(0);
@@ -1526,7 +1546,7 @@ async fn cancelling_a_pending_request_wakes_a_capacity_waiter() {
 
     for i in 1..4 {
         let order = Arc::clone(&order);
-        let send = compat.send_message(ChatId(i as i64 + 1), "m");
+        let send = compat.send_message("m").chat_id(ChatId(i as i64 + 1));
         futs.push(Box::pin(async move {
             let _ = send.await;
             order.lock().unwrap().push(i);
@@ -1575,7 +1595,7 @@ async fn slot_freed_before_waiter_registration_is_not_lost() {
     let order = Arc::new(Mutex::new(Vec::new()));
     for i in 0..3 {
         let order = Arc::clone(&order);
-        let send = compat.send_message(ChatId(i as i64 + 1), "m");
+        let send = compat.send_message("m").chat_id(ChatId(i as i64 + 1));
         futs.push(Box::pin(async move {
             let _ = send.await;
             order.lock().unwrap().push(i);
@@ -1609,7 +1629,7 @@ async fn actor_death_wakes_all_capacity_waiters_and_direct_sends() {
     let results = Arc::new(Mutex::new(Vec::new()));
     for i in 0..4 {
         let results = Arc::clone(&results);
-        let send = compat.send_message(ChatId(1), "m");
+        let send = compat.send_message("m").chat_id(ChatId(1));
         futs.push(Box::pin(async move {
             let output = send.await.unwrap();
             results.lock().unwrap().push((i, output.id.0));
@@ -1686,7 +1706,7 @@ where
     let mut futs: Vec<Pin<Box<dyn Future<Output = ()>>>> = Vec::new();
     {
         let order = Arc::clone(&order);
-        let request = bot.send_message(ChatId(first.0), first.1);
+        let request = bot.send_message(first.1).chat_id(ChatId(first.0));
         futs.push(Box::pin(async move {
             let _ = request.await;
             order.lock().unwrap().push(0);
@@ -1698,7 +1718,7 @@ where
 
     tokio::time::advance(Duration::from_secs(1)).await;
     let order_for_request = Arc::clone(&order);
-    let request = bot.send_message(ChatId(second.0), second.1);
+    let request = bot.send_message(second.1).chat_id(ChatId(second.0));
     futs.push(Box::pin(async move {
         let _ = request.await;
         order_for_request.lock().unwrap().push(1);
@@ -1747,7 +1767,7 @@ async fn actor_death_releases_slots_before_direct_sends_run() {
 
     let mut futs: Vec<Pin<Box<dyn Future<Output = ()>>>> = Vec::new();
     for _ in 0..4 {
-        let send = compat.send_message(ChatId(1), "m");
+        let send = compat.send_message("m").chat_id(ChatId(1));
         futs.push(Box::pin(async move {
             let _ = send.await;
         }));
@@ -1795,7 +1815,7 @@ async fn queue_full_after_cancel_lag_preserves_waiter_fifo() {
         let mut futs: Vec<Pin<Box<dyn Future<Output = ()>>>> = Vec::new();
         {
             let order = Arc::clone(&order);
-            let send = compat.send_message(ChatId(1), "freeze");
+            let send = compat.send_message("freeze").chat_id(ChatId(1));
             futs.push(Box::pin(async move {
                 let _ = send.await;
                 order.lock().unwrap().push(0);
@@ -1809,7 +1829,7 @@ async fn queue_full_after_cancel_lag_preserves_waiter_fifo() {
         // R3/R4 park on the semaphore.
         for i in 1..5 {
             let order = Arc::clone(&order);
-            let send = compat.send_message(ChatId(i as i64 + 1), "m");
+            let send = compat.send_message("m").chat_id(ChatId(i as i64 + 1));
             futs.push(Box::pin(async move {
                 let _ = send.await;
                 order.lock().unwrap().push(i);
@@ -1871,7 +1891,7 @@ async fn compat_on_queue_full_fires_when_the_backlog_reaches_capacity() {
 
     let mut futs: Vec<Pin<Box<dyn Future<Output = ()>>>> = Vec::new();
     for _ in 0..2 {
-        let send = compat.send_message(ChatId(1), "m");
+        let send = compat.send_message("m").chat_id(ChatId(1));
         futs.push(Box::pin(async move {
             let _ = send.await;
         }));
@@ -1917,7 +1937,7 @@ async fn compat_late_processed_completion_does_not_extend_the_freeze() {
     let (compat, actor) = ThrottleCompat::new(bot, default_limits());
     let mut actor = Box::pin(actor);
     let done = Arc::new(Mutex::new(None));
-    let request = compat.send_message(ChatId(1), "a");
+    let request = compat.send_message("a").chat_id(ChatId(1));
     let done2 = Arc::clone(&done);
     let mut future = Box::pin(async move {
         let _ = request.await;
@@ -1956,7 +1976,7 @@ async fn stateful_retry_after_is_classified_once() {
     let order = Arc::new(Mutex::new(Vec::new()));
     for i in 0..2 {
         let order = Arc::clone(&order);
-        let send = compat.send_message(ChatId(i as i64 + 1), "m");
+        let send = compat.send_message("m").chat_id(ChatId(i as i64 + 1));
         futs.push(Box::pin(async move {
             let result = send.await;
             order.lock().unwrap().push((i, result.map(|m| m.id.0)));
@@ -2009,7 +2029,7 @@ async fn compat_queue_full_is_silent_during_a_freeze() {
     );
     let actor_task = tokio::spawn(actor);
     let mut futs: Vec<Pin<Box<dyn Future<Output = ()>>>> = Vec::new();
-    let freezer = compat.send_message(ChatId(1), "freeze");
+    let freezer = compat.send_message("freeze").chat_id(ChatId(1));
     futs.push(Box::pin(async move {
         let _ = freezer.await;
     }));
@@ -2017,7 +2037,7 @@ async fn compat_queue_full_is_silent_during_a_freeze() {
     let _ = poll_once(futs[0].as_mut());
     drain_rounds(&mut futs, &mut resolved, false).await;
     for i in 1..3 {
-        let request = compat.send_message(ChatId(i as i64 + 1), "m");
+        let request = compat.send_message("m").chat_id(ChatId(i as i64 + 1));
         futs.push(Box::pin(async move {
             let _ = request.await;
         }));
@@ -2068,7 +2088,7 @@ async fn compat_queue_full_repeats_while_the_backlog_stays_full() {
     let actor_task = tokio::spawn(actor);
     let mut futs: Vec<Pin<Box<dyn Future<Output = ()>>>> = Vec::new();
     for &(chat, text) in &sends {
-        let request = compat.send_message(ChatId(chat), text);
+        let request = compat.send_message(text).chat_id(ChatId(chat));
         futs.push(Box::pin(async move {
             let _ = request.await;
         }));
@@ -2115,7 +2135,7 @@ async fn compat_cloned_no_retry_owned_send_uses_inner_send_ref() {
     let settings = Settings { limits: default_limits(), ..<_>::default() }.no_retry();
     let (compat, actor) = ThrottleCompat::with_settings(FakeBot::ok(), settings);
     let actor_task = tokio::spawn(actor);
-    let request = compat.send_message(ChatId(1), "x");
+    let request = compat.send_message("x").chat_id(ChatId(1));
     let clone = request.clone();
     let output =
         tokio::time::timeout(Duration::from_secs(1), request.send()).await.unwrap().unwrap();
@@ -2134,7 +2154,7 @@ async fn compat_outer_send_ref_does_not_clone_the_inner_request() {
     let (compat, actor) = ThrottleCompat::with_settings(bot, settings);
     let actor_task = tokio::spawn(actor);
     let before = clones.load(Ordering::SeqCst);
-    let request = compat.send_message(ChatId(1), "x");
+    let request = compat.send_message("x").chat_id(ChatId(1));
     let _ =
         tokio::time::timeout(Duration::from_secs(1), request.send_ref()).await.unwrap().unwrap();
     assert_eq!(clones.load(Ordering::SeqCst), before, "send_ref не клонирует inner request");
@@ -2168,7 +2188,7 @@ async fn actor_death_does_not_fire_on_queue_full() {
 
     let mut futs: Vec<Pin<Box<dyn Future<Output = ()>>>> = Vec::new();
     for _ in 0..2 {
-        let send = compat.send_message(ChatId(1), "m");
+        let send = compat.send_message("m").chat_id(ChatId(1));
         futs.push(Box::pin(async move {
             let _ = send.await;
         }));
@@ -2214,7 +2234,7 @@ async fn saturation_monitor_respawns_after_re_saturation() {
     let mut futs: Vec<Pin<Box<dyn Future<Output = ()>>>> = Vec::new();
     let mut resolved = Vec::new();
     for _ in 0..2 {
-        let send = compat.send_message(ChatId(1), "m");
+        let send = compat.send_message("m").chat_id(ChatId(1));
         futs.push(Box::pin(async move {
             let _ = send.await;
         }));
@@ -2239,7 +2259,7 @@ async fn saturation_monitor_respawns_after_re_saturation() {
     // again (the monitor respawned).
     let second_wave_start = futs.len();
     for _ in 0..2 {
-        let send = compat.send_message(ChatId(1), "m");
+        let send = compat.send_message("m").chat_id(ChatId(1));
         futs.push(Box::pin(async move {
             let _ = send.await;
         }));
@@ -2292,8 +2312,8 @@ async fn on_queue_full_fires_before_the_last_pending_job_is_granted() {
     let (compat, actor) = ThrottleCompat::with_settings(FakeBot::ok(), settings);
     let mut actor = Box::pin(actor);
 
-    let send_a = compat.send_message(ChatId(1), "a");
-    let send_b = compat.send_message(ChatId(1), "b");
+    let send_a = compat.send_message("a").chat_id(ChatId(1));
+    let send_b = compat.send_message("b").chat_id(ChatId(1));
     let mut fut_a = Box::pin(async move {
         let _ = send_a.await;
     });
@@ -2350,10 +2370,11 @@ async fn compat_owned_direct_fallback_uses_into_future_not_send() {
     let settings = Settings { limits: default_limits(), ..<_>::default() }.no_retry();
     let (compat, actor) = ThrottleCompat::with_settings(FakeBot::ok(), settings);
     std::mem::drop(actor);
-    let output = tokio::time::timeout(Duration::from_secs(1), compat.send_message(ChatId(1), "x"))
-        .await
-        .unwrap()
-        .unwrap();
+    let output =
+        tokio::time::timeout(Duration::from_secs(1), compat.send_message("x").chat_id(ChatId(1)))
+            .await
+            .unwrap()
+            .unwrap();
     assert_eq!(output.id.0, 3, "direct fallback (enqueue phase): owned -> IntoFuture");
     std::mem::drop(compat);
 
@@ -2362,7 +2383,7 @@ async fn compat_owned_direct_fallback_uses_into_future_not_send() {
     let settings = Settings { limits: default_limits(), ..<_>::default() }.no_retry();
     let (compat, actor) = ThrottleCompat::with_settings(FakeBot::ok(), settings);
     let mut actor = Box::pin(actor);
-    let send0 = compat.send_message(ChatId(1), "r0");
+    let send0 = compat.send_message("r0").chat_id(ChatId(1));
     let mut fut0 = Box::pin(async move {
         let _ = send0.await;
     });
@@ -2370,7 +2391,7 @@ async fn compat_owned_direct_fallback_uses_into_future_not_send() {
     let _ = poll_once(actor.as_mut());
     let _ = poll_once(fut0.as_mut());
 
-    let send = compat.send_message(ChatId(1), "x");
+    let send = compat.send_message("x").chat_id(ChatId(1));
     let mut fut = Box::pin(async move { send.await.unwrap() });
     let _ = poll_once(fut.as_mut());
     let _ = poll_once(actor.as_mut());
@@ -2414,7 +2435,7 @@ async fn granted_request_completes_without_an_additional_actor_poll() {
     // Success.
     let (compat, actor) = ThrottleCompat::new(FakeBot::ok(), default_limits());
     let mut actor = Box::pin(actor);
-    let send = compat.send_message(ChatId(1), "m");
+    let send = compat.send_message("m").chat_id(ChatId(1));
     let mut fut = Box::pin(async move { send.await });
     let _ = poll_once(fut.as_mut()); // semaphore slot + enqueue phase
     let _ = poll_once(actor.as_mut()); // acceptance + grant
@@ -2439,7 +2460,7 @@ async fn granted_request_completes_without_an_additional_actor_poll() {
         settings,
     );
     let mut actor = Box::pin(actor);
-    let send = compat.send_message(ChatId(1), "m");
+    let send = compat.send_message("m").chat_id(ChatId(1));
     let mut fut = Box::pin(async move { send.await });
     let _ = poll_once(fut.as_mut());
     let _ = poll_once(actor.as_mut());
@@ -2483,7 +2504,7 @@ async fn compat_full_backlog_cancelled_during_freeze_still_reports_after_thaw() 
         ThrottleCompat::with_settings(FakeBot::ok().failing_first(1, freeze), settings);
     let mut actor = Box::pin(actor);
 
-    let send_a = compat.send_message(ChatId(1), "a");
+    let send_a = compat.send_message("a").chat_id(ChatId(1));
     let mut fut_a = Box::pin(async move {
         let _ = send_a.await;
     });
@@ -2491,8 +2512,8 @@ async fn compat_full_backlog_cancelled_during_freeze_still_reports_after_thaw() 
     let _ = poll_once(actor.as_mut());
     let _ = poll_once(fut_a.as_mut());
 
-    let send_b = compat.send_message(ChatId(1), "b");
-    let send_c = compat.send_message(ChatId(1), "c");
+    let send_b = compat.send_message("b").chat_id(ChatId(1));
+    let send_c = compat.send_message("c").chat_id(ChatId(1));
     let mut fut_b = Box::pin(async move {
         let _ = send_b.await;
     });

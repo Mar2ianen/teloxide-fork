@@ -90,6 +90,10 @@ pub enum InvalidValueReason {
     MustBeCallbackButton,
     /// At least one of the alternative fields must be present.
     MustHaveTextOrRichMessage,
+    /// A chat is required except for callback-only ephemeral replies.
+    MustHaveChatOrCallbackReply,
+    /// Ephemeral parameters must identify a receiver or a callback query.
+    MustHaveReceiverOrCallback,
     /// Rich-message button labels may only contain plain text, custom emoji
     /// and date-time objects.
     MustBeRichButtonLabel,
@@ -114,6 +118,12 @@ impl fmt::Display for InvalidValueReason {
             Self::MustBeCallbackButton => f.write_str("must be a callback button"),
             Self::MustHaveTextOrRichMessage => {
                 f.write_str("text or rich_message must be specified")
+            }
+            Self::MustHaveChatOrCallbackReply => f.write_str(
+                "chat_id is required unless replying to a callback without receiver_user_id",
+            ),
+            Self::MustHaveReceiverOrCallback => {
+                f.write_str("receiver_user_id or callback_query_id must be specified")
             }
             Self::MustBeRichButtonLabel => {
                 f.write_str("must contain only plain text, custom emoji or date-time objects")
@@ -213,6 +223,54 @@ where
 pub trait ValidateWith<C> {
     /// Checks static constraints for `self` in `context`.
     fn validate_with(&self, context: &C) -> Result<(), RequestValidationError>;
+}
+
+/// The target fields shared by the fourteen ephemeral-capable send payloads.
+pub(crate) trait EphemeralSendPayload {
+    fn send_target(
+        &self,
+    ) -> (Option<&crate::types::Recipient>, Option<&crate::types::EphemeralMessageParameters>);
+}
+
+macro_rules! impl_ephemeral_send_payload {
+    ($($payload:ident),+ $(,)?) => {$(
+        impl EphemeralSendPayload for crate::payloads::$payload {
+            fn send_target(&self) -> (Option<&crate::types::Recipient>, Option<&crate::types::EphemeralMessageParameters>) {
+                (self.chat_id.as_ref(), self.ephemeral_message_parameters.as_ref())
+            }
+        }
+    )+};
+}
+
+impl_ephemeral_send_payload! {
+    SendMessage, SendRichMessage, SendAnimation, SendAudio, SendContact,
+    SendDocument, SendLivePhoto, SendLocation, SendPhoto, SendSticker,
+    SendVenue, SendVideo, SendVideoNote, SendVoice,
+}
+
+/// Checks only facts available locally; callback ownership and chat permissions
+/// remain Telegram's responsibility. An explicit but empty ephemeral object is
+/// invalid even when a chat ID is present, since Telegram ignores that chat ID.
+pub(crate) fn validate_ephemeral_send_target<T>(payload: &T) -> Result<(), RequestValidationError>
+where
+    T: EphemeralSendPayload,
+{
+    let (chat_id, ephemeral) = payload.send_target();
+    if ephemeral.is_some_and(|p| p.receiver_user_id.is_none() && p.callback_query_id.is_none()) {
+        return Err(RequestValidationError::InvalidValue {
+            path: RequestFieldPath::field("ephemeral_message_parameters"),
+            reason: InvalidValueReason::MustHaveReceiverOrCallback,
+        });
+    }
+    let callback_only =
+        ephemeral.is_some_and(|p| p.receiver_user_id.is_none() && p.callback_query_id.is_some());
+    if chat_id.is_none() && !callback_only {
+        return Err(RequestValidationError::InvalidValue {
+            path: RequestFieldPath::field("chat_id"),
+            reason: InvalidValueReason::MustHaveChatOrCallbackReply,
+        });
+    }
+    Ok(())
 }
 
 /// Validates the non-rich `sendMessageDraft` payload.
@@ -557,6 +615,9 @@ fn validate_rich_text_at(
             RichTextObject::BankCardNumber(value) => {
                 validate_nested_rich_text(&value.text, context, path, "bank_card_number")?;
             }
+            RichTextObject::TonAddress(value) => {
+                validate_nested_rich_text(&value.text, context, path, "ton_address")?;
+            }
             RichTextObject::Mention(value) => {
                 validate_nested_rich_text(&value.text, context, path, "mention")?;
             }
@@ -732,6 +793,7 @@ impl ValidateWith<RichMessageContext> for crate::types::InputRichMessage {
 pub(crate) fn validate_send_rich_message(
     payload: &crate::payloads::SendRichMessage,
 ) -> Result<(), RequestValidationError> {
+    validate_ephemeral_send_target(payload)?;
     let mut path = RequestFieldPath::field("rich_message");
     validate_rich_message_at(&payload.rich_message, RichMessageContext::Send, &mut path)
 }
@@ -1053,8 +1115,8 @@ mod tests {
         payloads::{
             AnswerGuestQuery, AnswerInlineQuery, AnswerWebAppQuery, EditEphemeralMessageText,
             EditEphemeralMessageTextSetters, EditMessageText, EditMessageTextInline,
-            SavePreparedInlineMessage, SendMessage, SendMessageDraft, SendRichMessage,
-            SendRichMessageDraft,
+            SavePreparedInlineMessage, SendMessage, SendMessageDraft, SendMessageSetters,
+            SendRichMessage, SendRichMessageDraft, SendRichMessageSetters,
         },
         requests::{Payload, Request, Requester},
         types::{
@@ -1214,7 +1276,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_rich_payload_is_rejected_before_dispatch() {
         let result =
-            Bot::new("token").send_rich_message(UserId(1), thinking_message()).send().await;
+            Bot::new("token").send_rich_message(thinking_message()).chat_id(UserId(1)).send().await;
 
         assert!(matches!(
             result,
@@ -1495,7 +1557,7 @@ mod tests {
 
     #[test]
     fn inline_keyboard_styles_are_validated_before_dispatch() {
-        let mut payload = SendMessage::new(UserId(1), "text");
+        let mut payload = SendMessage::new("text").chat_id(UserId(1));
         payload.reply_markup =
             Some(ReplyMarkup::inline_kb([[
                 InlineKeyboardButton::callback("button", "callback").style("link")
@@ -1605,7 +1667,7 @@ mod tests {
     fn rich_payload_hooks_use_their_declared_contexts() {
         let thinking = thinking_message();
         assert!(matches!(
-            Payload::validate(&SendRichMessage::new(UserId(1), thinking.clone())),
+            Payload::validate(&SendRichMessage::new(thinking.clone()).chat_id(UserId(1))),
             Err(RequestValidationError::UnsupportedInContext {
                 context: RichMessageContext::Send,
                 ..

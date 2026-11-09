@@ -29,6 +29,6 @@ async fn main() {
 }
 
 async fn my_endpoint(bot: Bot, msg: Message) -> HandlerResult {
-    bot.send_message(msg.chat.id, "Inside the endpoint.").await?;
+    bot.send_message("Inside the endpoint.").chat_id(msg.chat.id).await?;
     Ok(())
 }

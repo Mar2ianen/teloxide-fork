@@ -868,13 +868,13 @@ fn method_policy(name: &str) -> MethodPolicy {
             weight: WeightPolicy::One,
         },
         "send_animation" => MethodPolicy {
-            scope: ScopePolicy::RecipientField("chat_id"),
+            scope: ScopePolicy::EphemeralRecipient,
             class: "MESSAGE_SEND",
             priority: "NORMAL",
             weight: WeightPolicy::One,
         },
         "send_audio" => MethodPolicy {
-            scope: ScopePolicy::RecipientField("chat_id"),
+            scope: ScopePolicy::EphemeralRecipient,
             class: "MESSAGE_SEND",
             priority: "NORMAL",
             weight: WeightPolicy::One,
@@ -886,7 +886,7 @@ fn method_policy(name: &str) -> MethodPolicy {
             weight: WeightPolicy::One,
         },
         "send_contact" => MethodPolicy {
-            scope: ScopePolicy::RecipientField("chat_id"),
+            scope: ScopePolicy::EphemeralRecipient,
             class: "MESSAGE_SEND",
             priority: "NORMAL",
             weight: WeightPolicy::One,
@@ -898,7 +898,7 @@ fn method_policy(name: &str) -> MethodPolicy {
             weight: WeightPolicy::One,
         },
         "send_document" => MethodPolicy {
-            scope: ScopePolicy::RecipientField("chat_id"),
+            scope: ScopePolicy::EphemeralRecipient,
             class: "MESSAGE_SEND",
             priority: "NORMAL",
             weight: WeightPolicy::One,
@@ -916,13 +916,13 @@ fn method_policy(name: &str) -> MethodPolicy {
             weight: WeightPolicy::One,
         },
         "send_live_photo" => MethodPolicy {
-            scope: ScopePolicy::RecipientField("chat_id"),
+            scope: ScopePolicy::EphemeralRecipient,
             class: "MESSAGE_SEND",
             priority: "NORMAL",
             weight: WeightPolicy::One,
         },
         "send_location" => MethodPolicy {
-            scope: ScopePolicy::RecipientField("chat_id"),
+            scope: ScopePolicy::EphemeralRecipient,
             class: "MESSAGE_SEND",
             priority: "NORMAL",
             weight: WeightPolicy::One,
@@ -934,7 +934,7 @@ fn method_policy(name: &str) -> MethodPolicy {
             weight: WeightPolicy::Len("media"),
         },
         "send_message" => MethodPolicy {
-            scope: ScopePolicy::RecipientField("chat_id"),
+            scope: ScopePolicy::EphemeralRecipient,
             class: "MESSAGE_SEND",
             priority: "NORMAL",
             weight: WeightPolicy::One,
@@ -946,7 +946,7 @@ fn method_policy(name: &str) -> MethodPolicy {
             weight: WeightPolicy::One,
         },
         "send_photo" => MethodPolicy {
-            scope: ScopePolicy::RecipientField("chat_id"),
+            scope: ScopePolicy::EphemeralRecipient,
             class: "MESSAGE_SEND",
             priority: "NORMAL",
             weight: WeightPolicy::One,
@@ -958,37 +958,37 @@ fn method_policy(name: &str) -> MethodPolicy {
             weight: WeightPolicy::One,
         },
         "send_rich_message" => MethodPolicy {
-            scope: ScopePolicy::RecipientField("chat_id"),
+            scope: ScopePolicy::EphemeralRecipient,
             class: "MESSAGE_SEND",
             priority: "NORMAL",
             weight: WeightPolicy::One,
         },
         "send_sticker" => MethodPolicy {
-            scope: ScopePolicy::RecipientField("chat_id"),
+            scope: ScopePolicy::EphemeralRecipient,
             class: "MESSAGE_SEND",
             priority: "NORMAL",
             weight: WeightPolicy::One,
         },
         "send_venue" => MethodPolicy {
-            scope: ScopePolicy::RecipientField("chat_id"),
+            scope: ScopePolicy::EphemeralRecipient,
             class: "MESSAGE_SEND",
             priority: "NORMAL",
             weight: WeightPolicy::One,
         },
         "send_video" => MethodPolicy {
-            scope: ScopePolicy::RecipientField("chat_id"),
+            scope: ScopePolicy::EphemeralRecipient,
             class: "MESSAGE_SEND",
             priority: "NORMAL",
             weight: WeightPolicy::One,
         },
         "send_video_note" => MethodPolicy {
-            scope: ScopePolicy::RecipientField("chat_id"),
+            scope: ScopePolicy::EphemeralRecipient,
             class: "MESSAGE_SEND",
             priority: "NORMAL",
             weight: WeightPolicy::One,
         },
         "send_voice" => MethodPolicy {
-            scope: ScopePolicy::RecipientField("chat_id"),
+            scope: ScopePolicy::EphemeralRecipient,
             class: "MESSAGE_SEND",
             priority: "NORMAL",
             weight: WeightPolicy::One,
@@ -1329,6 +1329,60 @@ fn method_policy(name: &str) -> MethodPolicy {
             priority: "NORMAL",
             weight: WeightPolicy::One,
         },
+        "send_widget" => MethodPolicy {
+            scope: ScopePolicy::RecipientField("chat_id"),
+            class: "MESSAGE_SEND",
+            priority: "NORMAL",
+            weight: WeightPolicy::One,
+        },
+        "send_shared_widget" => MethodPolicy {
+            scope: ScopePolicy::RecipientField("chat_id"),
+            class: "MESSAGE_SEND",
+            priority: "NORMAL",
+            weight: WeightPolicy::One,
+        },
+        "answer_widget_query" => MethodPolicy {
+            scope: ScopePolicy::Global,
+            class: "OTHER",
+            priority: "INTERACTIVE",
+            weight: WeightPolicy::One,
+        },
+        "edit_message_widget_data" => MethodPolicy {
+            scope: ScopePolicy::WidgetMessage,
+            class: "MESSAGE_MUTATION",
+            priority: "NORMAL",
+            weight: WeightPolicy::One,
+        },
+        "edit_message_widget_data_inline" => MethodPolicy {
+            scope: ScopePolicy::Custom("inline_widget_message_scope", "inline_message_id"),
+            class: "MESSAGE_MUTATION",
+            priority: "NORMAL",
+            weight: WeightPolicy::One,
+        },
+        "edit_shared_widget_data" => MethodPolicy {
+            scope: ScopePolicy::Custom("shared_widget_scope", "widget_id"),
+            class: "MESSAGE_MUTATION",
+            priority: "NORMAL",
+            weight: WeightPolicy::One,
+        },
+        "get_chat_share_theme_backdrops" => MethodPolicy {
+            scope: ScopePolicy::Global,
+            class: "READ",
+            priority: "NORMAL",
+            weight: WeightPolicy::One,
+        },
+        "get_unique_gift" => MethodPolicy {
+            scope: ScopePolicy::Global,
+            class: "READ",
+            priority: "NORMAL",
+            weight: WeightPolicy::One,
+        },
+        "delete_business_account_gift" => MethodPolicy {
+            scope: ScopePolicy::Global,
+            class: "OTHER",
+            priority: "NORMAL",
+            weight: WeightPolicy::One,
+        },
         unknown => panic!(
             "no outbound classification for method `{unknown}`: add it to `method_policy` in \
              payloads/codegen.rs (scope policy, class, priority, weight)"
@@ -1342,6 +1396,10 @@ enum ScopePolicy {
     Global,
     /// A `Recipient` field (numeric id or channel username).
     RecipientField(&'static str),
+    /// Chat ID is optional and ignored for callback-only ephemeral replies.
+    EphemeralRecipient,
+    /// A widget identified by a chat/message address.
+    WidgetMessage,
     /// A numeric `ChatId` field.
     ChatIdField(&'static str),
     /// An optional numeric `ChatId` field: `None` falls back to global.
@@ -1383,6 +1441,14 @@ impl MethodPolicy {
     fn scope_expr(&self) -> String {
         match self.scope {
             ScopePolicy::Global => "crate::outbound::OutboundScope::Global".to_owned(),
+            ScopePolicy::WidgetMessage => "crate::outbound::classify::widget_message_scope(&self.\
+                                           chat_id, self.message_id)"
+                .to_owned(),
+            ScopePolicy::EphemeralRecipient => {
+                "crate::outbound::classify::ephemeral_recipient_scope(&self.chat_id, \
+                 &self.ephemeral_message_parameters)"
+                    .to_owned()
+            }
             ScopePolicy::RecipientField(field) => {
                 format!("crate::outbound::classify::scope_of_recipient(&self.{field})")
             }
@@ -1597,7 +1663,11 @@ fn multipart_input_file_fields(m: &Method) -> Option<Vec<&str>> {
     let mut fields: Vec<_> =
         m.params.iter().filter(|&p| ty_is_multiparty(&p.ty)).map(|p| &*p.name).collect();
 
-    fields.extend(m.multipart.iter().map(String::as_str));
+    for field in m.multipart.iter().map(String::as_str) {
+        if !fields.contains(&field) {
+            fields.push(field);
+        }
+    }
 
     if fields.is_empty() {
         None
@@ -1607,6 +1677,45 @@ fn multipart_input_file_fields(m: &Method) -> Option<Vec<&str>> {
 }
 
 fn ty_is_multiparty(ty: &Type) -> bool {
+    // NOTE: only leaf file types are auto-detected here. Composite
+    // file-bearing types (`InputMedia`, `InputPaidMedia`, `InputPollMedia`,
+    // `InputPollOptionMedia`, `InputStoryContent`, `InputMessageContent`,
+    // `InputRichMessage`) implement `InputFileLike` but must be listed in the
+    // method's explicit `multipart` schema attribute: several payloads using
+    // them (e.g. `SendPoll`, `PostStory`, `EditMessageMedia`) carry hand-written
+    // `MultipartPayload` impls in `requests/multipart_payload.rs`, and
+    // auto-detecting them would generate conflicting impls (E0119).
     matches!(ty, Type::RawTy(x) if x == "InputFile" || x == "InputSticker" || x == "InputProfilePhoto")
         || matches!(ty, Type::Option(inner) if ty_is_multiparty(inner))
+}
+
+#[cfg(test)]
+mod multipart_dedup_tests {
+    use super::*;
+
+    fn empty_doc() -> Doc {
+        Doc { md: String::new(), md_links: Default::default() }
+    }
+
+    #[test]
+    fn autodetected_and_explicit_multipart_fields_are_not_duplicated() {
+        let method = Method {
+            names: (String::new(), String::new(), String::new()),
+            return_ty: Type::True,
+            doc: empty_doc(),
+            tg_doc: String::new(),
+            tg_category: String::new(),
+            notes: Vec::new(),
+            multipart: vec!["media".to_owned()],
+            validation: None,
+            params: vec![Param {
+                name: "media".to_owned(),
+                ty: Type::RawTy("InputFile".to_owned()),
+                descr: empty_doc(),
+            }],
+            sibling: None,
+        };
+
+        assert_eq!(multipart_input_file_fields(&method), Some(vec!["media"]));
+    }
 }

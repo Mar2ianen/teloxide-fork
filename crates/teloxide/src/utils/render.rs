@@ -154,7 +154,11 @@ impl<'a> Renderer<'a> {
             }
 
             let ch = if let Some(previous) = prev_point.take() {
-                char::decode_utf16([previous, point]).next().unwrap().unwrap()
+                // `text` is a valid `&str`, so its UTF-16 stream never holds
+                // lone surrogates and this pair always decodes. Fall back to
+                // the replacement character instead of panicking if that
+                // invariant ever breaks.
+                char::decode_utf16([previous, point]).next().unwrap().unwrap_or('\u{FFFD}')
             } else {
                 match char::decode_utf16([point]).next().unwrap() {
                     Ok(c) => c,
@@ -347,6 +351,16 @@ mod test {
         assert_eq!(render.passthrough_entities().count(), 3);
         assert_eq!(render.as_html(), text);
         assert_eq!(render.as_markdown(), text);
+    }
+
+    #[test]
+    fn surrogate_pair_text_renders_without_panicking() {
+        // 😀 is a surrogate pair in UTF-16; bold covers only the emoji.
+        let text = "😀a";
+        let entities = vec![MessageEntity { kind: MEK::Bold, offset: 0, length: 2 }];
+        let render = Renderer::new(text, &entities);
+
+        assert_eq!(render.as_html(), "<b>😀</b>a");
     }
 
     #[test]

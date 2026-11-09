@@ -2,7 +2,7 @@ use std::iter;
 
 use serde::Serialize;
 
-use crate::types::{InputFile, Seconds};
+use crate::types::{InputFile, InputFileLike, Seconds};
 
 /// This object describes the paid media to be sent.
 ///
@@ -17,6 +17,25 @@ pub enum InputPaidMedia {
     Video(Box<InputPaidMediaVideo>),
 }
 
+impl InputFileLike for InputPaidMedia {
+    fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
+        for file in self.files() {
+            file.copy_into(into);
+        }
+    }
+
+    fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
+        for file in self.files_mut() {
+            file.move_into(into);
+        }
+    }
+}
+
+/// Converts paid media into its main file.
+///
+/// Note: this retains only the primary media and drops the thumbnail, cover,
+/// and live-photo still image. Multipart transport traverses every attachment
+/// internally, so prefer sending the media value itself over converting it.
 impl From<InputPaidMedia> for InputFile {
     fn from(media: InputPaidMedia) -> InputFile {
         match media {
@@ -280,5 +299,25 @@ mod tests {
 
         let actual_json = serde_json::to_string(&video).unwrap();
         assert_eq!(expected_json, actual_json);
+    }
+
+    #[test]
+    fn input_file_like_traverses_all_attachments() {
+        use crate::types::InputFileLike;
+
+        let media = InputPaidMedia::Video(Box::new(
+            InputPaidMediaVideo::new(InputFile::memory(vec![1_u8]))
+                .thumbnail(InputFile::memory(vec![2_u8]))
+                .cover(InputFile::memory(vec![3_u8])),
+        ));
+
+        let mut copied = Vec::new();
+        media.copy_into(&mut |file| copied.push(file));
+        assert_eq!(copied.len(), 3);
+
+        let mut media = media;
+        let mut moved_count = 0;
+        media.move_into(&mut |_| moved_count += 1);
+        assert_eq!(moved_count, 3);
     }
 }

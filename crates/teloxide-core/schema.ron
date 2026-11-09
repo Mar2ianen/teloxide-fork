@@ -40,8 +40,147 @@
 //! [github]: https://github.com/WaffleLapkin/tg-methods-schema
 
 Schema(
-    api_version: ApiVersion(ver: "10.3", date: "August 24, 2026"),
+    api_version: ApiVersion(ver: "10.4", date: "November 9, 2026"),
     methods: [
+        Method(
+            names: ("deleteBusinessAccountGift", "DeleteBusinessAccountGift", "delete_business_account_gift"),
+            return_ty: True,
+            doc: Doc(md: "Deletes a regular gift owned by a managed business account without receiving Telegram Stars for it. Requires the can_convert_gifts_to_stars business bot right. The gift can be deleted only if it isn't limited (the field total_count of the Gift is omitted) and wasn't refunded. Returns True on success."),
+            tg_doc: "https://core.telegram.org/bots/api#deletebusinessaccountgift",
+            tg_category: "Available methods",
+            params: [
+                Param(name: "business_connection_id", ty: RawTy("BusinessConnectionId"), descr: Doc(md: "Unique identifier of the business connection")),
+                Param(name: "owned_gift_id", ty: RawTy("OwnedGiftId"), descr: Doc(md: "Unique identifier of the regular gift that should be deleted")),
+            ],
+        ),
+
+        Method(
+            names: ("getUniqueGift", "GetUniqueGift", "get_unique_gift"),
+            return_ty: RawTy("UniqueGift"),
+            doc: Doc(md: "Use this method to get information about a unique gift by its name. Returns a UniqueGift object on success."),
+            tg_doc: "https://core.telegram.org/bots/api#getuniquegift",
+            tg_category: "Available methods",
+            params: [
+                Param(name: "name", ty: String, descr: Doc(md: "Unique name of the gift")),
+            ],
+        ),
+
+        Method(
+            names: ("getChatShareThemeBackdrops", "GetChatShareThemeBackdrops", "get_chat_share_theme_backdrops"),
+            return_ty: RawTy("ChatShareThemeBackdrops"),
+            doc: Doc(md: "Use this method to get the list of backdrops, which can be used as the background of a theme of the screen for sharing a link to a user or a chat. Requires no parameters. Returns a ChatShareThemeBackdrops object."),
+            tg_doc: "https://core.telegram.org/bots/api#getchatsharethemebackdrops",
+            tg_category: "Available methods",
+            params: [
+            ],
+        ),
+
+        Method(
+            names: ("editSharedWidgetData", "EditSharedWidgetData", "edit_shared_widget_data"),
+            return_ty: True,
+            doc: Doc(md: "Use this method to edit public data of a shared widget created by the bot. A shared widget can be edited at most once per second. On success, True is returned."),
+            tg_doc: "https://core.telegram.org/bots/api#editsharedwidgetdata",
+            tg_category: "Available methods",
+            params: [
+                Param(name: "widget_id", ty: String, descr: Doc(md: "Unique identifier of the shared widget")),
+                Param(name: "public_data", ty: String, descr: Doc(md: "New public data of the widget, 0-1024 bytes; pass an empty string to remove the public data")),
+                Param(name: "cache_time", ty: Option(i64), descr: Doc(md: "The maximum amount of time in seconds that the public data of the widget may be cached client-side; 5-3600. If omitted, then the current value is kept, which is 30 by default.")),
+            ],
+        ),
+
+        Method(
+            names: ("editMessageWidgetData", "EditMessageWidgetData", "edit_message_widget_data"),
+            return_ty: True,
+            doc: Doc(md: "Use this method to edit data of a widget in a message sent by the bot or via the bot (for inline bots). Public data of a shared widget can be changed at most once per second. On success, True is returned."),
+            tg_doc: "https://core.telegram.org/bots/api#editmessagewidgetdata",
+            tg_category: "Available methods",
+            sibling: Some("editMessageWidgetDataInline"),
+            params: [
+                Param(name: "chat_id", ty: RawTy("Recipient"), descr: Doc(md: "Required if inline_message_id is not specified. Unique identifier for the target chat or username of the target supergroup in the format @username .")),
+                Param(name: "message_id", ty: RawTy("MessageId"), descr: Doc(md: "Required if inline_message_id is not specified. Identifier of the message with the widget.")),
+                Param(name: "public_data", ty: Option(String), descr: Doc(md: "New public data of the widget, 0-1024 bytes; pass an empty string to remove the public data. If omitted, then the public data isn't changed.")),
+                Param(name: "chat_data", ty: Option(String), descr: Doc(md: "New data of the widget, which is specific to the message, 0-1024 bytes; pass an empty string to remove the data. If omitted, then the data isn't changed.")),
+            ],
+        ),
+        Method(
+            names: ("editMessageWidgetDataInline", "EditMessageWidgetDataInline", "edit_message_widget_data_inline"),
+            return_ty: True,
+            doc: Doc(md: "Use this method to edit data of a widget in a message sent by the bot or via the bot (for inline bots). Public data of a shared widget can be changed at most once per second. On success, True is returned."),
+            tg_doc: "https://core.telegram.org/bots/api#editmessagewidgetdata",
+            tg_category: "Available methods",
+            sibling: Some("editMessageWidgetData"),
+            params: [
+                Param(name: "inline_message_id", ty: String, descr: Doc(md: "Required if chat_id and message_id are not specified. Identifier of the inline message.")),
+                Param(name: "public_data", ty: Option(String), descr: Doc(md: "New public data of the widget, 0-1024 bytes; pass an empty string to remove the public data. If omitted, then the public data isn't changed.")),
+                Param(name: "chat_data", ty: Option(String), descr: Doc(md: "New data of the widget, which is specific to the message, 0-1024 bytes; pass an empty string to remove the data. If omitted, then the data isn't changed.")),
+            ],
+        ),
+
+        Method(
+            names: ("answerWidgetQuery", "AnswerWidgetQuery", "answer_widget_query"),
+            return_ty: True,
+            doc: Doc(md: "Use this method to send an answer to a query from a widget. The query must be answered within 15 seconds. The answer is received only by the widget that sent the query and doesn't change data of the widget; use editMessageWidgetData or editSharedWidgetData to change it. On success, True is returned."),
+            tg_doc: "https://core.telegram.org/bots/api#answerwidgetquery",
+            tg_category: "Available methods",
+            params: [
+                Param(name: "widget_query_id", ty: String, descr: Doc(md: "Unique identifier for the query to be answered")),
+                Param(name: "data", ty: Option(String), descr: Doc(md: "Data to be returned to the widget, 0-1024 bytes")),
+            ],
+        ),
+
+        Method(
+            names: ("sendSharedWidget", "SendSharedWidget", "send_shared_widget"),
+            return_ty: RawTy("Message"),
+            doc: Doc(md: "Use this method to send again a shared widget created by the bot. Currently, in the production environment, widgets can be sent only to private chats, and sent widgets automatically have protected content and therefore can't be forwarded. On success, the sent Message is returned."),
+            tg_doc: "https://core.telegram.org/bots/api#sendsharedwidget",
+            tg_category: "Available methods",
+            params: [
+                Param(name: "chat_id", ty: RawTy("Recipient"), descr: Doc(md: "Unique identifier for the target chat or username of the target supergroup in the format @username")),
+                Param(name: "message_thread_id", ty: Option(RawTy("ThreadId")), descr: Doc(md: "Unique identifier for the target message thread (topic) of a forum; for forum supergroups and private chats of bots with forum topic mode enabled only")),
+                Param(name: "widget_id", ty: String, descr: Doc(md: "Unique identifier of the shared widget")),
+                Param(name: "chat_data", ty: Option(String), descr: Doc(md: "Data of the widget, which is specific to the message, 0-1024 bytes")),
+                Param(name: "caption", ty: Option(String), descr: Doc(md: "Widget caption, 0-1024 characters after entities parsing")),
+                Param(name: "parse_mode", ty: Option(RawTy("ParseMode")), descr: Doc(md: "Mode for parsing entities in the widget caption. See formatting options for more details.")),
+                Param(name: "caption_entities", ty: Option(ArrayOf(RawTy("MessageEntity"))), descr: Doc(md: "A JSON-serialized list of special entities that appear in the caption, which can be specified instead of parse_mode")),
+                Param(name: "show_caption_above_media", ty: Option(bool), descr: Doc(md: "Pass True if the caption must be shown above the widget")),
+                Param(name: "disable_notification", ty: Option(bool), descr: Doc(md: "Sends the message silently . Users will receive a notification with no sound.")),
+                Param(name: "protect_content", ty: Option(bool), descr: Doc(md: "Protects the contents of the sent message from forwarding and saving")),
+                Param(name: "allow_paid_broadcast", ty: Option(bool), descr: Doc(md: "Pass True to allow up to 1000 messages per second, ignoring broadcasting limits for a fee of 0.1 Telegram Stars per message. The relevant Stars will be withdrawn from the bot's balance.")),
+                Param(name: "message_effect_id", ty: Option(RawTy("EffectId")), descr: Doc(md: "Unique identifier of the message effect to be added to the message; for private chats only")),
+                Param(name: "reply_parameters", ty: Option(RawTy("ReplyParameters")), descr: Doc(md: "Description of the message to reply to")),
+                Param(name: "reply_markup", ty: Option(RawTy("ReplyMarkup")), descr: Doc(md: "Additional interface options. A JSON-serialized object for an inline keyboard , custom reply keyboard , instructions to remove a reply keyboard or to force a reply from the user.")),
+            ],
+        ),
+
+        Method(
+            names: ("sendWidget", "SendWidget", "send_widget"),
+            return_ty: RawTy("Message"),
+            doc: Doc(md: "Use this method to send a message with an HTML widget . Currently, in the production environment, widgets can be sent only to private chats, and sent widgets automatically have protected content and therefore can't be forwarded. On success, the sent Message is returned."),
+            tg_doc: "https://core.telegram.org/bots/api#sendwidget",
+            tg_category: "Available methods",
+            params: [
+                Param(name: "chat_id", ty: RawTy("Recipient"), descr: Doc(md: "Unique identifier for the target chat or username of the target supergroup in the format @username")),
+                Param(name: "message_thread_id", ty: Option(RawTy("ThreadId")), descr: Doc(md: "Unique identifier for the target message thread (topic) of a forum; for forum supergroups and private chats of bots with forum topic mode enabled only")),
+                Param(name: "html", ty: String, descr: Doc(md: "HTML code of the widget, 1-32768 bytes. The code must not exceed 4096 bytes when compressed by zlib with the maximum compression level.")),
+                Param(name: "width", ty: Option(i64), descr: Doc(md: "Width of the widget in logical pixels; omit if the widget must occupy the whole width of the message bubble. The width is clamped by the app to the range from 200 to the maximum width of the message bubble.")),
+                Param(name: "height", ty: Option(i64), descr: Doc(md: "Height of the widget in logical pixels; omit if the height of the widget isn't fixed. The height is clamped by the app to the range 50-600.")),
+                Param(name: "public_data", ty: Option(String), descr: Doc(md: "Public data of the widget, 0-1024 bytes, which will be available wherever the widget is shown. If the widget is shared, then all messages with it will have the same public data.")),
+                Param(name: "chat_data", ty: Option(String), descr: Doc(md: "Data of the widget, which is specific to the message, 0-1024 bytes")),
+                Param(name: "caption", ty: Option(String), descr: Doc(md: "Widget caption, 0-1024 characters after entities parsing")),
+                Param(name: "parse_mode", ty: Option(RawTy("ParseMode")), descr: Doc(md: "Mode for parsing entities in the widget caption. See formatting options for more details.")),
+                Param(name: "caption_entities", ty: Option(ArrayOf(RawTy("MessageEntity"))), descr: Doc(md: "A JSON-serialized list of special entities that appear in the caption, which can be specified instead of parse_mode")),
+                Param(name: "show_caption_above_media", ty: Option(bool), descr: Doc(md: "Pass True if the caption must be shown above the widget")),
+                Param(name: "allow_queries", ty: Option(bool), descr: Doc(md: "Pass True to allow the widget to send queries to the bot")),
+                Param(name: "is_shared", ty: Option(bool), descr: Doc(md: "Pass True to create a shared widget, which can be sent again using the method sendSharedWidget")),
+                Param(name: "disable_notification", ty: Option(bool), descr: Doc(md: "Sends the message silently . Users will receive a notification with no sound.")),
+                Param(name: "protect_content", ty: Option(bool), descr: Doc(md: "Protects the contents of the sent message from forwarding and saving")),
+                Param(name: "allow_paid_broadcast", ty: Option(bool), descr: Doc(md: "Pass True to allow up to 1000 messages per second, ignoring broadcasting limits for a fee of 0.1 Telegram Stars per message. The relevant Stars will be withdrawn from the bot's balance.")),
+                Param(name: "message_effect_id", ty: Option(RawTy("EffectId")), descr: Doc(md: "Unique identifier of the message effect to be added to the message; for private chats only")),
+                Param(name: "reply_parameters", ty: Option(RawTy("ReplyParameters")), descr: Doc(md: "Description of the message to reply to")),
+                Param(name: "reply_markup", ty: Option(RawTy("ReplyMarkup")), descr: Doc(md: "Additional interface options. A JSON-serialized object for an inline keyboard , custom reply keyboard , instructions to remove a reply keyboard or to force a reply from the user.")),
+            ],
+        ),
+
         Method(
             names: ("getUpdates", "GetUpdates", "get_updates"),
             return_ty: ArrayOf(RawTy("Update")),
@@ -57,7 +196,7 @@ Schema(
             params: [
                 Param(
                     name: "offset",
-                    ty: Option(i32),
+                    ty: Option(i64),
                     descr: Doc(
                         md: "Identifier of the first update to be returned. Must be greater by one than the highest among the identifiers of previously received updates. By default, updates starting with the earliest unconfirmed update are returned. An update is considered confirmed as soon as [getUpdates] is called with an offset higher than its update_id. The negative offset can be specified to retrieve updates starting from -offset update from the end of the updates queue. All previous updates will forgotten.",
                         md_links: {
@@ -217,6 +356,7 @@ Schema(
         ),
         Method(
             names: ("sendMessage", "SendMessage", "send_message"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send text messages. On success, the sent [Message] is returned.",
@@ -232,8 +372,8 @@ Schema(
                 ),
                 Param(
                     name: "chat_id",
-                    ty: RawTy("Recipient"),
-                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`)")
+                    ty: Option(RawTy("Recipient")),
+                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`). Required unless sending a callback-only ephemeral reply; ignored when ephemeral_message_parameters.receiver_user_id is omitted.")
                 ),
                 Param(
                     name: "message_thread_id",
@@ -434,7 +574,7 @@ Schema(
             names: ("copyMessage", "CopyMessage", "copy_message"),
             return_ty: RawTy("MessageId"),
             doc: Doc(
-                md: "Use this method to copy messages of any kind. Service messages, paid media messages, giveaway messages, giveaway winners messages, and invoice messages can't be copied. A quiz [Poll] can be copied only if the value of the field *correct_option_id* is known to the bot. The method is analogous to the method [forwardMessage], but the copied message doesn't have a link to the original message. Returns the [MessageId] of the sent message on success.",
+                md: "Use this method to copy messages of any kind. Service messages, paid media messages, widget messages, giveaway messages, giveaway winners messages, and invoice messages can't be copied. A quiz [Poll] can be copied only if the value of the field *correct_option_id* is known to the bot. The method is analogous to the method [forwardMessage], but the copied message doesn't have a link to the original message. Returns the [MessageId] of the sent message on success.",
                 md_links: {
                     "Poll": "https://core.telegram.org/bots/api#poll",
                     "forwardMessage": "https://core.telegram.org/bots/api#forwardmessage",
@@ -547,7 +687,7 @@ Schema(
             names: ("copyMessages", "CopyMessages", "copy_messages"),
             return_ty: ArrayOf(RawTy("MessageId")),
             doc: Doc(
-                md: "Use this method to copy messages of any kind. If some of the specified messages can't be found or copied, they are skipped. Service messages, paid media messages, giveaway messages, giveaway winners messages, and invoice messages can't be copied. A quiz [Poll] can be copied only if the value of the field *correct_option_id* is known to the bot. The method is analogous to the method [forwardMessages], but the copied messages don't have a link to the original message. Album grouping is kept for copied messages. On success, an array of [MessageId] of the sent messages is returned.",
+                md: "Use this method to copy messages of any kind. If some of the specified messages can't be found or copied, they are skipped. Service messages, paid media messages, widget messages, giveaway messages, giveaway winners messages, and invoice messages can't be copied. A quiz [Poll] can be copied only if the value of the field *correct_option_id* is known to the bot. The method is analogous to the method [forwardMessages], but the copied messages don't have a link to the original message. Album grouping is kept for copied messages. On success, an array of [MessageId] of the sent messages is returned.",
                 md_links: {
                     "Poll": "https://core.telegram.org/bots/api#poll",
                     "forwardMessages": "https://core.telegram.org/bots/api#forwardmessages",
@@ -604,6 +744,7 @@ Schema(
         ),
         Method(
             names: ("sendPhoto", "SendPhoto", "send_photo"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send photos. On success, the sent [Message] is returned.",
@@ -619,8 +760,8 @@ Schema(
                 ),
                 Param(
                     name: "chat_id",
-                    ty: RawTy("Recipient"),
-                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`)")
+                    ty: Option(RawTy("Recipient")),
+                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`). Required unless sending a callback-only ephemeral reply; ignored when ephemeral_message_parameters.receiver_user_id is omitted.")
                 ),
                 Param(
                     name: "message_thread_id",
@@ -717,6 +858,7 @@ Schema(
         ),
         Method(
             names: ("sendAudio", "SendAudio", "send_audio"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send audio files, if you want Telegram clients to display them in the music player. Your audio must be in the .MP3 or .M4A format. On success, the sent [Message] is returned. Bots can currently send audio files of up to 50 MB in size, this limit may be changed in the future.\n\nFor sending voice messages, use the [sendVoice] method instead.",
@@ -735,8 +877,8 @@ Schema(
                 ),
                 Param(
                     name: "chat_id",
-                    ty: RawTy("Recipient"),
-                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`)"),
+                    ty: Option(RawTy("Recipient")),
+                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`). Required unless sending a callback-only ephemeral reply; ignored when ephemeral_message_parameters.receiver_user_id is omitted."),
                 ),
                 Param(
                     name: "message_thread_id",
@@ -846,6 +988,7 @@ Schema(
         ),
         Method(
             names: ("sendDocument", "SendDocument", "send_document"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send general files. On success, the sent [Message] is returned. Bots can currently send files of any type of up to 50 MB in size, this limit may be changed in the future.",
@@ -861,8 +1004,8 @@ Schema(
                 ),
                 Param(
                     name: "chat_id",
-                    ty: RawTy("Recipient"),
-                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`)"),
+                    ty: Option(RawTy("Recipient")),
+                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`). Required unless sending a callback-only ephemeral reply; ignored when ephemeral_message_parameters.receiver_user_id is omitted."),
                 ),
                 Param(
                     name: "message_thread_id",
@@ -962,6 +1105,7 @@ Schema(
         ),
         Method(
             names: ("sendVideo", "SendVideo", "send_video"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send video files, Telegram clients support mp4 videos (other formats may be sent as [Document]). On success, the sent [Message] is returned. Bots can currently send video files of up to 50 MB in size, this limit may be changed in the future.",
@@ -980,8 +1124,8 @@ Schema(
                 ),
                 Param(
                     name: "chat_id",
-                    ty: RawTy("Recipient"),
-                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`)"),
+                    ty: Option(RawTy("Recipient")),
+                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`). Required unless sending a callback-only ephemeral reply; ignored when ephemeral_message_parameters.receiver_user_id is omitted."),
                 ),
                 Param(
                     name: "message_thread_id",
@@ -1120,6 +1264,7 @@ Schema(
         ),
         Method(
             names: ("sendAnimation", "SendAnimation", "send_animation"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send animation files (GIF or H.264/MPEG-4 AVC video without sound). On success, the sent [Message] is returned. Bots can currently send animation files of up to 50 MB in size, this limit may be changed in the future.",
@@ -1135,8 +1280,8 @@ Schema(
                 ),
                 Param(
                     name: "chat_id",
-                    ty: RawTy("Recipient"),
-                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`)"),
+                    ty: Option(RawTy("Recipient")),
+                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`). Required unless sending a callback-only ephemeral reply; ignored when ephemeral_message_parameters.receiver_user_id is omitted."),
                 ),
                 Param(
                     name: "message_thread_id",
@@ -1256,6 +1401,7 @@ Schema(
         ),
         Method(
             names: ("sendVoice", "SendVoice", "send_voice"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send audio files, if you want Telegram clients to display the file as a playable voice message. For this to work, your audio must be in an .OGG file encoded with OPUS, or in .MP3 format, or in .M4A format (other formats may be sent as [Audio] or [Document]). On success, the sent [Message] is returned. Bots can currently send voice messages of up to 50 MB in size, this limit may be changed in the future.",
@@ -1275,8 +1421,8 @@ Schema(
                 ),
                 Param(
                     name: "chat_id",
-                    ty: RawTy("Recipient"),
-                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`)"),
+                    ty: Option(RawTy("Recipient")),
+                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`). Required unless sending a callback-only ephemeral reply; ignored when ephemeral_message_parameters.receiver_user_id is omitted."),
                 ),
                 Param(
                     name: "message_thread_id",
@@ -1368,6 +1514,7 @@ Schema(
         ),
         Method(
             names: ("sendVideoNote", "SendVideoNote", "send_video_note"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "As of [v.4.0], Telegram clients support rounded square mp4 videos of up to 1 minute long. Use this method to send video messages. On success, the sent [Message] is returned.",
@@ -1386,8 +1533,8 @@ Schema(
                 ),
                 Param(
                     name: "chat_id",
-                    ty: RawTy("Recipient"),
-                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`)"),
+                    ty: Option(RawTy("Recipient")),
+                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`). Required unless sending a callback-only ephemeral reply; ignored when ephemeral_message_parameters.receiver_user_id is omitted."),
                 ),
                 Param(
                     name: "message_thread_id",
@@ -1649,6 +1796,7 @@ Schema(
         ),
         Method(
             names: ("sendLocation", "SendLocation", "send_location"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send point on the map. On success, the sent [Message] is returned.",
@@ -1664,8 +1812,8 @@ Schema(
                 ),
                 Param(
                     name: "chat_id",
-                    ty: RawTy("Recipient"),
-                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`)"),
+                    ty: Option(RawTy("Recipient")),
+                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`). Required unless sending a callback-only ephemeral reply; ignored when ephemeral_message_parameters.receiver_user_id is omitted."),
                 ),
                 Param(
                     name: "message_thread_id",
@@ -2005,6 +2153,7 @@ Schema(
         ),
         Method(
             names: ("sendVenue", "SendVenue", "send_venue"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send information about a venue. On success, the sent [Message] is returned.",
@@ -2020,8 +2169,8 @@ Schema(
                 ),
                 Param(
                     name: "chat_id",
-                    ty: RawTy("Recipient"),
-                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`)")
+                    ty: Option(RawTy("Recipient")),
+                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`). Required unless sending a callback-only ephemeral reply; ignored when ephemeral_message_parameters.receiver_user_id is omitted.")
                 ),
                 Param(
                     name: "message_thread_id",
@@ -2125,6 +2274,7 @@ Schema(
         ),
         Method(
             names: ("sendContact", "SendContact", "send_contact"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send phone contacts. On success, the sent [Message] is returned.",
@@ -2140,8 +2290,8 @@ Schema(
                 ),
                 Param(
                     name: "chat_id",
-                    ty: RawTy("Recipient"),
-                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`)")
+                    ty: Option(RawTy("Recipient")),
+                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`). Required unless sending a callback-only ephemeral reply; ignored when ephemeral_message_parameters.receiver_user_id is omitted.")
                 ),
                 Param(
                     name: "message_thread_id",
@@ -4676,6 +4826,7 @@ Schema(
         ),
         Method(
             names: ("sendSticker", "SendSticker", "send_sticker"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(
                 md: "Use this method to send static .WEBP, .TGS or .WEBM stickers. On success, the sent Message is returned.",
@@ -4691,8 +4842,8 @@ Schema(
                 ),
                 Param(
                     name: "chat_id",
-                    ty: RawTy("Recipient"),
-                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`).")
+                    ty: Option(RawTy("Recipient")),
+                    descr: Doc(md: "Unique identifier for the target chat or username of the target channel (in the format `@channelusername`).. Required unless sending a callback-only ephemeral reply; ignored when ephemeral_message_parameters.receiver_user_id is omitted.")
                 ),
                 Param(
                     name: "message_thread_id",
@@ -5269,7 +5420,9 @@ Schema(
                     ty: Option(String),
                     descr: Doc(md: "Custom description for the verification; 0-70 characters. Must be empty if the organization isn't allowed to provide a custom verification description.")
                 ),
-            ]
+                            Param(name: "custom_description_parse_mode", ty: Option(RawTy("ParseMode")), descr: Doc(md: "Mode for parsing entities in the custom description. See formatting options for more details. Only “text_link” entities are supported.")),
+                Param(name: "custom_description_entities", ty: Option(ArrayOf(RawTy("MessageEntity"))), descr: Doc(md: "A JSON-serialized list of special entities that appear in the custom description, which can be specified instead of custom_description_parse_mode . Only “text_link” entities are supported.")),
+]
         ),
         Method(
             names: ("verifyChat", "VerifyChat", "verify_chat"),
@@ -5291,7 +5444,9 @@ Schema(
                     ty: Option(String),
                     descr: Doc(md: "Custom description for the verification; 0-70 characters. Must be empty if the organization isn't allowed to provide a custom verification description.")
                 ),
-            ]
+                            Param(name: "custom_description_parse_mode", ty: Option(RawTy("ParseMode")), descr: Doc(md: "Mode for parsing entities in the custom description. See formatting options for more details. Only “text_link” entities are supported.")),
+                Param(name: "custom_description_entities", ty: Option(ArrayOf(RawTy("MessageEntity"))), descr: Doc(md: "A JSON-serialized list of special entities that appear in the custom description, which can be specified instead of custom_description_parse_mode . Only “text_link” entities are supported.")),
+]
         ),
         Method(
             names: ("removeUserVerification", "RemoveUserVerification", "remove_user_verification"),
@@ -6468,13 +6623,14 @@ Schema(
 
         Method(
             names: ("sendLivePhoto", "SendLivePhoto", "send_live_photo"),
+            validation: Some("crate::requests::validation::validate_ephemeral_send_target"),
             return_ty: RawTy("Message"),
             doc: Doc(md: "Use this method to send live photos. On success, the sent [Message] is returned.", md_links: {"Message": "https://core.telegram.org/bots/api#message"}),
             tg_doc: "https://core.telegram.org/bots/api#sendlivephoto",
             tg_category: "Available methods",
             params: [
                 Param(name: "business_connection_id", ty: Option(RawTy("BusinessConnectionId")), descr: Doc(md: "Unique identifier of the business connection on behalf of which the message will be sent")),
-                Param(name: "chat_id", ty: RawTy("Recipient"), descr: Doc(md: "Unique identifier for the target chat or username of the target channel")),
+                Param(name: "chat_id", ty: Option(RawTy("Recipient")), descr: Doc(md: "Unique identifier for the target chat or username of the target channel. Required unless sending a callback-only ephemeral reply; ignored when ephemeral_message_parameters.receiver_user_id is omitted.")),
                 Param(name: "message_thread_id", ty: Option(RawTy("ThreadId")), descr: Doc(md: "Unique identifier for the target message thread")),
                 Param(name: "direct_messages_topic_id", ty: Option(RawTy("TopicId")), descr: Doc(md: "Identifier of the direct messages topic to which the message will be sent")),
                 Param(name: "ephemeral_message_parameters", ty: Option(RawTy("EphemeralMessageParameters")), descr: Doc(md: "A JSON-serialized object containing the parameters of the ephemeral message to send")),
@@ -6831,7 +6987,7 @@ Schema(
             multipart: ["rich_message"],
             params: [
                 Param(name: "business_connection_id", ty: Option(RawTy("BusinessConnectionId")), descr: Doc(md: "Unique identifier of the business connection on behalf of which the message will be sent")),
-                Param(name: "chat_id", ty: RawTy("Recipient"), descr: Doc(md: "Unique identifier for the target chat or username")),
+                Param(name: "chat_id", ty: Option(RawTy("Recipient")), descr: Doc(md: "Unique identifier for the target chat or username. Required unless sending a callback-only ephemeral reply; ignored when ephemeral_message_parameters.receiver_user_id is omitted.")),
                 Param(name: "message_thread_id", ty: Option(RawTy("ThreadId")), descr: Doc(md: "Unique identifier for the target message thread")),
                 Param(name: "direct_messages_topic_id", ty: Option(RawTy("TopicId")), descr: Doc(md: "Identifier of the direct messages topic")),
                 Param(name: "ephemeral_message_parameters", ty: Option(RawTy("EphemeralMessageParameters")), descr: Doc(md: "A JSON-serialized object containing the parameters of the ephemeral message to send")),

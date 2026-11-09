@@ -1,11 +1,11 @@
 //! Core part of the [`teloxide`] library.
 //!
 //! This library provides tools for making requests to the [Telegram Bot API]
-//! (Currently, version `10.3` is supported) with ease. The library is fully
+//! (Currently, version `10.4` is supported) with ease. The library is fully
 //! asynchronous and built using [`tokio`].
 //!
 //!```toml
-//! teloxide-core = "0.16.0"
+//! teloxide-core = "0.17.0-rc.1"
 //! ```
 //! _Compiler support: requires rustc 1.85+_.
 //!
@@ -22,7 +22,9 @@
 //! let me = bot.get_me().await?;
 //!
 //! bot.send_dice(chat_id).emoji(DiceEmoji::Dice).await?;
-//! bot.send_message(chat_id, format!("Hi, my name is **{}** 👋", me.user.first_name)).await?;
+//! bot.send_message(format!("Hi, my name is **{}** 👋", me.user.first_name))
+//!     .chat_id(chat_id)
+//!     .await?;
 //! # Ok::<_, Box<dyn std::error::Error>>(()) };
 //! ```
 //!

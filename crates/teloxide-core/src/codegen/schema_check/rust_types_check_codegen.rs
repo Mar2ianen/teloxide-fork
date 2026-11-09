@@ -421,6 +421,19 @@ fn expand_reference(
         .get(&reference)
         .unwrap_or_else(|| panic!("Reference does not exist, {field_name}, {reference}"));
 
+    // Expand primitive ID wrappers, not semantic unions such as RichText.
+    // A recursive anyOf is a named wire type, even when the check schema
+    // only mentions it through a field reference.
+    if let Some(variants) = reference_object.get("anyOf").and_then(Value::as_array) {
+        let is_recipient = variants.len() == 2
+            && variants.iter().any(|v| v.get("type").and_then(Value::as_str) == Some("string"))
+            && variants
+                .iter()
+                .any(|v| v.get("$ref").and_then(Value::as_str) == Some("#/$defs/ChatId"));
+        if !is_recipient {
+            return None;
+        }
+    }
     // A check if its really a wrapper and not smth like FileMeta
     if reference_object.get("type").and_then(|x| x.as_str()) != Some("object") {
         let (reference_required, reference_kind) =

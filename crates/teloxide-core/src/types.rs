@@ -1,5 +1,17 @@
 //! Telegram API types.
 
+pub use paid_messages_waived::*;
+mod paid_messages_waived;
+
+pub use chat_share_theme::*;
+mod chat_share_theme;
+
+pub use ton_wallet::*;
+mod ton_wallet;
+
+pub use widget::*;
+mod widget;
+
 pub use accepted_gift_types::*;
 pub use allowed_update::*;
 pub use animation::*;

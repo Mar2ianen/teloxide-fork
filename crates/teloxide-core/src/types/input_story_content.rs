@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::types::InputFile;
+use crate::types::{InputFile, InputFileLike};
 
 /// This object describes the content of a story to post.
 #[derive(Clone, Debug, Serialize)]
@@ -10,6 +10,20 @@ use crate::types::InputFile;
 pub enum InputStoryContent {
     Photo(InputStoryContentPhoto),
     Video(InputStoryContentVideo),
+}
+
+impl InputFileLike for InputStoryContent {
+    fn copy_into(&self, into: &mut dyn FnMut(InputFile)) {
+        for file in self.files() {
+            file.copy_into(into);
+        }
+    }
+
+    fn move_into(&mut self, into: &mut dyn FnMut(InputFile)) {
+        for file in self.files_mut() {
+            file.move_into(into);
+        }
+    }
 }
 
 impl InputStoryContent {
@@ -69,4 +83,26 @@ pub struct InputStoryContentVideo {
 
     /// Pass _true_ if the video has no sound
     pub is_animation: Option<bool>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{InputFile, InputFileLike};
+
+    #[test]
+    fn story_content_input_file_like_traverses_the_file() {
+        let content = InputStoryContent::Photo(InputStoryContentPhoto {
+            photo: InputFile::file_id("1".into()),
+        });
+
+        let mut copied = Vec::new();
+        content.copy_into(&mut |file| copied.push(file));
+        assert_eq!(copied.len(), 1);
+
+        let mut content = content;
+        let mut moved_count = 0;
+        content.move_into(&mut |_| moved_count += 1);
+        assert_eq!(moved_count, 1);
+    }
 }

@@ -58,7 +58,7 @@ async fn main() {
 }
 
 async fn start(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
-    bot.send_message(msg.chat.id, "Let's start! What's your full name?").await?;
+    bot.send_message("Let's start! What's your full name?").chat_id(msg.chat.id).await?;
     dialogue.update(State::ReceiveFullName).await?;
     Ok(())
 }
@@ -66,11 +66,11 @@ async fn start(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
 async fn receive_full_name(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
     match msg.text() {
         Some(text) => {
-            bot.send_message(msg.chat.id, "How old are you?").await?;
+            bot.send_message("How old are you?").chat_id(msg.chat.id).await?;
             dialogue.update(State::ReceiveAge { full_name: text.into() }).await?;
         }
         None => {
-            bot.send_message(msg.chat.id, "Send me plain text.").await?;
+            bot.send_message("Send me plain text.").chat_id(msg.chat.id).await?;
         }
     }
 
@@ -85,11 +85,11 @@ async fn receive_age(
 ) -> HandlerResult {
     match msg.text().map(|text| text.parse::<u8>()) {
         Some(Ok(age)) => {
-            bot.send_message(msg.chat.id, "What's your location?").await?;
+            bot.send_message("What's your location?").chat_id(msg.chat.id).await?;
             dialogue.update(State::ReceiveLocation { full_name, age }).await?;
         }
         _ => {
-            bot.send_message(msg.chat.id, "Send me a number.").await?;
+            bot.send_message("Send me a number.").chat_id(msg.chat.id).await?;
         }
     }
 
@@ -105,11 +105,11 @@ async fn receive_location(
     match msg.text() {
         Some(location) => {
             let report = format!("Full name: {full_name}\nAge: {age}\nLocation: {location}");
-            bot.send_message(msg.chat.id, report).await?;
+            bot.send_message(report).chat_id(msg.chat.id).await?;
             dialogue.exit().await?;
         }
         None => {
-            bot.send_message(msg.chat.id, "Send me plain text.").await?;
+            bot.send_message("Send me plain text.").chat_id(msg.chat.id).await?;
         }
     }
 

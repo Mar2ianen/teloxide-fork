@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let Me { user: me, .. } = bot.get_me().await?;
 
     bot.send_dice(chat_id).emoji(DiceEmoji::Dice).await?;
-    bot.send_message(chat_id, format!("Hi, my name is **{}** 👋", me.first_name)).await?;
+    bot.send_message(format!("Hi, my name is **{}** 👋", me.first_name)).chat_id(chat_id).await?;
 
     Ok(())
 }

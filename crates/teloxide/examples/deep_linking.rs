@@ -1,15 +1,15 @@
 //! This example demonstrates how to use deep linking in Telegram
 //! by making a simple anonymous message bot.
 //!
-//! Deep linking (links like https://t.me/some_bot?start=123456789)
+//! Deep linking (links like `https://t.me/some_bot?start=123456789`)
 //! is handled by telegram in the same way as just sending /start {argument}.
 //! So, in the StartCommand enum we need to write Start(String)
 //! to get the argument, just like in command.rs example.
 //!
 //! Also, deep linking is only supported with /start command!
-//! "https://t.me/some_bot?argument=123456789" will not work
+//! `https://t.me/some_bot?argument=123456789` will not work
 //!
-//! https://core.telegram.org/bots/features#deep-linking
+//! <https://core.telegram.org/bots/features#deep-linking>
 use dptree::{case, deps};
 use teloxide::{
     dispatching::dialogue::{self, InMemStorage},

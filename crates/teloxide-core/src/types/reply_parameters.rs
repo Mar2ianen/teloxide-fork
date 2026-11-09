@@ -32,6 +32,8 @@ pub struct ReplyParameters {
     /// _spoiler_, and _custom_emoji_ entities. The message will fail to send if
     /// the quote isn't found in the original message.
     pub quote: Option<String>,
+    /// Rich texts to quote from a rich message.
+    pub quote_rich_texts: Option<Vec<crate::types::RichText>>,
     /// Mode for parsing entities in the quote. See [formatting options] for
     /// more details.
     ///
@@ -50,6 +52,16 @@ pub struct ReplyParameters {
 }
 
 impl ReplyParameters {
+    /// Sets rich texts to quote from a rich message.
+    #[must_use]
+    pub fn quote_rich_texts(
+        mut self,
+        texts: impl IntoIterator<Item = crate::types::RichText>,
+    ) -> Self {
+        self.quote_rich_texts = Some(texts.into_iter().collect());
+        self
+    }
+
     pub fn new(message_id: MessageId) -> Self {
         Self { message_id: Some(message_id), ..Self::default() }
     }

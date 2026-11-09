@@ -9,20 +9,21 @@ use crate::types::{
 };
 
 impl_payload! {
+    @[validate = crate::requests::validation::validate_ephemeral_send_target]
     /// Use this method to send text messages. On success, the sent [`Message`] is returned.
     ///
     /// [`Message`]: crate::types::Message
     #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize)]
     pub SendMessage (SendMessageSetters) => Message {
         required {
-            /// Unique identifier for the target chat or username of the target channel (in the format `@channelusername`)
-            pub chat_id: Recipient [into],
             /// Text of the message to be sent, 1-4096 characters after entities parsing
             pub text: String [into],
         }
         optional {
             /// Unique identifier of the business connection on behalf of which the message will be sent
             pub business_connection_id: BusinessConnectionId,
+            /// Unique identifier for the target chat or username of the target channel (in the format `@channelusername`). Required unless sending a callback-only ephemeral reply; ignored when ephemeral_message_parameters.receiver_user_id is omitted.
+            pub chat_id: Recipient [into],
             /// Unique identifier for the target message thread (topic) of the forum; for forum supergroups only
             pub message_thread_id: ThreadId,
             /// Identifier of the direct messages topic to which the message will be sent; required if the message is sent to a direct messages chat
@@ -63,7 +64,10 @@ impl_payload! {
 impl crate::outbound::OutboundPayload for SendMessage {
     fn outbound_hint(&self) -> crate::outbound::OutboundHint {
         crate::outbound::OutboundHint {
-            scope: crate::outbound::classify::scope_of_recipient(&self.chat_id),
+            scope: crate::outbound::classify::ephemeral_recipient_scope(
+                &self.chat_id,
+                &self.ephemeral_message_parameters,
+            ),
             class: crate::outbound::OutboundClass::new(crate::outbound::class::MESSAGE_SEND),
             priority: crate::outbound::OutboundPriority::NORMAL,
             weight: std::num::NonZeroU32::new(1).unwrap(),

@@ -69,16 +69,19 @@ async fn message_handler(
         match BotCommands::parse(text, me.username()) {
             Ok(Command::Help) => {
                 // Just send the description of all commands.
-                bot.send_message(msg.chat.id, Command::descriptions().to_string()).await?;
+                bot.send_message(Command::descriptions().to_string()).chat_id(msg.chat.id).await?;
             }
             Ok(Command::Start) => {
                 // Create a list of buttons and send them.
                 let keyboard = make_keyboard();
-                bot.send_message(msg.chat.id, "Debian versions:").reply_markup(keyboard).await?;
+                bot.send_message("Debian versions:")
+                    .chat_id(msg.chat.id)
+                    .reply_markup(keyboard)
+                    .await?;
             }
 
             Err(_) => {
-                bot.send_message(msg.chat.id, "Command not found!").await?;
+                bot.send_message("Command not found!").chat_id(msg.chat.id).await?;
             }
         }
     }

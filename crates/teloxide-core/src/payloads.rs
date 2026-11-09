@@ -23,6 +23,7 @@ mod answer_inline_query;
 mod answer_pre_checkout_query;
 mod answer_shipping_query;
 mod answer_web_app_query;
+mod answer_widget_query;
 mod approve_chat_join_request;
 mod approve_suggested_post;
 mod ban_chat_member;
@@ -41,6 +42,7 @@ mod create_new_sticker_set;
 mod decline_chat_join_request;
 mod decline_suggested_post;
 mod delete_all_message_reactions;
+mod delete_business_account_gift;
 mod delete_business_messages;
 mod delete_chat_photo;
 mod delete_chat_sticker_set;
@@ -73,6 +75,9 @@ mod edit_message_reply_markup;
 mod edit_message_reply_markup_inline;
 mod edit_message_text;
 mod edit_message_text_inline;
+mod edit_message_widget_data;
+mod edit_message_widget_data_inline;
+mod edit_shared_widget_data;
 mod edit_story;
 mod edit_user_star_subscription;
 mod export_chat_invite_link;
@@ -89,6 +94,7 @@ mod get_chat_member;
 mod get_chat_member_count;
 mod get_chat_members_count;
 mod get_chat_menu_button;
+mod get_chat_share_theme_backdrops;
 mod get_custom_emoji_stickers;
 mod get_file;
 mod get_forum_topic_icon_stickers;
@@ -104,6 +110,7 @@ mod get_my_short_description;
 mod get_my_star_balance;
 mod get_star_transactions;
 mod get_sticker_set;
+mod get_unique_gift;
 mod get_updates;
 mod get_user_chat_boosts;
 mod get_user_gifts;
@@ -156,11 +163,13 @@ mod send_photo;
 mod send_poll;
 mod send_rich_message;
 mod send_rich_message_draft;
+mod send_shared_widget;
 mod send_sticker;
 mod send_venue;
 mod send_video;
 mod send_video_note;
 mod send_voice;
+mod send_widget;
 mod set_business_account_bio;
 mod set_business_account_gift_settings;
 mod set_business_account_name;
@@ -221,6 +230,7 @@ pub use answer_inline_query::{AnswerInlineQuery, AnswerInlineQuerySetters};
 pub use answer_pre_checkout_query::{AnswerPreCheckoutQuery, AnswerPreCheckoutQuerySetters};
 pub use answer_shipping_query::{AnswerShippingQuery, AnswerShippingQuerySetters};
 pub use answer_web_app_query::{AnswerWebAppQuery, AnswerWebAppQuerySetters};
+pub use answer_widget_query::{AnswerWidgetQuery, AnswerWidgetQuerySetters};
 pub use approve_chat_join_request::{ApproveChatJoinRequest, ApproveChatJoinRequestSetters};
 pub use approve_suggested_post::{ApproveSuggestedPost, ApproveSuggestedPostSetters};
 pub use ban_chat_member::{BanChatMember, BanChatMemberSetters};
@@ -242,6 +252,9 @@ pub use decline_chat_join_request::{DeclineChatJoinRequest, DeclineChatJoinReque
 pub use decline_suggested_post::{DeclineSuggestedPost, DeclineSuggestedPostSetters};
 pub use delete_all_message_reactions::{
     DeleteAllMessageReactions, DeleteAllMessageReactionsSetters,
+};
+pub use delete_business_account_gift::{
+    DeleteBusinessAccountGift, DeleteBusinessAccountGiftSetters,
 };
 pub use delete_business_messages::{DeleteBusinessMessages, DeleteBusinessMessagesSetters};
 pub use delete_chat_photo::{DeleteChatPhoto, DeleteChatPhotoSetters};
@@ -287,6 +300,11 @@ pub use edit_message_reply_markup_inline::{
 };
 pub use edit_message_text::{EditMessageText, EditMessageTextSetters};
 pub use edit_message_text_inline::{EditMessageTextInline, EditMessageTextInlineSetters};
+pub use edit_message_widget_data::{EditMessageWidgetData, EditMessageWidgetDataSetters};
+pub use edit_message_widget_data_inline::{
+    EditMessageWidgetDataInline, EditMessageWidgetDataInlineSetters,
+};
+pub use edit_shared_widget_data::{EditSharedWidgetData, EditSharedWidgetDataSetters};
 pub use edit_story::{EditStory, EditStorySetters};
 pub use edit_user_star_subscription::{EditUserStarSubscription, EditUserStarSubscriptionSetters};
 pub use export_chat_invite_link::{ExportChatInviteLink, ExportChatInviteLinkSetters};
@@ -305,6 +323,9 @@ pub use get_chat_member::{GetChatMember, GetChatMemberSetters};
 pub use get_chat_member_count::{GetChatMemberCount, GetChatMemberCountSetters};
 pub use get_chat_members_count::{GetChatMembersCount, GetChatMembersCountSetters};
 pub use get_chat_menu_button::{GetChatMenuButton, GetChatMenuButtonSetters};
+pub use get_chat_share_theme_backdrops::{
+    GetChatShareThemeBackdrops, GetChatShareThemeBackdropsSetters,
+};
 pub use get_custom_emoji_stickers::{GetCustomEmojiStickers, GetCustomEmojiStickersSetters};
 pub use get_file::{GetFile, GetFileSetters};
 pub use get_forum_topic_icon_stickers::{
@@ -326,6 +347,7 @@ pub use get_my_short_description::{GetMyShortDescription, GetMyShortDescriptionS
 pub use get_my_star_balance::{GetMyStarBalance, GetMyStarBalanceSetters};
 pub use get_star_transactions::{GetStarTransactions, GetStarTransactionsSetters};
 pub use get_sticker_set::{GetStickerSet, GetStickerSetSetters};
+pub use get_unique_gift::{GetUniqueGift, GetUniqueGiftSetters};
 pub use get_updates::{GetUpdates, GetUpdatesSetters};
 pub use get_user_chat_boosts::{GetUserChatBoosts, GetUserChatBoostsSetters};
 pub use get_user_gifts::{GetUserGifts, GetUserGiftsSetters};
@@ -388,11 +410,13 @@ pub use send_photo::{SendPhoto, SendPhotoSetters};
 pub use send_poll::{SendPoll, SendPollSetters};
 pub use send_rich_message::{SendRichMessage, SendRichMessageSetters};
 pub use send_rich_message_draft::{SendRichMessageDraft, SendRichMessageDraftSetters};
+pub use send_shared_widget::{SendSharedWidget, SendSharedWidgetSetters};
 pub use send_sticker::{SendSticker, SendStickerSetters};
 pub use send_venue::{SendVenue, SendVenueSetters};
 pub use send_video::{SendVideo, SendVideoSetters};
 pub use send_video_note::{SendVideoNote, SendVideoNoteSetters};
 pub use send_voice::{SendVoice, SendVoiceSetters};
+pub use send_widget::{SendWidget, SendWidgetSetters};
 pub use set_business_account_bio::{SetBusinessAccountBio, SetBusinessAccountBioSetters};
 pub use set_business_account_gift_settings::{
     SetBusinessAccountGiftSettings, SetBusinessAccountGiftSettingsSetters,

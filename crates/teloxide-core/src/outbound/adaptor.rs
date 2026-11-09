@@ -18,7 +18,7 @@
 //! the Bot API schema for every payload, so the hint always reflects the
 //! payload that is actually sent.
 
-use std::{error::Error, fmt, future::IntoFuture, num::NonZeroU32};
+use std::{error::Error, fmt, future::IntoFuture, num::NonZeroU32, sync::Arc};
 
 use url::Url;
 
@@ -120,7 +120,8 @@ impl<E: AsResponseParameters> AsResponseParameters for OutboundRequestError<E> {
 /// Per-request scheduling overrides ([`priority`](Self::priority),
 /// [`weight`](Self::weight), [`class`](Self::class)) are fixed on the
 /// `ScheduledRequest` and applied on top of the payload classification at
-/// send time; the scope always follows the payload.
+/// send time; the scope follows the payload or its explicit shared-widget
+/// binding.
 ///
 /// The type requires `Req: HasPayload`; the [`Request`] implementation
 /// requires `Req: Clone + Send + 'static` and `Req::Payload::Output: Send`
@@ -165,6 +166,7 @@ pub struct ScheduledRequest<Req: HasPayload> {
     lane: Option<ScheduledLane>,
     overrides: OutboundOverrides,
     correlation_id: Option<crate::outbound::OutboundCorrelationId>,
+    shared_widget: Option<Arc<str>>,
 }
 
 impl<Req: HasPayload> Clone for ScheduledRequest<Req>
@@ -178,6 +180,7 @@ where
             lane: self.lane.clone(),
             overrides: self.overrides,
             correlation_id: self.correlation_id,
+            shared_widget: self.shared_widget.clone(),
         }
     }
 }
@@ -190,7 +193,25 @@ impl<Req: HasPayload> ScheduledRequest<Req> {
             lane: None,
             overrides: OutboundOverrides::default(),
             correlation_id: None,
+            shared_widget: None,
         }
+    }
+
+    /// Binds a message-addressed edit to its known shared-widget identity.
+    /// Use the widget ID from `Message::widget()` or a widget query whenever
+    /// editing shared public data through a message/inline address. Telegram
+    /// does not carry that ID in either edit payload. The caller must ensure
+    /// the binding describes the final target after any payload mutations.
+    /// This affects scheduling only and is never serialized to Telegram.
+    /// All bot instances editing the widget must use the same queue and ID;
+    /// pacing successful public-data edits to once per second remains the
+    /// application's responsibility.
+    pub fn shared_widget(mut self, widget_id: impl AsRef<str>) -> Self
+    where
+        Req::Payload: crate::outbound::WidgetDataEditPayload,
+    {
+        self.shared_widget = Some(Arc::from(widget_id.as_ref()));
+        self
     }
 
     /// Attaches an ordering lane. Requests are served strictly in enqueue
@@ -256,7 +277,7 @@ impl<Req: HasPayload> ScheduledRequest<Req> {
     where
         Req::Payload: OutboundPayload,
     {
-        let hint = self.request.payload_ref().outbound_hint();
+        let hint = widget_bound_hint(self.request.payload_ref(), self.shared_widget.as_deref());
         OutboundHint {
             scope: hint.scope,
             class: self.overrides.class.unwrap_or(hint.class),
@@ -320,7 +341,7 @@ where
         // (inside the future): `Request::send_ref` is only *recommended*
         // to be lazy, so any side effect it has (opening a resource,
         // capturing a deadline, ...) must happen after admission.
-        let hint = self.request.payload_ref().outbound_hint();
+        let hint = widget_bound_hint(self.request.payload_ref(), self.shared_widget.as_deref());
         let metadata = effective_metadata(hint, self.overrides);
         SendRef::new(SendRefPlan {
             request: self.request.clone(),
@@ -353,8 +374,8 @@ req_future! {
             // publicly mutable until send (teloxide's `send_ref` flow
             // changes `chat_id` before sending), so admission, lanes and
             // `RetryAfter` penalties always follow what is actually sent.
-            let ScheduledRequest { request, queue, lane, overrides, correlation_id } = it;
-            let hint = request.payload_ref().outbound_hint();
+            let ScheduledRequest { request, queue, lane, overrides, correlation_id, shared_widget } = it;
+            let hint = widget_bound_hint(request.payload_ref(), shared_widget.as_deref());
             let metadata = effective_metadata(hint, overrides);
             // The classifier below runs after the acquire consumed the
             // metadata, so the policy copy is kept separately.
@@ -468,10 +489,24 @@ req_future! {
         U::Payload: Payload<Output: std::marker::Send> + OutboundPayload,
 }
 
+fn widget_bound_hint(payload: &impl OutboundPayload, widget_id: Option<&str>) -> OutboundHint {
+    let mut hint = payload.outbound_hint();
+    if let Some(id) = widget_id {
+        let resource = crate::outbound::OutboundResourceKey::shared_widget(id);
+        hint.scope = match hint.scope {
+            OutboundScope::ResourceInChat { chat, .. } => {
+                OutboundScope::ResourceInChat { resource, chat }
+            }
+            _ => OutboundScope::Resource(resource),
+        };
+    }
+    hint
+}
+
 /// Builds the scheduler metadata from the effective classification: the
 /// payload hint with request-level overrides applied. Scope always comes
-/// from the payload — it is tied to what is actually sent and is
-/// deliberately not overridable.
+/// from the payload or its typed shared-widget binding; arbitrary scope
+/// overrides are deliberately not supported.
 fn effective_metadata(hint: OutboundHint, overrides: OutboundOverrides) -> OutboundMetadata {
     OutboundMetadata {
         scope: hint.scope,
@@ -936,6 +971,32 @@ where
     <B::SendMediaGroup as HasPayload>::Payload:
         Payload<Output: std::marker::Send> + OutboundPayload,
     B::SendMessage: Clone + std::marker::Send + 'static,
+    B::SendWidget: Clone + std::marker::Send + 'static,
+    <B::SendWidget as HasPayload>::Payload: Payload<Output: std::marker::Send> + OutboundPayload,
+    B::SendSharedWidget: Clone + std::marker::Send + 'static,
+    <B::SendSharedWidget as HasPayload>::Payload:
+        Payload<Output: std::marker::Send> + OutboundPayload,
+    B::AnswerWidgetQuery: Clone + std::marker::Send + 'static,
+    <B::AnswerWidgetQuery as HasPayload>::Payload:
+        Payload<Output: std::marker::Send> + OutboundPayload,
+    B::EditMessageWidgetData: Clone + std::marker::Send + 'static,
+    <B::EditMessageWidgetData as HasPayload>::Payload:
+        Payload<Output: std::marker::Send> + OutboundPayload,
+    B::EditMessageWidgetDataInline: Clone + std::marker::Send + 'static,
+    <B::EditMessageWidgetDataInline as HasPayload>::Payload:
+        Payload<Output: std::marker::Send> + OutboundPayload,
+    B::EditSharedWidgetData: Clone + std::marker::Send + 'static,
+    <B::EditSharedWidgetData as HasPayload>::Payload:
+        Payload<Output: std::marker::Send> + OutboundPayload,
+    B::GetChatShareThemeBackdrops: Clone + std::marker::Send + 'static,
+    <B::GetChatShareThemeBackdrops as HasPayload>::Payload:
+        Payload<Output: std::marker::Send> + OutboundPayload,
+    B::GetUniqueGift: Clone + std::marker::Send + 'static,
+    <B::GetUniqueGift as HasPayload>::Payload: Payload<Output: std::marker::Send> + OutboundPayload,
+    B::DeleteBusinessAccountGift: Clone + std::marker::Send + 'static,
+    <B::DeleteBusinessAccountGift as HasPayload>::Payload:
+        Payload<Output: std::marker::Send> + OutboundPayload,
+
     <B::SendMessage as HasPayload>::Payload: Payload<Output: std::marker::Send> + OutboundPayload,
     B::SendMessageDraft: Clone + std::marker::Send + 'static,
     <B::SendMessageDraft as HasPayload>::Payload:
@@ -1242,6 +1303,15 @@ where
                 send_photo,
                 send_poll,
                 send_rich_message,
+                send_widget,
+                send_shared_widget,
+                answer_widget_query,
+                edit_message_widget_data,
+                edit_message_widget_data_inline,
+                edit_shared_widget_data,
+                get_chat_share_theme_backdrops,
+                get_unique_gift,
+                delete_business_account_gift,
                 send_rich_message_draft,
                 send_sticker,
                 send_venue,
@@ -1647,6 +1717,15 @@ mod tests {
             send_photo,
             send_poll,
             send_rich_message,
+                send_widget,
+                send_shared_widget,
+                answer_widget_query,
+                edit_message_widget_data,
+                edit_message_widget_data_inline,
+                edit_shared_widget_data,
+                get_chat_share_theme_backdrops,
+                get_unique_gift,
+                delete_business_account_gift,
             send_rich_message_draft,
             send_sticker,
             send_venue,
@@ -2518,5 +2597,235 @@ mod tests {
         tokio::time::advance(Duration::from_secs(5)).await;
         let permit = tokio::time::timeout(Duration::from_secs(1), blocked).await.unwrap().unwrap();
         permit.complete(OutboundCompletion::Success);
+    }
+    async fn wait_for_pending(queue: &OutboundQueue, expected: usize) {
+        // Lifecycle snapshots can overtake admission on its separate channel.
+        for _ in 0..32 {
+            tokio::task::yield_now().await;
+            if queue.handle().snapshot().await.unwrap().pending == expected {
+                return;
+            }
+        }
+        panic!("expected {expected} admitted pending requests");
+    }
+
+    fn fake_payload<P: Payload>(
+        payload: P,
+        result: Result<P::Output, RequestError>,
+    ) -> FakeRequest<P> {
+        FakeRequest {
+            _payload: payload,
+            result,
+            polls: Arc::new(AtomicUsize::new(0)),
+            release: None,
+            entered: None,
+            send_ref_calls: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    #[test]
+    fn widget_resource_keys_preserve_namespaces_and_explicit_shared_identity() {
+        use crate::outbound::OutboundResourceKey;
+        let (queue, _worker) = OutboundQueue::new(settings()).unwrap();
+        let first = Outbound::new(crate::Bot::new("123:first"), queue.clone());
+        let second = Outbound::new(crate::Bot::new("123:first"), queue);
+        let shared = first.edit_shared_widget_data("Shared", "").metadata().scope;
+        assert_eq!(shared, OutboundScope::Resource(OutboundResourceKey::shared_widget("Shared")));
+        assert_eq!(
+            second
+                .edit_message_widget_data(ChatId(7), MessageId(1))
+                .public_data("")
+                .shared_widget("Shared")
+                .metadata()
+                .scope,
+            OutboundScope::ResourceInChat {
+                resource: OutboundResourceKey::shared_widget("Shared"),
+                chat: crate::outbound::OutboundChatKey::id(7),
+            }
+        );
+        assert_eq!(
+            second
+                .edit_message_widget_data_inline("inline")
+                .public_data("")
+                .shared_widget("Shared")
+                .metadata()
+                .scope,
+            shared
+        );
+        assert_ne!(shared, first.edit_shared_widget_data("shared", "").metadata().scope);
+        assert_ne!(shared, first.edit_message_widget_data_inline("Shared").metadata().scope);
+        assert_ne!(
+            first.edit_message_widget_data(ChatId(7), MessageId(1)).metadata().scope,
+            first.edit_message_widget_data(ChatId(8), MessageId(1)).metadata().scope
+        );
+        // Scheduling annotations never become Telegram fields.
+        let request = second
+            .edit_message_widget_data_inline("inline")
+            .public_data("")
+            .shared_widget("Shared");
+        assert_eq!(
+            serde_json::to_value(request.payload_ref()).unwrap(),
+            serde_json::json!({"inline_message_id":"inline", "public_data":""})
+        );
+        assert_eq!(request.clone().metadata(), request.metadata());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn widget_retry_after_is_shared_across_edits_without_freezing_other_traffic() {
+        let queue = OutboundQueue::new_spawn(settings()).unwrap();
+        let result = ScheduledRequest::new(
+            fake_payload(
+                EditSharedWidgetData::new("shared", "{}"),
+                Err(RequestError::RetryAfter(Seconds::from_seconds(5))),
+            ),
+            queue.clone(),
+        )
+        .send()
+        .await;
+        assert!(matches!(result, Err(OutboundRequestError::Inner(RequestError::RetryAfter(_)))));
+        // Two independent requests/clients share one widget identity and queue.
+        let common = fake_payload(
+            EditMessageWidgetData::new(ChatId(7), MessageId(1)).public_data("{}"),
+            Ok(True),
+        );
+        let common_polls = common.polls.clone();
+        let common = ScheduledRequest::new(common, queue.clone()).shared_widget("shared");
+        let inline =
+            fake_payload(EditMessageWidgetDataInline::new("inline").public_data("{}"), Ok(True));
+        let inline_polls = inline.polls.clone();
+        let inline = ScheduledRequest::new(inline, queue.clone()).shared_widget("shared");
+        let common = tokio::spawn(common.send());
+        let inline = tokio::spawn(inline.send_ref());
+        let message: Message = serde_json::from_value(serde_json::json!({"message_id":1,"date":0,
+            "chat":{"id":7,"type":"private","first_name":"User"},"text":"hello"}))
+        .unwrap();
+        let ordinary = ScheduledRequest::new(
+            fake_payload(SendMessage::new("hello").chat_id(ChatId(7)), Ok(message)),
+            queue.clone(),
+        );
+        tokio::time::timeout(Duration::from_secs(1), ordinary.send()).await.unwrap().unwrap();
+        let answer = ScheduledRequest::new(
+            fake_payload(AnswerWidgetQuery::new("query"), Ok(True)),
+            queue.clone(),
+        );
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), answer.send()).await.unwrap().unwrap(),
+            True
+        );
+        let other = ScheduledRequest::new(
+            fake_payload(EditSharedWidgetData::new("other", "{}"), Ok(True)),
+            queue.clone(),
+        );
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), other.send()).await.unwrap().unwrap(),
+            True
+        );
+        wait_for_pending(&queue, 2).await;
+        assert!(!common.is_finished());
+        assert!(!inline.is_finished());
+        assert_eq!(common_polls.load(Ordering::SeqCst), 0);
+        assert_eq!(inline_polls.load(Ordering::SeqCst), 0);
+        tokio::time::advance(Duration::from_secs(5)).await;
+        assert_eq!(common.await.unwrap().unwrap(), True);
+        assert_eq!(inline.await.unwrap().unwrap(), True);
+        let snapshot = queue.handle().snapshot().await.unwrap();
+        assert_eq!(snapshot.pending, 0);
+        assert_eq!(snapshot.in_flight, 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn message_and_inline_penalties_apply_to_the_shared_edit_endpoint_too() {
+        for inline in [false, true] {
+            let queue = OutboundQueue::new_spawn(settings()).unwrap();
+            let error = Err(RequestError::RetryAfter(Seconds::from_seconds(5)));
+            let result = if inline {
+                ScheduledRequest::new(
+                    fake_payload(
+                        EditMessageWidgetDataInline::new("inline").public_data("{}"),
+                        error,
+                    ),
+                    queue.clone(),
+                )
+                .shared_widget("shared")
+                .send_ref()
+                .await
+            } else {
+                ScheduledRequest::new(
+                    fake_payload(
+                        EditMessageWidgetData::new(ChatId(7), MessageId(1)).public_data("{}"),
+                        error,
+                    ),
+                    queue.clone(),
+                )
+                .shared_widget("shared")
+                .send()
+                .await
+            };
+            assert!(matches!(
+                result,
+                Err(OutboundRequestError::Inner(RequestError::RetryAfter(_)))
+            ));
+            let request = fake_payload(EditSharedWidgetData::new("shared", "{}"), Ok(True));
+            let polls = request.polls.clone();
+            let pending = tokio::spawn(ScheduledRequest::new(request, queue.clone()).send());
+            wait_for_pending(&queue, 1).await;
+            assert!(!pending.is_finished());
+            assert_eq!(polls.load(Ordering::SeqCst), 0);
+            tokio::time::advance(Duration::from_secs(5)).await;
+            assert_eq!(pending.await.unwrap().unwrap(), True);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unbound_inline_widget_penalty_stays_local_to_its_message() {
+        let queue = OutboundQueue::new_spawn(settings()).unwrap();
+        let result = ScheduledRequest::new(
+            fake_payload(
+                EditMessageWidgetDataInline::new("one").public_data("{}"),
+                Err(RequestError::RetryAfter(Seconds::from_seconds(5))),
+            ),
+            queue.clone(),
+        )
+        .send()
+        .await;
+        assert!(matches!(result, Err(OutboundRequestError::Inner(_))));
+        let answer = ScheduledRequest::new(
+            fake_payload(AnswerWidgetQuery::new("query"), Ok(True)),
+            queue.clone(),
+        );
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), answer.send()).await.unwrap().unwrap(),
+            True
+        );
+        let other = ScheduledRequest::new(
+            fake_payload(EditMessageWidgetDataInline::new("two").public_data("{}"), Ok(True)),
+            queue,
+        );
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), other.send()).await.unwrap().unwrap(),
+            True
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn widget_answer_deadline_cancels_admission_without_a_late_send() {
+        let queue = OutboundQueue::new_spawn(settings()).unwrap();
+        let handle = queue.handle();
+        handle.penalize(OutboundScope::Global, Duration::from_secs(60));
+        let request = fake_payload(AnswerWidgetQuery::new("query"), Ok(True));
+        let polls = request.polls.clone();
+        let answer = ScheduledRequest::new(request, queue.clone());
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+        let timed = tokio::spawn(tokio::time::timeout_at(deadline, answer.send()));
+        wait_for_pending(&queue, 1).await;
+        tokio::time::advance(Duration::from_secs(14)).await;
+        assert!(!timed.is_finished());
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert!(timed.await.unwrap().is_err());
+        let snapshot = handle.snapshot().await.unwrap();
+        assert_eq!(snapshot.pending, 0);
+        assert_eq!(snapshot.in_flight, 0);
+        tokio::time::advance(Duration::from_secs(60)).await;
+        assert_eq!(polls.load(Ordering::SeqCst), 0);
     }
 }

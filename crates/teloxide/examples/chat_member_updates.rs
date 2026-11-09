@@ -59,7 +59,8 @@ async fn new_chat_member(bot: Bot, chat_member: ChatMemberUpdated) -> ResponseRe
     let username =
         user.mention().unwrap_or_else(|| html::user_mention(user.id, user.full_name().as_str()));
 
-    bot.send_message(chat_member.chat.id, format!("Welcome to {telegram_group_name} {username}!"))
+    bot.send_message(format!("Welcome to {telegram_group_name} {username}!"))
+        .chat_id(chat_member.chat.id)
         .await?;
 
     Ok(())
@@ -71,7 +72,7 @@ async fn left_chat_member(bot: Bot, chat_member: ChatMemberUpdated) -> ResponseR
     let username =
         user.mention().unwrap_or_else(|| html::user_mention(user.id, user.full_name().as_str()));
 
-    bot.send_message(chat_member.chat.id, format!("Goodbye {username}!")).await?;
+    bot.send_message(format!("Goodbye {username}!")).chat_id(chat_member.chat.id).await?;
 
     Ok(())
 }

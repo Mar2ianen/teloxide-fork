@@ -8,17 +8,17 @@ use crate::types::{Argb, CountryCode, ReactionType};
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct StoryArea {
     /// Position of the area
-    pub position: StoryAreaPosition,
+    pub position: AreaPosition,
 
     /// Type of the area
     pub r#type: StoryAreaType,
 }
 
-/// Describes the position of a clickable area within a story.
+/// Position of a rectangle on story media or a TON wallet card.
 #[derive(Clone, Debug, PartialEq)]
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
-pub struct StoryAreaPosition {
+pub struct AreaPosition {
     /// The abscissa of the area's center, as a percentage of the media width
     pub x_percentage: f64,
 
@@ -142,3 +142,6 @@ pub struct StoryAreaTypeUniqueGift {
     /// Unique name of the gift
     pub name: String,
 }
+
+/// Compatibility name for [`AreaPosition`], renamed in Bot API 10.4.
+pub type StoryAreaPosition = AreaPosition;

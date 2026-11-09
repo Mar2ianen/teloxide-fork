@@ -64,7 +64,7 @@ async fn main() {
 async fn action(bot: Bot, msg: Message, cmd: Command) -> ResponseResult<()> {
     match cmd {
         Command::Help => {
-            bot.send_message(msg.chat.id, Command::descriptions().to_string()).await?;
+            bot.send_message(Command::descriptions().to_string()).chat_id(msg.chat.id).await?;
         }
         Command::Kick => kick_user(bot, msg).await?,
         Command::Ban { time, unit } => ban_user(bot, msg, calc_restrict_time(time, unit)).await?,
@@ -82,7 +82,9 @@ async fn kick_user(bot: Bot, msg: Message) -> ResponseResult<()> {
             bot.unban_chat_member(msg.chat.id, replied.from.as_ref().unwrap().id).await?;
         }
         None => {
-            bot.send_message(msg.chat.id, "Use this command in reply to another message").await?;
+            bot.send_message("Use this command in reply to another message")
+                .chat_id(msg.chat.id)
+                .await?;
         }
     }
     Ok(())
@@ -100,7 +102,8 @@ async fn ban_user(bot: Bot, msg: Message, time: Duration) -> ResponseResult<()> 
             .await?;
         }
         None => {
-            bot.send_message(msg.chat.id, "Use this command in a reply to another message!")
+            bot.send_message("Use this command in a reply to another message!")
+                .chat_id(msg.chat.id)
                 .await?;
         }
     }
@@ -120,7 +123,8 @@ async fn mute_user(bot: Bot, msg: Message, time: Duration) -> ResponseResult<()>
             .await?;
         }
         None => {
-            bot.send_message(msg.chat.id, "Use this command in a reply to another message!")
+            bot.send_message("Use this command in a reply to another message!")
+                .chat_id(msg.chat.id)
                 .await?;
         }
     }

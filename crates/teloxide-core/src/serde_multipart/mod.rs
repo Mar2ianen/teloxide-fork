@@ -101,9 +101,13 @@ mod tests {
     #[tokio::test]
     async fn issue_473() {
         to_form_ref(
-            &payloads::SendPhoto::new(ChatId(0), InputFile::file_id("0".into())).caption_entities(
-                [MessageEntity { kind: MessageEntityKind::Url, offset: 0, length: 0 }],
-            ),
+            &payloads::SendPhoto::new(InputFile::file_id("0".into()))
+                .chat_id(ChatId(0))
+                .caption_entities([MessageEntity {
+                    kind: MessageEntityKind::Url,
+                    offset: 0,
+                    length: 0,
+                }]),
         )
         .unwrap()
         .await;
@@ -170,14 +174,12 @@ mod tests {
     #[tokio::test]
     async fn test_send_animation() {
         to_form_ref(
-            &payloads::SendAnimation::new(
-                ChatId(0),
-                InputFile::file("../../media/teloxide-core-logo.png"),
-            )
-            .caption_entities(entities())
-            .thumbnail(InputFile::read(
-                File::open("../../media/teloxide-core-logo.png").await.unwrap(),
-            )),
+            &payloads::SendAnimation::new(InputFile::file("../../media/teloxide-core-logo.png"))
+                .chat_id(ChatId(0))
+                .caption_entities(entities())
+                .thumbnail(InputFile::read(
+                    File::open("../../media/teloxide-core-logo.png").await.unwrap(),
+                )),
         )
         .unwrap()
         .await;

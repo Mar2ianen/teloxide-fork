@@ -42,6 +42,13 @@ where
     B::Err: AsResponseParameters,
 
     B::SendMessage: Clone + Send + Sync + 'static,
+    B::SendWidget: Clone + Send + Sync + 'static,
+    <B::SendWidget as HasPayload>::Payload:
+        Payload<Output: Send> + crate::outbound::OutboundPayload,
+    B::SendSharedWidget: Clone + Send + Sync + 'static,
+    <B::SendSharedWidget as HasPayload>::Payload:
+        Payload<Output: Send> + crate::outbound::OutboundPayload,
+
     <B::SendMessage as HasPayload>::Payload:
         Payload<Output: Send> + crate::outbound::OutboundPayload,
     B::SendRichMessage: Clone + Send + Sync + 'static,
@@ -114,6 +121,8 @@ where
     requester_forward! {
         send_message,
         send_rich_message,
+        send_widget,
+        send_shared_widget,
         forward_message,
         forward_messages,
         copy_message,
@@ -308,6 +317,14 @@ where
         edit_ephemeral_message_reply_markup,
         delete_ephemeral_message,
         send_rich_message_draft,
+        answer_widget_query,
+        edit_message_widget_data,
+        edit_message_widget_data_inline,
+        edit_shared_widget_data,
+        get_chat_share_theme_backdrops,
+        get_unique_gift,
+        delete_business_account_gift,
+
         approve_chat_join_request,
         decline_chat_join_request,
         get_game_high_scores

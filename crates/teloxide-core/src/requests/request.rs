@@ -83,11 +83,11 @@ where
     /// use teloxide_core::{prelude::*, requests::Request, types::ChatId, Bot};
     ///
     /// let bot = Bot::new("TOKEN");
-    /// # let chat_ids = vec![1i64, 2, 3, 4].into_iter().map(ChatId).map(Into::into).collect::<Vec<_>>();
+    /// # let chat_ids = vec![1i64, 2, 3, 4].into_iter().map(ChatId).collect::<Vec<_>>();
     ///
-    /// let mut req = bot.send_message(ChatId(0xAAAAAAAA), "Hi there!");
+    /// let mut req = bot.send_message("Hi there!").chat_id(ChatId(0xAAAAAAAA));
     /// for chat_id in chat_ids {
-    ///     req.chat_id = chat_id;
+    ///     req.chat_id = Some(chat_id.into());
     ///     req.send_ref().await.unwrap();
     /// }
     /// # };

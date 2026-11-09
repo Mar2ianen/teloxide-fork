@@ -183,8 +183,8 @@ pub struct Restricted {
     /// `true` if the user can send voice notes.
     pub can_send_voice_notes: bool,
 
-    /// `true` if the user is allowed to send animations, games, stickers and
-    /// use inline bots.
+    /// `true` if the user is allowed to send animations, games, stickers,
+    /// widgets and use inline bots.
     pub can_send_other_messages: bool,
 
     /// `true` if the user is allowed to add web page previews to their

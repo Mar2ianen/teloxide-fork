@@ -6,8 +6,8 @@ use crate::types::{
     BotSubscriptionUpdated, BusinessConnection, BusinessMessagesDeleted, CallbackQuery, Chat,
     ChatBoostRemoved, ChatBoostUpdated, ChatJoinRequest, ChatMemberUpdated, ChosenInlineResult,
     InlineQuery, ManagedBotUpdated, Message, MessageGenerationStopped, MessageReactionCountUpdated,
-    MessageReactionUpdated, PaidMediaPurchased, Poll, PollAnswer, PreCheckoutQuery, ShippingQuery,
-    User,
+    MessageReactionUpdated, PaidMediaPurchased, Poll, PollAnswer, PreCheckoutQuery,
+    SharedWidgetQuery, ShippingQuery, User, WidgetQuery,
 };
 
 /// This [object] represents an incoming update.
@@ -166,6 +166,10 @@ pub enum UpdateKind {
 
     /// A user stopped generation of a streamed message draft.
     StoppedMessageGeneration(MessageGenerationStopped),
+    /// Query from a widget in a message sent by or via the bot.
+    WidgetQuery(WidgetQuery),
+    /// Query from a forwarded shared widget.
+    SharedWidgetQuery(SharedWidgetQuery),
 
     /// An error that happened during deserialization.
     ///
@@ -199,6 +203,8 @@ impl Update {
             BusinessConnection(conn) => &conn.user,
 
             CallbackQuery(query) => &query.from,
+            WidgetQuery(query) => &query.from,
+            SharedWidgetQuery(query) => &query.from,
             ChosenInlineResult(chosen) => &chosen.from,
             MessageReaction(reaction) => return reaction.user(),
             InlineQuery(query) => &query.from,
@@ -281,6 +287,8 @@ impl Update {
             }
 
             UpdateKind::InlineQuery(query) => i1(once(&query.from)),
+            UpdateKind::WidgetQuery(query) => i1(once(&query.from)),
+            UpdateKind::SharedWidgetQuery(query) => i1(once(&query.from)),
             UpdateKind::ChosenInlineResult(query) => i1(once(&query.from)),
             UpdateKind::CallbackQuery(query) => i2(query.mentioned_users()),
             UpdateKind::ShippingQuery(query) => i1(once(&query.from)),
@@ -340,6 +348,8 @@ impl Update {
             | BusinessMessage(m)
             | EditedBusinessMessage(m) => &m.chat,
             CallbackQuery(q) => q.message.as_ref()?.chat(),
+            WidgetQuery(q) => return q.chat.as_ref(),
+            SharedWidgetQuery(_) => return None,
             ChatMember(m) => &m.chat,
             MyChatMember(m) => &m.chat,
             ChatJoinRequest(c) => &c.chat,
@@ -470,6 +480,10 @@ impl<'de> Deserialize<'de> for UpdateKind {
                     "removed_chat_boost" => {
                         decode!(ChatBoostRemoved, UpdateKind::RemovedChatBoost)
                     }
+                    "widget_query" => decode!(WidgetQuery, UpdateKind::WidgetQuery),
+                    "shared_widget_query" => {
+                        decode!(SharedWidgetQuery, UpdateKind::SharedWidgetQuery)
+                    }
                     "stopped_message_generation" => {
                         decode!(MessageGenerationStopped, UpdateKind::StoppedMessageGeneration)
                     }
@@ -554,6 +568,10 @@ impl Serialize for UpdateKind {
             UpdateKind::StoppedMessageGeneration(v) => {
                 s.serialize_newtype_variant(name, 26, "stopped_message_generation", v)
             }
+            UpdateKind::WidgetQuery(v) => s.serialize_newtype_variant(name, 27, "widget_query", v),
+            UpdateKind::SharedWidgetQuery(v) => {
+                s.serialize_newtype_variant(name, 28, "shared_widget_query", v)
+            }
             UpdateKind::Error(v) => v.serialize(s),
         }
     }
@@ -588,6 +606,8 @@ fn is_update_kind_key(key: &str) -> bool {
             | "chat_join_request"
             | "chat_boost"
             | "removed_chat_boost"
+            | "widget_query"
+            | "shared_widget_query"
             | "stopped_message_generation"
     )
 }

@@ -10,7 +10,8 @@ use crate::{
         EditMessageText, EditMessageTextInline, EditStory, GiftPremiumSubscription, PostStory,
         SavePreparedInlineMessage, SendAnimation, SendAudio, SendChecklist, SendDocument, SendGift,
         SendGiftChat, SendLivePhoto, SendMediaGroup, SendMessage, SendMessageDraft, SendPaidMedia,
-        SendPhoto, SendPoll, SendVideo, SendVoice,
+        SendPhoto, SendPoll, SendSharedWidget, SendVideo, SendVoice, SendWidget, VerifyChat,
+        VerifyUser,
     },
     prelude::Requester,
     requests::{HasPayload, Output, Request},
@@ -139,6 +140,10 @@ where
     B::SendMessage: Clone,
     B::SendMessageDraft: Clone,
     B::SendPhoto: Clone,
+    B::VerifyChat: Clone,
+    B::VerifyUser: Clone,
+    B::SendSharedWidget: Clone,
+    B::SendWidget: Clone,
     B::SendLivePhoto: Clone,
     B::SendVideo: Clone,
     B::SendAudio: Clone,
@@ -175,6 +180,10 @@ where
         send_message,
         send_message_draft,
         send_photo,
+        verify_chat,
+        verify_user,
+        send_shared_widget,
+        send_widget,
         send_live_photo,
         send_video,
         send_audio,
@@ -315,8 +324,6 @@ where
         set_sticker_keywords,
         set_sticker_mask_position,
         get_available_gifts,
-        verify_user,
-        verify_chat,
         remove_user_verification,
         remove_chat_verification,
         read_business_message,
@@ -368,6 +375,13 @@ where
         edit_ephemeral_message_reply_markup,
         delete_ephemeral_message,
         send_rich_message,
+        answer_widget_query,
+        edit_message_widget_data,
+        edit_message_widget_data_inline,
+        edit_shared_widget_data,
+        get_chat_share_theme_backdrops,
+        get_unique_gift,
+        delete_business_account_gift,
         send_rich_message_draft,
         approve_chat_join_request,
         decline_chat_join_request
@@ -412,6 +426,10 @@ impl_visit_parse_modes! {
     SendMessage => [parse_mode],
     SendMessageDraft => [parse_mode],
     SendPhoto => [parse_mode],
+    VerifyChat => [custom_description_parse_mode],
+    VerifyUser => [custom_description_parse_mode],
+    SendSharedWidget => [parse_mode],
+    SendWidget => [parse_mode],
     SendLivePhoto => [parse_mode],
     SendVideo => [parse_mode],
     SendAudio => [parse_mode],
@@ -500,50 +518,53 @@ fn visit_parse_modes_in_inline_query_result(
 ) {
     use InlineQueryResult::*;
 
-    let parse_mode = match result {
-        // Simply contain `parse_mode`
-        CachedAudio(r) => &mut r.parse_mode,
-        CachedDocument(r) => &mut r.parse_mode,
-        CachedGif(r) => &mut r.parse_mode,
-        CachedMpeg4Gif(r) => &mut r.parse_mode,
-        CachedPhoto(r) => &mut r.parse_mode,
-        CachedVideo(r) => &mut r.parse_mode,
-        CachedVoice(r) => &mut r.parse_mode,
-        Audio(r) => &mut r.parse_mode,
-        Document(r) => &mut r.parse_mode,
-        Gif(r) => &mut r.parse_mode,
-        Mpeg4Gif(r) => &mut r.parse_mode,
-        Photo(r) => &mut r.parse_mode,
-        Video(r) => &mut r.parse_mode,
-        Voice(r) => &mut r.parse_mode,
-
-        // Can contain parse mode if `InputMessageContent::Text`
-        CachedSticker(r) => match &mut r.input_message_content {
-            Some(InputMessageContent::Text(t)) => &mut t.parse_mode,
-            _ => return,
-        },
-        Article(r) => match &mut r.input_message_content {
-            InputMessageContent::Text(t) => &mut t.parse_mode,
-            _ => return,
-        },
-        Contact(r) => match &mut r.input_message_content {
-            Some(InputMessageContent::Text(t)) => &mut t.parse_mode,
-            _ => return,
-        },
-        Location(r) => match &mut r.input_message_content {
-            Some(InputMessageContent::Text(t)) => &mut t.parse_mode,
-            _ => return,
-        },
-        Venue(r) => match &mut r.input_message_content {
-            Some(InputMessageContent::Text(t)) => &mut t.parse_mode,
-            _ => return,
-        },
-
-        // Can't contain `parse_mode` at all
-        Game(_r) => return,
+    let content = match result {
+        CachedAudio(r) => r.input_message_content.as_mut(),
+        CachedDocument(r) => r.input_message_content.as_mut(),
+        CachedGif(r) => r.input_message_content.as_mut(),
+        CachedMpeg4Gif(r) => r.input_message_content.as_mut(),
+        CachedPhoto(r) => r.input_message_content.as_mut(),
+        CachedVideo(r) => r.input_message_content.as_mut(),
+        CachedVoice(r) => r.input_message_content.as_mut(),
+        Audio(r) => r.input_message_content.as_mut(),
+        Document(r) => r.input_message_content.as_mut(),
+        Gif(r) => r.input_message_content.as_mut(),
+        Mpeg4Gif(r) => r.input_message_content.as_mut(),
+        Photo(r) => r.input_message_content.as_mut(),
+        Video(r) => r.input_message_content.as_mut(),
+        Voice(r) => r.input_message_content.as_mut(),
+        CachedSticker(r) => r.input_message_content.as_mut(),
+        Contact(r) => r.input_message_content.as_mut(),
+        Location(r) => r.input_message_content.as_mut(),
+        Venue(r) => r.input_message_content.as_mut(),
+        Article(r) => Some(&mut r.input_message_content),
+        Game(_) => None,
     };
-
-    visitor(parse_mode);
+    if let Some(content) = content {
+        match content {
+            InputMessageContent::Text(t) => visitor(&mut t.parse_mode),
+            InputMessageContent::Widget(t) => visitor(&mut t.parse_mode),
+            InputMessageContent::SharedWidget(t) => visitor(&mut t.parse_mode),
+            _ => {}
+        }
+    }
+    match result {
+        CachedAudio(r) => visitor(&mut r.parse_mode),
+        CachedDocument(r) => visitor(&mut r.parse_mode),
+        CachedGif(r) => visitor(&mut r.parse_mode),
+        CachedMpeg4Gif(r) => visitor(&mut r.parse_mode),
+        CachedPhoto(r) => visitor(&mut r.parse_mode),
+        CachedVideo(r) => visitor(&mut r.parse_mode),
+        CachedVoice(r) => visitor(&mut r.parse_mode),
+        Audio(r) => visitor(&mut r.parse_mode),
+        Document(r) => visitor(&mut r.parse_mode),
+        Gif(r) => visitor(&mut r.parse_mode),
+        Mpeg4Gif(r) => visitor(&mut r.parse_mode),
+        Photo(r) => visitor(&mut r.parse_mode),
+        Video(r) => visitor(&mut r.parse_mode),
+        Voice(r) => visitor(&mut r.parse_mode),
+        CachedSticker(_) | Article(_) | Contact(_) | Location(_) | Venue(_) | Game(_) => {}
+    }
 }
 
 fn visit_parse_modes_in_input_media(

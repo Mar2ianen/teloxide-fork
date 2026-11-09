@@ -413,9 +413,11 @@ Key restrictions of the slice:
   priority, weight) is recomputed from the FINAL payload at send time;
   batch weights depend on the current batch length. Request-level
   overrides (`ScheduledRequest::priority/weight/class`) are fixed on the
-  request and applied on top of the hint at send time; the scope is not
-  overridable. Admission, rate windows and `RetryAfter` penalties always
-  follow the chat that actually receives the request. Ordering lanes are
+  request and applied on top of the hint at send time. Arbitrary scope
+  overrides are not supported; message-addressed widget edits can supply their
+  otherwise unavailable shared ID using `.shared_widget(id)` (see below).
+  Admission and penalties follow the final target, including that explicit
+  binding. Ordering lanes are
   an explicitly assigned policy (`ScheduledRequest::on_lane` for serial lanes
   or `ScheduledRequest::on_ordered_start_lane` for bounded concurrent lanes)
   and do not
@@ -426,6 +428,34 @@ Key restrictions of the slice:
   unrelated channels or numeric chats, and two usernames can never
   collide into one scheduling identity. A username and the numeric id of
   the same chat are intentionally separate identities (spec §11.2).
+- **Widget resource penalties (Bot API 10.4)**: `OutboundScope::Resource`
+  isolates edit `RetryAfter` from normal sends and widget answers. Shared edits
+  use the exact widget ID; ordinary and inline message edits default to their
+  message address, in separate namespaces. For shared public-data edits through
+  either message-addressed endpoint, bind the known shared ID explicitly:
+
+  ```rust,ignore
+  bot.edit_message_widget_data(chat_id, message_id)
+      .public_data("new shared state")
+      .shared_widget(widget_id)
+      .await?;
+  // Same penalty scope as bot.edit_shared_widget_data(widget_id).
+  ```
+
+  This typed annotation is available only on the two widget-message edit
+  payloads and never enters the wire body. It must match the final target after
+  any mutation. Use one queue and the same ID across bot instances; separate
+  queues/processes need an external coordinator. Unknown shared identities
+  remain message-local and cannot coordinate across addresses. Resource edits
+  consume global/class windows, obey global penalties, and do not consume
+  per-chat windows. Applications must pace successful shared public updates to
+  once per second across all producers; this change isolates penalties rather
+  than implementing automatic per-widget pacing. A serial lane alone provides
+  no time spacing. Incoming five-queries-per-five-seconds limits apply per
+  user across widgets, not to the global outbound answer rate. Put application
+  deadlines around the entire scheduled answer (as in `examples/widgets.rs`):
+  cancelling while queued removes admission without a later send. Cancellation
+  after HTTP dispatch cannot retract a request already transmitted.
 - **Completion barrier**: the adaptor completes the permit with
   `OutboundPermit::complete_and_await`, which resolves only after the actor
   applied the outcome. A `RetryAfter` penalty is therefore registered
@@ -523,7 +553,7 @@ pub trait OutboundPayload {
   completeness test for the whole trait.
 - **Per-request overrides**: `ScheduledRequest::priority/weight/class`
   (or `with_outbound_overrides`) apply on top of the payload
-  classification; scope is deliberately not overridable. This is what
+  classification; arbitrary scope overrides are not supported. This is what
   gives the Drafter migration its preview-vs-final priorities on the
   same payload type. Overridden weight is validated against the windows
   like any other weight (`WeightExceedsWindow` on acquire).

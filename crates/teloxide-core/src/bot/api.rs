@@ -50,12 +50,11 @@ impl Requester for Bot {
 
     type SendMessage = JsonRequest<payloads::SendMessage>;
 
-    fn send_message<C, T>(&self, chat_id: C, text: T) -> Self::SendMessage
+    fn send_message<T>(&self, text: T) -> Self::SendMessage
     where
-        C: Into<Recipient>,
         T: Into<String>,
     {
-        Self::SendMessage::new(self.clone(), payloads::SendMessage::new(chat_id, text))
+        Self::SendMessage::new(self.clone(), payloads::SendMessage::new(text))
     }
 
     type ForwardMessage = JsonRequest<payloads::ForwardMessage>;
@@ -96,65 +95,44 @@ impl Requester for Bot {
 
     type SendPhoto = MultipartRequest<payloads::SendPhoto>;
 
-    fn send_photo<C>(&self, chat_id: C, photo: InputFile) -> Self::SendPhoto
-    where
-        C: Into<Recipient>,
-    {
-        Self::SendPhoto::new(self.clone(), payloads::SendPhoto::new(chat_id, photo))
+    fn send_photo(&self, photo: InputFile) -> Self::SendPhoto {
+        Self::SendPhoto::new(self.clone(), payloads::SendPhoto::new(photo))
     }
 
     type SendAudio = MultipartRequest<payloads::SendAudio>;
 
-    fn send_audio<C>(&self, chat_id: C, audio: InputFile) -> Self::SendAudio
-    where
-        C: Into<Recipient>,
-    {
-        Self::SendAudio::new(self.clone(), payloads::SendAudio::new(chat_id, audio))
+    fn send_audio(&self, audio: InputFile) -> Self::SendAudio {
+        Self::SendAudio::new(self.clone(), payloads::SendAudio::new(audio))
     }
 
     type SendDocument = MultipartRequest<payloads::SendDocument>;
 
-    fn send_document<C>(&self, chat_id: C, document: InputFile) -> Self::SendDocument
-    where
-        C: Into<Recipient>,
-    {
-        Self::SendDocument::new(self.clone(), payloads::SendDocument::new(chat_id, document))
+    fn send_document(&self, document: InputFile) -> Self::SendDocument {
+        Self::SendDocument::new(self.clone(), payloads::SendDocument::new(document))
     }
 
     type SendVideo = MultipartRequest<payloads::SendVideo>;
 
-    fn send_video<C>(&self, chat_id: C, video: InputFile) -> Self::SendVideo
-    where
-        C: Into<Recipient>,
-    {
-        Self::SendVideo::new(self.clone(), payloads::SendVideo::new(chat_id, video))
+    fn send_video(&self, video: InputFile) -> Self::SendVideo {
+        Self::SendVideo::new(self.clone(), payloads::SendVideo::new(video))
     }
 
     type SendAnimation = MultipartRequest<payloads::SendAnimation>;
 
-    fn send_animation<C>(&self, chat_id: C, animation: InputFile) -> Self::SendAnimation
-    where
-        C: Into<Recipient>,
-    {
-        Self::SendAnimation::new(self.clone(), payloads::SendAnimation::new(chat_id, animation))
+    fn send_animation(&self, animation: InputFile) -> Self::SendAnimation {
+        Self::SendAnimation::new(self.clone(), payloads::SendAnimation::new(animation))
     }
 
     type SendVoice = MultipartRequest<payloads::SendVoice>;
 
-    fn send_voice<C>(&self, chat_id: C, voice: InputFile) -> Self::SendVoice
-    where
-        C: Into<Recipient>,
-    {
-        Self::SendVoice::new(self.clone(), payloads::SendVoice::new(chat_id, voice))
+    fn send_voice(&self, voice: InputFile) -> Self::SendVoice {
+        Self::SendVoice::new(self.clone(), payloads::SendVoice::new(voice))
     }
 
     type SendVideoNote = MultipartRequest<payloads::SendVideoNote>;
 
-    fn send_video_note<C>(&self, chat_id: C, video_note: InputFile) -> Self::SendVideoNote
-    where
-        C: Into<Recipient>,
-    {
-        Self::SendVideoNote::new(self.clone(), payloads::SendVideoNote::new(chat_id, video_note))
+    fn send_video_note(&self, video_note: InputFile) -> Self::SendVideoNote {
+        Self::SendVideoNote::new(self.clone(), payloads::SendVideoNote::new(video_note))
     }
 
     type SendPaidMedia = MultipartRequest<payloads::SendPaidMedia>;
@@ -182,14 +160,8 @@ impl Requester for Bot {
 
     type SendLocation = JsonRequest<payloads::SendLocation>;
 
-    fn send_location<C>(&self, chat_id: C, latitude: f64, longitude: f64) -> Self::SendLocation
-    where
-        C: Into<Recipient>,
-    {
-        Self::SendLocation::new(
-            self.clone(),
-            payloads::SendLocation::new(chat_id, latitude, longitude),
-        )
+    fn send_location(&self, latitude: f64, longitude: f64) -> Self::SendLocation {
+        Self::SendLocation::new(self.clone(), payloads::SendLocation::new(latitude, longitude))
     }
 
     type EditMessageLiveLocation = JsonRequest<payloads::EditMessageLiveLocation>;
@@ -283,37 +255,31 @@ impl Requester for Bot {
 
     type SendVenue = JsonRequest<payloads::SendVenue>;
 
-    fn send_venue<C, T, A>(
+    fn send_venue<T, A>(
         &self,
-        chat_id: C,
         latitude: f64,
         longitude: f64,
         title: T,
         address: A,
     ) -> Self::SendVenue
     where
-        C: Into<Recipient>,
         T: Into<String>,
         A: Into<String>,
     {
         Self::SendVenue::new(
             self.clone(),
-            payloads::SendVenue::new(chat_id, latitude, longitude, title, address),
+            payloads::SendVenue::new(latitude, longitude, title, address),
         )
     }
 
     type SendContact = JsonRequest<payloads::SendContact>;
 
-    fn send_contact<C, P, F>(&self, chat_id: C, phone_number: P, first_name: F) -> Self::SendContact
+    fn send_contact<P, F>(&self, phone_number: P, first_name: F) -> Self::SendContact
     where
-        C: Into<Recipient>,
         P: Into<String>,
         F: Into<String>,
     {
-        Self::SendContact::new(
-            self.clone(),
-            payloads::SendContact::new(chat_id, phone_number, first_name),
-        )
+        Self::SendContact::new(self.clone(), payloads::SendContact::new(phone_number, first_name))
     }
 
     type SendPoll = MultipartRequest<payloads::SendPoll>;
@@ -1287,11 +1253,8 @@ impl Requester for Bot {
 
     type SendSticker = MultipartRequest<payloads::SendSticker>;
 
-    fn send_sticker<C>(&self, chat_id: C, sticker: InputFile) -> Self::SendSticker
-    where
-        C: Into<Recipient>,
-    {
-        Self::SendSticker::new(self.clone(), payloads::SendSticker::new(chat_id, sticker))
+    fn send_sticker(&self, sticker: InputFile) -> Self::SendSticker {
+        Self::SendSticker::new(self.clone(), payloads::SendSticker::new(sticker))
     }
 
     type GetStickerSet = JsonRequest<payloads::GetStickerSet>;
@@ -1813,19 +1776,8 @@ impl Requester for Bot {
 
     type SendLivePhoto = MultipartRequest<payloads::SendLivePhoto>;
 
-    fn send_live_photo<C>(
-        &self,
-        chat_id: C,
-        live_photo: InputFile,
-        photo: InputFile,
-    ) -> Self::SendLivePhoto
-    where
-        C: Into<Recipient>,
-    {
-        Self::SendLivePhoto::new(
-            self.clone(),
-            payloads::SendLivePhoto::new(chat_id, live_photo, photo),
-        )
+    fn send_live_photo(&self, live_photo: InputFile, photo: InputFile) -> Self::SendLivePhoto {
+        Self::SendLivePhoto::new(self.clone(), payloads::SendLivePhoto::new(live_photo, photo))
     }
 
     type SendMessageDraft = JsonRequest<payloads::SendMessageDraft>;
@@ -2332,18 +2284,8 @@ impl Requester for Bot {
 
     type SendRichMessage = MultipartRequest<payloads::SendRichMessage>;
 
-    fn send_rich_message<C>(
-        &self,
-        chat_id: C,
-        rich_message: InputRichMessage,
-    ) -> Self::SendRichMessage
-    where
-        C: Into<Recipient>,
-    {
-        Self::SendRichMessage::new(
-            self.clone(),
-            payloads::SendRichMessage::new(chat_id, rich_message),
-        )
+    fn send_rich_message(&self, rich_message: InputRichMessage) -> Self::SendRichMessage {
+        Self::SendRichMessage::new(self.clone(), payloads::SendRichMessage::new(rich_message))
     }
 
     type SendRichMessageDraft = JsonRequest<payloads::SendRichMessageDraft>;
@@ -2415,6 +2357,111 @@ impl Requester for Bot {
         C: Into<Recipient>,
     {
         Self::UnpinAllChatMessages::new(self.clone(), payloads::UnpinAllChatMessages::new(chat_id))
+    }
+    type SendWidget = JsonRequest<payloads::SendWidget>;
+
+    fn send_widget<C, H>(&self, chat_id: C, html: H) -> Self::SendWidget
+    where
+        C: Into<Recipient>,
+        H: Into<String>,
+    {
+        Self::SendWidget::new(self.clone(), payloads::SendWidget::new(chat_id, html))
+    }
+    type SendSharedWidget = JsonRequest<payloads::SendSharedWidget>;
+
+    fn send_shared_widget<C, W>(&self, chat_id: C, widget_id: W) -> Self::SendSharedWidget
+    where
+        C: Into<Recipient>,
+        W: Into<String>,
+    {
+        Self::SendSharedWidget::new(
+            self.clone(),
+            payloads::SendSharedWidget::new(chat_id, widget_id),
+        )
+    }
+    type AnswerWidgetQuery = JsonRequest<payloads::AnswerWidgetQuery>;
+
+    fn answer_widget_query<W>(&self, widget_query_id: W) -> Self::AnswerWidgetQuery
+    where
+        W: Into<String>,
+    {
+        Self::AnswerWidgetQuery::new(
+            self.clone(),
+            payloads::AnswerWidgetQuery::new(widget_query_id),
+        )
+    }
+    type EditMessageWidgetData = JsonRequest<payloads::EditMessageWidgetData>;
+
+    fn edit_message_widget_data<C>(
+        &self,
+        chat_id: C,
+        message_id: MessageId,
+    ) -> Self::EditMessageWidgetData
+    where
+        C: Into<Recipient>,
+    {
+        Self::EditMessageWidgetData::new(
+            self.clone(),
+            payloads::EditMessageWidgetData::new(chat_id, message_id),
+        )
+    }
+    type EditMessageWidgetDataInline = JsonRequest<payloads::EditMessageWidgetDataInline>;
+
+    fn edit_message_widget_data_inline<I>(
+        &self,
+        inline_message_id: I,
+    ) -> Self::EditMessageWidgetDataInline
+    where
+        I: Into<String>,
+    {
+        Self::EditMessageWidgetDataInline::new(
+            self.clone(),
+            payloads::EditMessageWidgetDataInline::new(inline_message_id),
+        )
+    }
+    type EditSharedWidgetData = JsonRequest<payloads::EditSharedWidgetData>;
+
+    fn edit_shared_widget_data<W, P>(
+        &self,
+        widget_id: W,
+        public_data: P,
+    ) -> Self::EditSharedWidgetData
+    where
+        W: Into<String>,
+        P: Into<String>,
+    {
+        Self::EditSharedWidgetData::new(
+            self.clone(),
+            payloads::EditSharedWidgetData::new(widget_id, public_data),
+        )
+    }
+    type GetChatShareThemeBackdrops = JsonRequest<payloads::GetChatShareThemeBackdrops>;
+
+    fn get_chat_share_theme_backdrops(&self) -> Self::GetChatShareThemeBackdrops {
+        Self::GetChatShareThemeBackdrops::new(
+            self.clone(),
+            payloads::GetChatShareThemeBackdrops::new(),
+        )
+    }
+    type GetUniqueGift = JsonRequest<payloads::GetUniqueGift>;
+
+    fn get_unique_gift<N>(&self, name: N) -> Self::GetUniqueGift
+    where
+        N: Into<String>,
+    {
+        Self::GetUniqueGift::new(self.clone(), payloads::GetUniqueGift::new(name))
+    }
+    type DeleteBusinessAccountGift = JsonRequest<payloads::DeleteBusinessAccountGift>;
+
+    fn delete_business_account_gift(
+        &self,
+        business_connection_id: BusinessConnectionId,
+        owned_gift_id: OwnedGiftId,
+    ) -> Self::DeleteBusinessAccountGift {
+        Self::DeleteBusinessAccountGift::new(
+            self.clone(),
+            payloads::DeleteBusinessAccountGift::new(business_connection_id, owned_gift_id),
+        )
     }
 }
 

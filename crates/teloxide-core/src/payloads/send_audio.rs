@@ -9,6 +9,7 @@ use crate::types::{
 
 impl_payload! {
     @[multipart = audio, thumbnail]
+    @[validate = crate::requests::validation::validate_ephemeral_send_target]
     /// Use this method to send audio files, if you want Telegram clients to display them in the music player. Your audio must be in the .MP3 or .M4A format. On success, the sent [`Message`] is returned. Bots can currently send audio files of up to 50 MB in size, this limit may be changed in the future.
     ///
     /// For sending voice messages, use the [`SendVoice`] method instead.
@@ -18,8 +19,6 @@ impl_payload! {
     #[derive(Debug, Clone, Serialize)]
     pub SendAudio (SendAudioSetters) => Message {
         required {
-            /// Unique identifier for the target chat or username of the target channel (in the format `@channelusername`)
-            pub chat_id: Recipient [into],
             /// Audio file to send. Pass a file_id as FileId to send an audio file that exists on the Telegram servers (recommended), pass an HTTP URL as a String for Telegram to get an audio file from the Internet, or upload a new one using multipart/form-data. [More info on Sending Files »]
             ///
             /// [More info on Sending Files »]: crate::types::InputFile
@@ -28,6 +27,8 @@ impl_payload! {
         optional {
             /// Unique identifier of the business connection on behalf of which the message will be sent
             pub business_connection_id: BusinessConnectionId,
+            /// Unique identifier for the target chat or username of the target channel (in the format `@channelusername`). Required unless sending a callback-only ephemeral reply; ignored when ephemeral_message_parameters.receiver_user_id is omitted.
+            pub chat_id: Recipient [into],
             /// Unique identifier for the target message thread (topic) of the forum; for forum supergroups only
             pub message_thread_id: ThreadId,
             /// Identifier of the direct messages topic to which the message will be sent; required if the message is sent to a direct messages chat
@@ -78,7 +79,10 @@ impl_payload! {
 impl crate::outbound::OutboundPayload for SendAudio {
     fn outbound_hint(&self) -> crate::outbound::OutboundHint {
         crate::outbound::OutboundHint {
-            scope: crate::outbound::classify::scope_of_recipient(&self.chat_id),
+            scope: crate::outbound::classify::ephemeral_recipient_scope(
+                &self.chat_id,
+                &self.ephemeral_message_parameters,
+            ),
             class: crate::outbound::OutboundClass::new(crate::outbound::class::MESSAGE_SEND),
             priority: crate::outbound::OutboundPriority::NORMAL,
             weight: std::num::NonZeroU32::new(1).unwrap(),

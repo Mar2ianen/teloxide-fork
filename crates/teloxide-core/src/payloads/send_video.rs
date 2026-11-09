@@ -10,6 +10,7 @@ use crate::types::{
 
 impl_payload! {
     @[multipart = video, thumbnail, cover]
+    @[validate = crate::requests::validation::validate_ephemeral_send_target]
     /// Use this method to send video files, Telegram clients support mp4 videos (other formats may be sent as [`Document`]). On success, the sent [`Message`] is returned. Bots can currently send video files of up to 50 MB in size, this limit may be changed in the future.
     ///
     /// [`Document`]: crate::types::Document
@@ -17,8 +18,6 @@ impl_payload! {
     #[derive(Debug, Clone, Serialize)]
     pub SendVideo (SendVideoSetters) => Message {
         required {
-            /// Unique identifier for the target chat or username of the target channel (in the format `@channelusername`)
-            pub chat_id: Recipient [into],
             /// Video to send. Pass a file_id as FileId to send a video that exists on the Telegram servers (recommended), pass an HTTP URL as a String for Telegram to get a video from the Internet, or upload a new video using multipart/form-data. [More info on Sending Files »]
             ///
             /// [More info on Sending Files »]: crate::types::InputFile
@@ -27,6 +26,8 @@ impl_payload! {
         optional {
             /// Unique identifier of the business connection on behalf of which the message will be sent
             pub business_connection_id: BusinessConnectionId,
+            /// Unique identifier for the target chat or username of the target channel (in the format `@channelusername`). Required unless sending a callback-only ephemeral reply; ignored when ephemeral_message_parameters.receiver_user_id is omitted.
+            pub chat_id: Recipient [into],
             /// Unique identifier for the target message thread (topic) of the forum; for forum supergroups only
             pub message_thread_id: ThreadId,
             /// Identifier of the direct messages topic to which the message will be sent; required if the message is sent to a direct messages chat
@@ -89,7 +90,10 @@ impl_payload! {
 impl crate::outbound::OutboundPayload for SendVideo {
     fn outbound_hint(&self) -> crate::outbound::OutboundHint {
         crate::outbound::OutboundHint {
-            scope: crate::outbound::classify::scope_of_recipient(&self.chat_id),
+            scope: crate::outbound::classify::ephemeral_recipient_scope(
+                &self.chat_id,
+                &self.ephemeral_message_parameters,
+            ),
             class: crate::outbound::OutboundClass::new(crate::outbound::class::MESSAGE_SEND),
             priority: crate::outbound::OutboundPriority::NORMAL,
             weight: std::num::NonZeroU32::new(1).unwrap(),

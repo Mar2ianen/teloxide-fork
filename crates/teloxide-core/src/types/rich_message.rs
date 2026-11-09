@@ -16,7 +16,7 @@ pub struct RichMessage {
 
 /// A button embedded in a rich message.
 #[serde_with::skip_serializing_none]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct RichMessageButton {
     pub text: RichText,
@@ -80,7 +80,7 @@ impl RichMessageButton {
 }
 
 /// Rich-formatted inline text.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum RichText {
@@ -137,7 +137,7 @@ impl From<Vec<Self>> for RichText {
 }
 
 /// A typed rich-text object.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub enum RichTextObject {
     Bold(RichTextBold),
@@ -157,6 +157,7 @@ pub enum RichTextObject {
     EmailAddress(RichTextEmailAddress),
     PhoneNumber(RichTextPhoneNumber),
     BankCardNumber(RichTextBankCardNumber),
+    TonAddress(RichTextTonAddress),
     Mention(RichTextMention),
     Hashtag(RichTextHashtag),
     Cashtag(RichTextCashtag),
@@ -190,6 +191,7 @@ fn is_known_rich_text_type(type_name: &str) -> bool {
             | "email_address"
             | "phone_number"
             | "bank_card_number"
+            | "ton_address"
             | "mention"
             | "hashtag"
             | "cashtag"
@@ -242,6 +244,7 @@ enum KnownRichTextObject {
     EmailAddress(RichTextEmailAddress),
     PhoneNumber(RichTextPhoneNumber),
     BankCardNumber(RichTextBankCardNumber),
+    TonAddress(RichTextTonAddress),
     Mention(RichTextMention),
     Hashtag(RichTextHashtag),
     Cashtag(RichTextCashtag),
@@ -275,6 +278,7 @@ impl From<KnownRichTextObject> for RichTextObject {
             KnownRichTextObject::EmailAddress(value) => Self::EmailAddress(value),
             KnownRichTextObject::PhoneNumber(value) => Self::PhoneNumber(value),
             KnownRichTextObject::BankCardNumber(value) => Self::BankCardNumber(value),
+            KnownRichTextObject::TonAddress(value) => Self::TonAddress(value),
             KnownRichTextObject::Mention(value) => Self::Mention(value),
             KnownRichTextObject::Hashtag(value) => Self::Hashtag(value),
             KnownRichTextObject::Cashtag(value) => Self::Cashtag(value),
@@ -344,6 +348,7 @@ impl Serialize for RichTextObject {
             Self::BankCardNumber(value) => {
                 serialize_rich_text_object(serializer, "bank_card_number", value)
             }
+            Self::TonAddress(value) => serialize_rich_text_object(serializer, "ton_address", value),
             Self::Mention(value) => serialize_rich_text_object(serializer, "mention", value),
             Self::Hashtag(value) => serialize_rich_text_object(serializer, "hashtag", value),
             Self::Cashtag(value) => serialize_rich_text_object(serializer, "cashtag", value),
@@ -373,7 +378,7 @@ macro_rules! rich_text_from {
 macro_rules! rich_text_wrapper {
     ($($type:ident => $variant:ident),+ $(,)?) => {
         $(
-            #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+            #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
             #[cfg_attr(test, derive(schemars::JsonSchema))]
             pub struct $type {
                 pub text: Box<RichText>,
@@ -404,7 +409,7 @@ rich_text_wrapper! {
 
 macro_rules! rich_text_link {
     ($type:ident, $variant:ident, $field:ident) => {
-        #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+        #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
         #[cfg_attr(test, derive(schemars::JsonSchema))]
         pub struct $type {
             pub text: Box<RichText>,
@@ -415,7 +420,7 @@ macro_rules! rich_text_link {
     };
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct RichTextDateTime {
     pub text: Box<RichText>,
@@ -424,7 +429,7 @@ pub struct RichTextDateTime {
 }
 rich_text_from!(RichTextDateTime, DateTime);
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct RichTextTextMention {
     pub text: Box<RichText>,
@@ -432,7 +437,7 @@ pub struct RichTextTextMention {
 }
 rich_text_from!(RichTextTextMention, TextMention);
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct RichTextCustomEmoji {
     pub custom_emoji_id: String,
@@ -440,7 +445,7 @@ pub struct RichTextCustomEmoji {
 }
 rich_text_from!(RichTextCustomEmoji, CustomEmoji);
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct RichTextMathematicalExpression {
     pub expression: String,
@@ -451,12 +456,13 @@ rich_text_link!(RichTextUrl, Url, url);
 rich_text_link!(RichTextEmailAddress, EmailAddress, email_address);
 rich_text_link!(RichTextPhoneNumber, PhoneNumber, phone_number);
 rich_text_link!(RichTextBankCardNumber, BankCardNumber, bank_card_number);
+rich_text_link!(RichTextTonAddress, TonAddress, address);
 rich_text_link!(RichTextMention, Mention, username);
 rich_text_link!(RichTextHashtag, Hashtag, hashtag);
 rich_text_link!(RichTextCashtag, Cashtag, cashtag);
 rich_text_link!(RichTextBotCommand, BotCommand, bot_command);
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct RichTextButton {
     pub button: Box<RichMessageButton>,
@@ -467,14 +473,14 @@ rich_text_link!(RichTextAnchorLink, AnchorLink, anchor_name);
 rich_text_link!(RichTextReference, Reference, name);
 rich_text_link!(RichTextReferenceLink, ReferenceLink, reference_name);
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct RichTextAnchor {
     pub name: String,
 }
 rich_text_from!(RichTextAnchor, Anchor);
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct RichBlockCaption {
     pub text: RichText,

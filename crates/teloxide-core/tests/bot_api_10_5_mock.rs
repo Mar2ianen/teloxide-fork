@@ -222,7 +222,8 @@ async fn cache_me_invalidates_all_clones_after_successful_settings_update() {
             let response = body.to_string();
             write!(
                 client,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \
+                 {}\r\nConnection: close\r\n\r\n{}",
                 response.len(),
                 response
             )

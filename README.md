@@ -18,9 +18,9 @@
 </div>
 
 This repository is a maintained fork of [`teloxide`](https://github.com/teloxide/teloxide).
-The 0.21.0 release candidate introduced Bot API 10.4 support. The current
-development line adds Bot API 10.5; fork-specific runtime layers remain opt-in
-features documented below.
+The 0.21.0-rc.1 release candidate introduced Bot API 10.4 support. The
+0.21.0-rc.2 candidate adds Bot API 10.5; fork-specific runtime layers remain
+opt-in features documented below.
 
 ## Highlights
 
@@ -78,7 +78,7 @@ parser landmarks, not safe message-segmentation boundaries.
 Enable only the layer an application needs:
 
 ```toml
-teloxide = { version = "0.21.0-rc.1", features = ["macros", "drafter", "rich-text"] }
+teloxide = { version = "0.21.0-rc.2", features = ["macros", "drafter", "rich-text"] }
 ```
 
 The Drafter example requires the feature explicitly:
@@ -98,7 +98,7 @@ module rustdoc and the time renderer API docs.
 
 ### Telegram Bot API 10.5
 
-The development line now includes Bot API 10.5: bot settings via `setMySettings`,
+The 0.21.0-rc.2 candidate includes Bot API 10.5: bot settings via `setMySettings`,
 the `BotFullInfo` response from `getMe`, invited-user write-access events and
 expandable rich quotes containing arbitrary blocks. See the
 [official-source audit](docs/bot-api-10.5/README.md) and

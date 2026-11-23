@@ -178,8 +178,9 @@ async fn cache_me_invalidates_all_clones_after_successful_settings_update() {
     let server = thread::spawn(move || {
         let mut calls = Vec::new();
         let mut me_fetches = 0;
+        let mut settings_calls = 0;
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        while calls.len() < 4 && std::time::Instant::now() < deadline {
+        while calls.len() < 7 && std::time::Instant::now() < deadline {
             let (mut client, _) = match listener.accept() {
                 Ok(connection) => connection,
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -192,9 +193,9 @@ async fn cache_me_invalidates_all_clones_after_successful_settings_update() {
             let mut request = [0u8; 8192];
             let size = client.read(&mut request).unwrap();
             let request = String::from_utf8_lossy(&request[..size]).to_ascii_lowercase();
-            let body = if request.contains("/getme ") {
+            let (status, body) = if request.contains("/getme ") {
                 me_fetches += 1;
-                json!({
+                ("200 OK", json!({
                     "ok": true,
                     "result": {
                         "id": 123,
@@ -213,16 +214,31 @@ async fn cache_me_invalidates_all_clones_after_successful_settings_update() {
                         "can_manage_bots": false,
                         "has_main_web_app": false
                     }
-                })
+                }))
             } else if request.contains("/setmysettings ") {
-                json!({"ok": true, "result": true})
+                settings_calls += 1;
+                if settings_calls == 1 {
+                    (
+                        "429 Too Many Requests",
+                        json!({
+                            "ok": false,
+                            "error_code": 429,
+                            "description": "Too Many Requests: retry after 1",
+                            "parameters": {"retry_after": 1}
+                        }),
+                    )
+                } else {
+                    ("200 OK", json!({"ok": true, "result": true}))
+                }
+            } else if request.contains("/setmyname ") {
+                ("200 OK", json!({"ok": true, "result": true}))
             } else {
                 panic!("unexpected mock API request: {request}");
             };
             let response = body.to_string();
             write!(
                 client,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: \
                  {}\r\nConnection: close\r\n\r\n{}",
                 response.len(),
                 response
@@ -240,17 +256,30 @@ async fn cache_me_invalidates_all_clones_after_successful_settings_update() {
     assert_eq!(first.user.first_name, "generation-1");
     assert_eq!(cloned.get_me().await.unwrap().user.first_name, "generation-1");
 
-    // The update is lazy and should only invalidate after Telegram confirms it.
+    // Constructing or dropping a lazy request never changes the cache.
+    drop(bot.set_my_settings());
+    assert_eq!(bot.get_me().await.unwrap().user.first_name, "generation-1");
+
+    // An API error must also preserve the previously known bot info.
+    assert!(cloned.set_my_settings().await.is_err());
+    assert_eq!(bot.get_me().await.unwrap().user.first_name, "generation-1");
+
+    // A successful settings update invalidates the entire clone family.
     cloned.set_my_settings().await.unwrap();
     assert_eq!(bot.get_me().await.unwrap().user.first_name, "generation-2");
     assert_eq!(cloned.get_me().await.unwrap().user.first_name, "generation-2");
 
-    // clear() is shared, not a clone-local Arc::make_mut operation.
-    assert!(cloned.clear().is_some());
+    // setMyName also changes getMe data, so it needs the same invalidation.
+    cloned.set_my_name().await.unwrap();
     assert_eq!(bot.get_me().await.unwrap().user.first_name, "generation-3");
 
+    // clear() is shared, not a clone-local Arc::make_mut operation.
+    assert!(cloned.clear().is_some());
+    assert_eq!(bot.get_me().await.unwrap().user.first_name, "generation-4");
+
     let calls = server.join().unwrap();
-    assert_eq!(calls.len(), 4);
-    assert_eq!(calls.iter().filter(|request| request.contains("/getme ")).count(), 3);
-    assert_eq!(calls.iter().filter(|request| request.contains("/setmysettings ")).count(), 1);
+    assert_eq!(calls.len(), 7);
+    assert_eq!(calls.iter().filter(|request| request.contains("/getme ")).count(), 4);
+    assert_eq!(calls.iter().filter(|request| request.contains("/setmysettings ")).count(), 2);
+    assert_eq!(calls.iter().filter(|request| request.contains("/setmyname ")).count(), 1);
 }

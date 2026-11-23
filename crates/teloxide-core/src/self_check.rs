@@ -69,10 +69,7 @@ pub fn inspect_bot(info: BotFullInfo, expected: &ExpectedBotCapabilities) -> Bot
 
     if let Some(wanted) = expected.id {
         if info.user.id != wanted {
-            issues.push(BotSelfCheckIssue::IdMismatch {
-                expected: wanted,
-                actual: info.user.id,
-            });
+            issues.push(BotSelfCheckIssue::IdMismatch { expected: wanted, actual: info.user.id });
         }
     }
 
@@ -295,10 +292,9 @@ mod tests {
         };
         let result = inspect_bot(info(), &expected);
         assert_eq!(result.issues.len(), 4);
-        assert!(result.issues.contains(&BotSelfCheckIssue::IdMismatch {
-            expected: UserId(43),
-            actual: UserId(42),
-        }));
+        assert!(result
+            .issues
+            .contains(&BotSelfCheckIssue::IdMismatch { expected: UserId(43), actual: UserId(42) }));
         assert!(result.issues.contains(&BotSelfCheckIssue::UsernameMismatch {
             expected: "another_bot".into(),
             actual: Some("example_bot".into()),

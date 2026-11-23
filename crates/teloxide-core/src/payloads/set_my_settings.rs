@@ -5,6 +5,7 @@ use serde::Serialize;
 use crate::types::{CallbackQueryMode, True};
 
 impl_payload! {
+    @[validate = crate::requests::validation::validate_set_my_settings]
     /// Use this method to change settings of the bot. Settings that aren't specified remain unchanged. Returns True on success.
     #[derive(Debug, PartialEq, Eq, Hash, Default, Clone, Serialize)]
     pub SetMySettings (SetMySettingsSetters) => True {

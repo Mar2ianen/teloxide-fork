@@ -1,0 +1,129 @@
+name: Deep Rust quality
+
+on:
+  pull_request:
+    branches: [master, next]
+  push:
+    branches: [next]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deep-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  property-and-features:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install nextest and cargo-hack
+        run: |
+          cargo +stable install cargo-nextest --locked
+          cargo +stable install cargo-hack --locked
+      - name: Property tests and offline API contracts
+        run: |
+          cargo +stable nextest run -p teloxide-core --features full --test bot_api_10_5_properties --test bot_api_10_5_mock --test bot_api_10_5_integration
+      - name: Cargo feature matrix (excluding intentionally nightly-only feature)
+        run: |
+          cargo +stable hack check -p teloxide-core --each-feature --exclude-features nightly --no-dev-deps
+
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: nightly-2025-06-12
+          components: rustfmt
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Select pinned rustfmt for instrumented codegen checks
+        run: echo "RUSTFMT=$(rustup which --toolchain nightly-2025-06-12 rustfmt)" >> "$GITHUB_ENV"
+      - name: Install coverage tool
+        run: cargo +stable install cargo-llvm-cov --locked
+      - name: Measure core coverage
+        run: |
+          mkdir -p coverage
+          cargo +stable llvm-cov -p teloxide-core --features full --lcov --output-path coverage/core.lcov
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: teloxide-core-lcov
+          path: coverage/core.lcov
+          if-no-files-found: warn
+          retention-days: 14
+
+  mutants:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: stable
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: nightly-2025-06-12
+          components: rustfmt
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Select pinned rustfmt for mutation baseline
+        run: echo "RUSTFMT=$(rustup which --toolchain nightly-2025-06-12 rustfmt)" >> "$GITHUB_ENV"
+      - name: Install mutation runner
+        run: cargo +stable install cargo-mutants --locked
+      - name: Mutate new capability self checks
+        run: |
+          cargo +stable mutants -p teloxide-core --file crates/teloxide-core/src/self_check.rs --timeout 90 -- --features full
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: mutation-results
+          path: mutants.out/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: nightly
+          components: rust-src
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz --locked
+      - name: Fuzz untrusted Telegram updates
+        run: cargo +nightly fuzz run updates -- -max_total_time=20 -max_len=16384
+      - name: Fuzz getMe and rich responses
+        run: cargo +nightly fuzz run bot_info_and_rich -- -max_total_time=60 -max_len=16384
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: fuzz-reproducers
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+          retention-days: 14

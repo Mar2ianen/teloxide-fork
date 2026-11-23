@@ -20,6 +20,10 @@ categories = ["web-programming", "api-bindings", "asynchronous"]
 [features]
 default = ["native-tls", "ctrlc_handler", "teloxide-core/default"]
 
+# Backwards-compatible alias: outbound scheduling is now built into core.
+# Existing downstream crates still request this feature explicitly.
+outbound = []
+
 # Optional runtime layers that are useful to applications but are not part of
 # the core Telegram transport.
 drafter = ["tokio/sync", "tokio/time", "tokio/macros"]

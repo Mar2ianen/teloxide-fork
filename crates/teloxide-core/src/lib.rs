@@ -124,8 +124,8 @@ pub mod net;
 pub mod payloads;
 pub mod prelude;
 pub mod requests;
-pub mod types;
 pub mod self_check;
+pub mod types;
 
 // reexported
 mod bot;

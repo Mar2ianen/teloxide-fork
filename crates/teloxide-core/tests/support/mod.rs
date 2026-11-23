@@ -4,11 +4,7 @@
 //! Wait for the header terminator and all Content-Length body bytes before
 //! responding, so tests cannot succeed against an incomplete request.
 
-use std::{
-    io::Read,
-    net::TcpStream,
-    time::Duration,
-};
+use std::{io::Read, net::TcpStream, time::Duration};
 
 const MAX_HEADER_BYTES: usize = 64 * 1024;
 const MAX_REQUEST_BYTES: usize = 2 * 1024 * 1024;
@@ -28,7 +24,8 @@ pub fn read_http_request(stream: &mut TcpStream) -> Vec<u8> {
         request.extend_from_slice(&chunk[..size]);
     };
 
-    let headers = std::str::from_utf8(&request[..header_end]).expect("HTTP request headers are UTF-8");
+    let headers =
+        std::str::from_utf8(&request[..header_end]).expect("HTTP request headers are UTF-8");
     let mut content_length = None;
     for line in headers.lines().skip(1) {
         let Some((name, value)) = line.split_once(':') else {
@@ -40,11 +37,15 @@ pub fn read_http_request(stream: &mut TcpStream) -> Vec<u8> {
         } else if name.eq_ignore_ascii_case("transfer-encoding") {
             // The test requests are JSON with a known length. Reject other
             // framing explicitly rather than accidentally reading a prefix.
-            assert!(value.trim().eq_ignore_ascii_case("identity"), "unsupported HTTP transfer encoding in mock test: {value}");
+            assert!(
+                value.trim().eq_ignore_ascii_case("identity"),
+                "unsupported HTTP transfer encoding in mock test: {value}"
+            );
         }
     }
 
-    let total = header_end.checked_add(content_length.unwrap_or(0)).expect("request length overflow");
+    let total =
+        header_end.checked_add(content_length.unwrap_or(0)).expect("request length overflow");
     assert!(total <= MAX_REQUEST_BYTES, "HTTP mock request exceeded size limit");
     while request.len() < total {
         let size = stream.read(&mut chunk).expect("reading HTTP test request body");

@@ -565,6 +565,14 @@ macro_rules! requester_forward {
             $body!(get_me this ())
         }
     };
+    (@method set_my_settings $body:ident $ty:ident) => {
+        type SetMySettings = $ty![SetMySettings];
+
+        fn set_my_settings(&self, ) -> Self::SetMySettings {
+            let this = self;
+            $body!(set_my_settings this ())
+        }
+    };
     (@method log_out $body:ident $ty:ident) => {
         type LogOut = $ty![LogOut];
 

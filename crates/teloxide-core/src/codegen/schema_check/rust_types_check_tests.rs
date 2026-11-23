@@ -13,6 +13,14 @@ fn test_rust_objects() {
     let exceptions = Exceptions::new(vec![
         Exception::ExpandTelegramReference { reference: "InputFile".to_owned() },
         Exception::IgnoreObjectField {
+            object: "InputRichBlockExpandableBlockQuotation".to_owned(),
+            field_name: "blocks".to_owned(),
+        },
+        Exception::IgnoreObjectField {
+            object: "RichBlockExpandableBlockQuotation".to_owned(),
+            field_name: "blocks".to_owned(),
+        },
+        Exception::IgnoreObjectField {
             object: "ChatMember".to_owned(),
             field_name: "status".to_owned(),
         },
@@ -1963,6 +1971,27 @@ fn test_rust_objects() {
         api_schema.clone(),
         schema_for!(GameHighScore),
         "GameHighScore".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(BotFullInfo),
+        "BotFullInfo".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(RichBlockExpandableBlockQuotation),
+        "RichBlockExpandableBlockQuotation".to_owned(),
+        &mut errors,
+        &exceptions,
+    );
+    check_object(
+        api_schema.clone(),
+        schema_for!(InputRichBlockExpandableBlockQuotation),
+        "InputRichBlockExpandableBlockQuotation".to_owned(),
         &mut errors,
         &exceptions,
     );

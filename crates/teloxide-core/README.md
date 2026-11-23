@@ -12,7 +12,7 @@
     <img src="https://img.shields.io/badge/license-MIT-blue.svg">
   </a>
   <a href="https://core.telegram.org/bots/api">
-    <img src="https://img.shields.io/badge/API%20coverage-Bot%20API%2010.4%20core-yellowgreen.svg">
+    <img src="https://img.shields.io/badge/API%20coverage-Bot%20API%2010.5%20core-yellowgreen.svg">
   </a>
   <a href="https://crates.io/crates/teloxide_core">
     <img src="https://img.shields.io/crates/v/teloxide_core.svg">
@@ -29,12 +29,13 @@ teloxide-core = "0.17.0-rc.1"
 ```
 _Compiler support: requires rustc 1.85+_.
 
-The 10.4 delta adds widgets, wallet/query types, share themes, rich quotes,
-callback-only ephemeral replies and gift methods. See the
-[official-source audit](../../docs/bot-api-10.4/README.md) for the coverage checklist
-and server/client constraints.
+The 10.5 delta adds bot settings and the full bot-info response, write-access
+events for owner-invited users and arbitrary blocks in expandable quotations.
+See the [official-source audit](../../docs/bot-api-10.5/README.md) for the
+coverage checklist. The preceding 10.4 audit is available at
+[`docs/bot-api-10.4`](../../docs/bot-api-10.4/README.md).
 
-The current development line exposes Telegram Bot API 10.4, including rich-message
+The current development line exposes Telegram Bot API 10.5, including rich-message
 buttons and document blocks, expandable quotations, compact tables, ephemeral
 message parameters and editing methods, native draft Stop controls, disabled
 buttons, force-reply flags, stopped-generation updates and new service

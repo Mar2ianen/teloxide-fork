@@ -352,6 +352,7 @@ where
         get_managed_bot_access_settings,
         set_managed_bot_access_settings,
         set_my_profile_photo,
+        set_my_settings,
         remove_my_profile_photo,
         get_user_gifts,
         get_chat_gifts,
@@ -1393,6 +1394,8 @@ trait ErasableRequester<'a> {
         &self,
         photo: InputProfilePhoto,
     ) -> ErasedRequest<'a, SetMyProfilePhoto, Self::Err>;
+
+    fn set_my_settings(&self) -> ErasedRequest<'a, SetMySettings, Self::Err>;
 
     fn remove_my_profile_photo(&self) -> ErasedRequest<'a, RemoveMyProfilePhoto, Self::Err>;
 
@@ -2897,6 +2900,10 @@ where
         photo: InputProfilePhoto,
     ) -> ErasedRequest<'a, SetMyProfilePhoto, Self::Err> {
         Requester::set_my_profile_photo(self, photo).erase()
+    }
+
+    fn set_my_settings(&self) -> ErasedRequest<'a, SetMySettings, Self::Err> {
+        Requester::set_my_settings(self).erase()
     }
 
     fn remove_my_profile_photo(&self) -> ErasedRequest<'a, RemoveMyProfilePhoto, Self::Err> {

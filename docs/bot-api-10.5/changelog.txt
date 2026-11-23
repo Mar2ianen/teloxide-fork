@@ -1,0 +1,13 @@
+Bot API 10.5 — November 22, 2026
+
+Bot Settings
+- Added setMySettings for inline mode, privacy mode, group membership, private-chat topics, and callback-query delivery mode.
+- Added callback_query_mode values default, auto, and inline; callback queries from bot-authored regular messages may expose inline_message_id according to this setting.
+- Added has_topic_sidebar to setMySettings.
+- Split BotFullInfo from User and changed getMe to return BotFullInfo. getMe-only fields were removed from User.
+- Added active_usernames, inline_query_placeholder, needs_inline_query_location, and has_topic_sidebar to BotFullInfo.
+
+General
+- Bot owners can invite up to 10 users to the bot's private chat via https://t.me/botinvite/<bot_username>; invited users can receive messages from the bot.
+- Added inviter to WriteAccessAllowed service messages for owner-invited users.
+- Replaced text with blocks in RichBlockExpandableBlockQuotation and InputRichBlockExpandableBlockQuotation so expandable quotes can contain arbitrary rich blocks.

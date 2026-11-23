@@ -2647,6 +2647,7 @@ impl Message {
             .chain(flatten(self.new_chat_members()))
             .chain(self.left_chat_member())
             .chain(self.forward_from_user())
+            .chain(self.write_access_allowed().and_then(|access| access.inviter.as_ref()))
             .chain(flatten(self.game().map(Game::mentioned_users)))
             .chain(flatten(self.entities().map(mentioned_users_from_entities)))
             .chain(flatten(self.caption_entities().map(mentioned_users_from_entities)))
@@ -3457,11 +3458,6 @@ mod tests {
                     language_code: None,
                     is_premium: false,
                     added_to_attachment_menu: false,
-                    supports_guest_queries: false,
-                    supports_join_request_queries: false,
-                    has_topics_enabled: false,
-                    allows_users_to_create_topics: false,
-                    can_manage_bots: false,
                 }],
                 additional_chat_count: None,
                 premium_subscription_month_count: Some(6),

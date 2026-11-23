@@ -1087,6 +1087,8 @@ where
     B::SetMyProfilePhoto: Clone + std::marker::Send + 'static,
     <B::SetMyProfilePhoto as HasPayload>::Payload:
         Payload<Output: std::marker::Send> + OutboundPayload,
+    B::SetMySettings: Clone + std::marker::Send + 'static,
+    <B::SetMySettings as HasPayload>::Payload: Payload<Output: std::marker::Send> + OutboundPayload,
     B::SetMyShortDescription: Clone + std::marker::Send + 'static,
     <B::SetMyShortDescription as HasPayload>::Payload:
         Payload<Output: std::marker::Send> + OutboundPayload,
@@ -1341,6 +1343,7 @@ where
                 set_my_description,
                 set_my_name,
                 set_my_profile_photo,
+                set_my_settings,
                 set_my_short_description,
                 set_passport_data_errors,
                 set_sticker_emoji_list,
@@ -1755,6 +1758,7 @@ mod tests {
             set_my_description,
             set_my_name,
             set_my_profile_photo,
+            set_my_settings,
             set_my_short_description,
             set_passport_data_errors,
             set_sticker_emoji_list,

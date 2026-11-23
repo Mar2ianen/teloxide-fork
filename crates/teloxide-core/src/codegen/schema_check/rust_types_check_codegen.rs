@@ -462,6 +462,14 @@ fn extract_fields_from_properties_object(
     let mut fields = vec![];
 
     for (name, prop) in rust_object {
+        // Some custom-serde union fields have no faithful schemars shape. Skip
+        // these before walking their schema, which may contain unsupported JSON values.
+        if exceptions.is_field_ignored(name.clone())
+            || exceptions.is_object_field_ignored(initial_object_name.clone(), name.clone())
+        {
+            continue;
+        }
+
         let (required, mut kind) = get_type(prop, initial_object_name.clone());
 
         // Here we flatten the types like ChatId and others
@@ -1020,6 +1028,16 @@ mod tests {
             Exception::IgnoreObjectField {
                 object: "ChatMember".to_owned(),
                 field_name: "status".to_owned(),
+            },
+            // Schemars cannot express these custom-serde tagged block unions as
+            // the named RichBlock/InputRichBlock references in Telegram's schema.
+            Exception::IgnoreObjectField {
+                object: "RichBlockExpandableBlockQuotation".to_owned(),
+                field_name: "blocks".to_owned(),
+            },
+            Exception::IgnoreObjectField {
+                object: "InputRichBlockExpandableBlockQuotation".to_owned(),
+                field_name: "blocks".to_owned(),
             },
         ]);
 

@@ -5,7 +5,7 @@
     <img src="https://github.com/Mar2ianen/teloxide-fork/actions/workflows/ci.yml/badge.svg?branch=master">
   </a>
   <a href="https://core.telegram.org/bots/api">
-    <img src="https://img.shields.io/badge/API%20coverage-Bot%20API%2010.4%20core-yellowgreen.svg">
+    <img src="https://img.shields.io/badge/API%20coverage-Bot%20API%2010.5%20core-yellowgreen.svg">
   </a>
   <a href="https://t.me/teloxide">
     <img src="https://img.shields.io/badge/support-t.me%2Fteloxide-blueviolet">
@@ -18,7 +18,8 @@
 </div>
 
 This repository is a maintained fork of [`teloxide`](https://github.com/teloxide/teloxide).
-The Bot API 10.4 release candidate is `teloxide 0.21.0-rc.1` with `teloxide-core 0.17.0-rc.1`; fork-specific runtime layers remain opt-in
+The 0.21.0 release candidate introduced Bot API 10.4 support. The current
+development line adds Bot API 10.5; fork-specific runtime layers remain opt-in
 features documented below.
 
 ## Highlights
@@ -95,6 +96,14 @@ shared semantic API. For the full public API and feature matrix see
 The implementation-specific delivery contract is documented in the Drafter
 module rustdoc and the time renderer API docs.
 
+### Telegram Bot API 10.5
+
+The development line now includes Bot API 10.5: bot settings via `setMySettings`,
+the `BotFullInfo` response from `getMe`, invited-user write-access events and
+expandable rich quotes containing arbitrary blocks. See the
+[official-source audit](docs/bot-api-10.5/README.md) and
+[migration notes](MIGRATION_GUIDE.md#bot-api-105).
+
 ### Telegram Bot API 10.4
 
 Bot API 10.4 adds HTML widgets and query updates, shared widget state, TON wallet
@@ -103,12 +112,13 @@ and new gift methods. See the [official-source audit](docs/bot-api-10.4/README.m
 and [migration notes](MIGRATION_GUIDE.md#bot-api-104). The runnable
 [`widgets` example](crates/teloxide/examples/widgets.rs) includes a sandbox-checkable HTML widget.
 
-The current development line exposes the Bot API 10.4 surface in `teloxide-core`, including rich
-message buttons/documents, expandable quotations, compact tables, ephemeral
-message editing, native draft Stop controls, disabled buttons and the
-`stopped_message_generation` update. Existing inline-button code can opt into
-native styles and custom emojis with builders; rich buttons can be constructed
-with `RichMessageButton` and placed with `InputRichBlockButtons::align`.
+The current development line exposes the Bot API 10.5 surface in `teloxide-core`
+alongside prior additions such as rich-message buttons and documents, compact
+tables, ephemeral message editing, native draft Stop controls, disabled
+buttons and the `stopped_message_generation` update. Existing inline-button
+code can opt into native styles and custom emojis with builders; rich buttons
+can be constructed with `RichMessageButton` and placed with
+`InputRichBlockButtons::align`.
 
 For native streaming drafts, enable `drafter` and configure the Stop lifecycle
 through the high-level facade:

@@ -297,10 +297,9 @@ mod tests {
             expected: BotDeliveryMode::Webhook(other),
             actual: Some("https://example.org/hook".parse().unwrap()),
         }));
-        assert!(report.issues.contains(&BotDeliveryIssue::TooManyPendingUpdates {
-            maximum: 2,
-            actual: 3,
-        }));
+        assert!(report
+            .issues
+            .contains(&BotDeliveryIssue::TooManyPendingUpdates { maximum: 2, actual: 3 }));
     }
 
     #[test]

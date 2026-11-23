@@ -5,9 +5,9 @@
 Every PR compiles all targets, checks formatting and Clippy, and runs
 core and high-level tests across stable, beta, nightly and the workspace MSRV.
 The offline fake Bot API runs without a Telegram token or network. It covers
-\`getMe\`, channel posts from \`Channel_Bot\`, and error responses.
+`getMe`, channel posts from `Channel_Bot`, and error responses.
 
-The tests in \`bot_api_10_5_properties.rs\` use \`proptest\` to verify
+The tests in `bot_api_10_5_properties.rs` use `proptest` to verify
 tri-state optional settings and independent self-capability flags. Proptest's
 regression files should be committed when a new shrinking counterexample is
 found, so future runs reproduce the exact issue.
@@ -17,50 +17,50 @@ found, so future runs reproduce the exact issue.
 The code generator is intentionally **check-only by default**: stale files
 fail with a message and do not modify the source tree. To regenerate:
 
-\`\`\`sh
+```sh
 TELOXIDE_CODEGEN_WRITE=1 cargo test -p teloxide-core --features full codegen_
 cargo test -p teloxide-core --features full codegen_
 git diff --check
-\`\`\`
+```
 
-\`RUSTFMT\` can be set to the path of a rustfmt binary; no hardcoded
-\`rustup run nightly-2025-06-12\` is required by the generator itself.
+`RUSTFMT` can be set to the path of a rustfmt binary; no hardcoded
+`rustup run nightly-2025-06-12` is required by the generator itself.
 The repo still pins nightly for **byte-for-byte reproducible historical
-formatting**, because \`rustfmt.toml\` uses nightly-only options. Stable
+formatting**, because `rustfmt.toml` uses nightly-only options. Stable
 rustfmt can run with reduced formatting features but may generate a diff.
 The user-facing compile path remains stable, including the 1.85 MSRV.
 
 ## Deep quality
 
-\`.github/workflows/deep-testing.yml\` runs weekly and on explicit dispatch:
+`.github/workflows/deep-testing.yml` runs weekly and on explicit dispatch:
 
-- \`cargo-nextest\` / \`cargo-hack\`: focused test suite and feature matrix;
-- \`cargo-llvm-cov\`: line coverage artifact (not a quality target by itself);
-- \`cargo-mutants\`: mutants in the typed self-check implementation;
-- \`cargo-fuzz\`: short libFuzzer sessions on incoming updates and rich
+- `cargo-nextest` / `cargo-hack`: focused test suite and feature matrix;
+- `cargo-llvm-cov`: line coverage artifact (not a quality target by itself);
+- `cargo-mutants`: mutants in the typed self-check implementation;
+- `cargo-fuzz`: short libFuzzer sessions on incoming updates and rich
   identity payloads. Long fuzz campaigns can run locally using the same
   targets. Avoid real bot tokens and use only sanitized fixtures.
 
 Run locally:
 
-\`\`\`sh
+```sh
 cargo +stable nextest run -p teloxide-core --features full
 cargo +stable hack check -p teloxide-core --each-feature --exclude-features nightly --no-dev-deps
 cargo +stable llvm-cov -p teloxide-core --features full --lcov --output-path coverage.lcov
 cargo +stable mutants -p teloxide-core --file crates/teloxide-core/src/self_check.rs -- --features full
 cargo +nightly fuzz run updates -- -max_total_time=60
-\`\`\`
+```
 
 ## Runtime capability checks
 
-\`teloxide_core::self_check::{inspect_bot, check_bot}\` compare a \`getMe\`
+`teloxide_core::self_check::{inspect_bot, check_bot}` compare a `getMe`
 snapshot against application-declared expectations. They never invoke
-\`setMySettings\`. A disabled feature is not an error unless an application
+`setMySettings`. A disabled feature is not an error unless an application
 expects it to be enabled.
 
-\`CacheMe\` may contain a stale copy after \`setMySettings\`; when freshness is
-required, pass \`cache.inner()\` to \`check_bot\` (or bypass the adaptor).
-Unsupported fields must not be inferred from the returned \`BotFullInfo\`.
+`CacheMe` may contain a stale copy after `setMySettings`; when freshness is
+required, pass `cache.inner()` to `check_bot` (or bypass the adaptor).
+Unsupported fields must not be inferred from the returned `BotFullInfo`.
 
 ## Live Telegram
 

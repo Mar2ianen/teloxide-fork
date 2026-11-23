@@ -40,6 +40,28 @@ git push origin v0.21.0-rc.1 core-v0.17.0-rc.1 macros-v0.11.2-rc.1
 Never move or reuse a published tag. Each later RC increments the prerelease
 number and points to its own reviewed release merge commit.
 
+## Bot API 10.5: second release candidate
+
+The `v0.21.0-rc.1` and `core-v0.17.0-rc.1` tags belong to the Bot API 10.4
+candidate. The breaking Bot API 10.5 changes are prepared separately as
+`teloxide 0.21.0-rc.2` and `teloxide-core 0.17.0-rc.2`.
+`teloxide-macros 0.11.2-rc.1` is unchanged and is **not retagged**.
+
+After the RC2 release PR has merged into `master` and all gates listed in
+`docs/releases/0.21.0-rc.2.md` have passed, create exactly two *new*
+annotated tags at that merge SHA (never reuse rc.1):
+
+```sh
+git tag -a v0.21.0-rc.2 <release-merge-sha> -m "Release teloxide 0.21.0-rc.2"
+git tag -a core-v0.17.0-rc.2 <release-merge-sha> -m "Release teloxide-core 0.17.0-rc.2"
+git push origin v0.21.0-rc.2 core-v0.17.0-rc.2
+```
+
+A GitHub release does **not** imply a crates.io publication. Check ownership
+of the crate names and availability of the macro/core dependencies before
+attempting registry publishing; otherwise distribute this RC as tagged Git
+source and document the exact rev.
+
 ## Publishing
 
 Publish only from the tagged release commit, in dependency order. The

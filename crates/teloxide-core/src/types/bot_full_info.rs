@@ -70,6 +70,24 @@ impl BotFullInfo {
         self.user.username.as_deref().expect("Bots must have usernames")
     }
 
+    /// Returns the username if Telegram provided one; never panics.
+    #[must_use]
+    pub fn username_opt(&self) -> Option<&str> {
+        self.user.username.as_deref()
+    }
+
+    /// Returns the mention if a username is available.
+    #[must_use]
+    pub fn mention_opt(&self) -> Option<String> {
+        self.user.mention()
+    }
+
+    /// Returns a \`t.me\` URL only if a username is available.
+    #[must_use]
+    pub fn tme_url_opt(&self) -> Option<reqwest::Url> {
+        self.user.tme_url()
+    }
+
     /// Returns a username mention of this bot.
     #[must_use]
     pub fn mention(&self) -> String {

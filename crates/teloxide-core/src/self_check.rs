@@ -9,7 +9,7 @@
 
 use crate::{
     requests::{Request, Requester},
-    types::{BotFullInfo, UserId},
+    types::{BotFullInfo, UserId, WebhookInfo},
 };
 
 /// Capabilities expected by an application. Unspecified fields are not checked.
@@ -17,6 +17,8 @@ use crate::{
 pub struct ExpectedBotCapabilities {
     pub id: Option<UserId>,
     pub username: Option<String>,
+    pub active_usernames: Option<Vec<String>>,
+    pub inline_query_placeholder: Option<String>,
     pub can_join_groups: Option<bool>,
     pub can_read_all_group_messages: Option<bool>,
     pub supports_inline_queries: Option<bool>,
@@ -37,6 +39,8 @@ pub enum BotSelfCheckIssue {
     NotABot,
     IdMismatch { expected: UserId, actual: UserId },
     UsernameMismatch { expected: String, actual: Option<String> },
+    ActiveUsernamesMismatch { expected: Vec<String>, actual: Option<Vec<String>> },
+    InlinePlaceholderMismatch { expected: String, actual: Option<String> },
     CapabilityMismatch { field: &'static str, expected: bool, actual: bool },
 }
 
@@ -77,6 +81,23 @@ pub fn inspect_bot(info: BotFullInfo, expected: &ExpectedBotCapabilities) -> Bot
             issues.push(BotSelfCheckIssue::UsernameMismatch {
                 expected: wanted.clone(),
                 actual: info.user.username.clone(),
+            });
+        }
+    }
+
+    if let Some(wanted) = &expected.active_usernames {
+        if info.active_usernames.as_ref() != Some(wanted) {
+            issues.push(BotSelfCheckIssue::ActiveUsernamesMismatch {
+                expected: wanted.clone(),
+                actual: info.active_usernames.clone(),
+            });
+        }
+    }
+    if let Some(wanted) = &expected.inline_query_placeholder {
+        if info.inline_query_placeholder.as_ref() != Some(wanted) {
+            issues.push(BotSelfCheckIssue::InlinePlaceholderMismatch {
+                expected: wanted.clone(),
+                actual: info.inline_query_placeholder.clone(),
             });
         }
     }
@@ -124,6 +145,79 @@ pub async fn check_bot<B: Requester>(
     Ok(inspect_bot(info, expected))
 }
 
+/// Requested delivery mode; neither mode is inherently better.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BotDeliveryMode {
+    Polling,
+    Webhook(reqwest::Url),
+}
+
+/// Optional transport requirements, checked using \`getWebhookInfo\`.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ExpectedBotDelivery {
+    pub mode: Option<BotDeliveryMode>,
+    pub max_pending_updates: Option<u32>,
+}
+
+/// A disagreement between expected and observed delivery configuration.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BotDeliveryIssue {
+    ModeMismatch { expected: BotDeliveryMode, actual: Option<reqwest::Url> },
+    TooManyPendingUpdates { maximum: u32, actual: u32 },
+}
+
+/// A read-only webhook status snapshot.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BotDeliveryReport {
+    pub info: WebhookInfo,
+    pub issues: Vec<BotDeliveryIssue>,
+}
+
+impl BotDeliveryReport {
+    #[must_use]
+    pub fn is_healthy(&self) -> bool {
+        self.issues.is_empty()
+    }
+}
+
+/// Interpret an existing webhook status snapshot without making requests.
+#[must_use]
+pub fn inspect_delivery(info: WebhookInfo, expected: &ExpectedBotDelivery) -> BotDeliveryReport {
+    let mut issues = Vec::new();
+    if let Some(wanted) = &expected.mode {
+        let matches = match wanted {
+            BotDeliveryMode::Polling => info.url.is_none(),
+            BotDeliveryMode::Webhook(url) => info.url.as_ref() == Some(url),
+        };
+        if !matches {
+            issues.push(BotDeliveryIssue::ModeMismatch {
+                expected: wanted.clone(),
+                actual: info.url.clone(),
+            });
+        }
+    }
+
+    if let Some(maximum) = expected.max_pending_updates {
+        if info.pending_update_count > maximum {
+            issues.push(BotDeliveryIssue::TooManyPendingUpdates {
+                maximum,
+                actual: info.pending_update_count,
+            });
+        }
+    }
+
+    BotDeliveryReport { info, issues }
+}
+
+/// Check delivery status through \`getWebhookInfo\` without changing it.
+pub async fn check_delivery<B: Requester>(
+    bot: &B,
+    expected: &ExpectedBotDelivery,
+) -> Result<BotDeliveryReport, B::Err> {
+    let info = bot.get_webhook_info().send().await?;
+    Ok(inspect_delivery(info, expected))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,6 +243,39 @@ mod tests {
             "has_main_web_app": false
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn delivery_mode_and_backlog_are_checked_only_when_configured() {
+        let status: WebhookInfo = serde_json::from_value(json!({
+            "url": "",
+            "has_custom_certificate": false,
+            "pending_update_count": 9
+        }))
+        .unwrap();
+
+        assert!(inspect_delivery(status.clone(), &ExpectedBotDelivery::default()).is_healthy());
+
+        let expected = ExpectedBotDelivery {
+            mode: Some(BotDeliveryMode::Polling),
+            max_pending_updates: Some(3),
+        };
+        let report = inspect_delivery(status, &expected);
+        assert_eq!(
+            report.issues,
+            vec![BotDeliveryIssue::TooManyPendingUpdates { maximum: 3, actual: 9 }]
+        );
+    }
+
+    #[test]
+    fn optional_metadata_mismatches_are_reported() {
+        let expected = ExpectedBotCapabilities {
+            active_usernames: Some(vec!["additional_bot".to_owned()]),
+            inline_query_placeholder: Some("Search".to_owned()),
+            ..ExpectedBotCapabilities::default()
+        };
+        let report = inspect_bot(info(), &expected);
+        assert_eq!(report.issues.len(), 2);
     }
 
     #[test]

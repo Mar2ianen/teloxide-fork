@@ -374,3 +374,26 @@ fn set_my_settings_supports_all_fifteen_optional_fields() {
         })
     );
 }
+
+#[test]
+fn set_my_settings_rejects_invalid_feedback_denominators() {
+    use teloxide_core::{
+        payloads::SetMySettings,
+        requests::{RequestValidationError, Validate},
+    };
+
+    for value in [0, 1, 10, 100, 1000] {
+        let mut settings = SetMySettings::new();
+        settings.inline_feedback_share_denominator = Some(value);
+        assert!(settings.validate().is_ok(), "{value} is explicitly allowed");
+    }
+
+    for value in [2, 9, 11, 999, u16::MAX] {
+        let mut settings = SetMySettings::new();
+        settings.inline_feedback_share_denominator = Some(value);
+        assert!(
+            matches!(settings.validate(), Err(RequestValidationError::InvalidValue { .. })),
+            "{value} must be rejected before sending"
+        );
+    }
+}

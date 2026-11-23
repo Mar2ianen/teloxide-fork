@@ -1,4 +1,5 @@
-//! Offline wire-level checks: no Telegram credentials or external network needed.
+//! Offline wire-level checks: no Telegram credentials or external network
+//! needed.
 
 use std::{
     io::{Read, Write},
@@ -10,7 +11,9 @@ use std::{
 use serde_json::json;
 use teloxide_core::{
     prelude::*,
-    self_check::{check_bot, check_delivery, BotDeliveryMode, ExpectedBotCapabilities, ExpectedBotDelivery},
+    self_check::{
+        check_bot, check_delivery, BotDeliveryMode, ExpectedBotCapabilities, ExpectedBotDelivery,
+    },
     types::{CallbackQueryMode, UpdateKind, UserId},
 };
 
@@ -29,7 +32,8 @@ fn mock_response(
         let response = response.to_string();
         write!(
             client,
-            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: \
+             {}\r\nConnection: close\r\n\r\n{}",
             response.len(),
             response
         )
@@ -136,10 +140,8 @@ async fn delivery_self_check_distinguishes_polling_from_webhook() {
         }),
     );
     let bot = Bot::new("123:offline").set_api_url(url);
-    let expected = ExpectedBotDelivery {
-        mode: Some(BotDeliveryMode::Polling),
-        max_pending_updates: Some(4),
-    };
+    let expected =
+        ExpectedBotDelivery { mode: Some(BotDeliveryMode::Polling), max_pending_updates: Some(4) };
     let report = check_delivery(&bot, &expected).await.unwrap();
     assert_eq!(report.issues.len(), 1);
     assert!(report.info.url.is_none());
@@ -164,4 +166,3 @@ fn telegram_internal_sender_identifiers_are_disjoint() {
     assert!(UserId(1087968824).is_anonymous());
     assert!(!UserId(777000).is_channel());
 }
-

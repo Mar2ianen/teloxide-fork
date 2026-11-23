@@ -166,3 +166,90 @@ fn telegram_internal_sender_identifiers_are_disjoint() {
     assert!(UserId(1087968824).is_anonymous());
     assert!(!UserId(777000).is_channel());
 }
+
+#[cfg(feature = "cache_me")]
+#[tokio::test]
+async fn cache_me_invalidates_all_clones_after_successful_settings_update() {
+    use teloxide_core::adaptors::CacheMe;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let url: reqwest::Url = format!("http://{}", listener.local_addr().unwrap()).parse().unwrap();
+    let server = thread::spawn(move || {
+        let mut calls = Vec::new();
+        let mut me_fetches = 0;
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while calls.len() < 4 && std::time::Instant::now() < deadline {
+            let (mut client, _) = match listener.accept() {
+                Ok(connection) => connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
+                Err(error) => panic!("accept: {error}"),
+            };
+            client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            let mut request = [0u8; 8192];
+            let size = client.read(&mut request).unwrap();
+            let request = String::from_utf8_lossy(&request[..size]).to_ascii_lowercase();
+            let body = if request.contains("/getme ") {
+                me_fetches += 1;
+                json!({
+                    "ok": true,
+                    "result": {
+                        "id": 123,
+                        "is_bot": true,
+                        "first_name": format!("generation-{me_fetches}"),
+                        "can_join_groups": false,
+                        "can_read_all_group_messages": false,
+                        "supports_inline_queries": false,
+                        "needs_inline_query_location": false,
+                        "can_connect_to_business": false,
+                        "supports_guest_queries": false,
+                        "supports_join_request_queries": false,
+                        "has_topics_enabled": false,
+                        "allows_users_to_create_topics": false,
+                        "has_topic_sidebar": false,
+                        "can_manage_bots": false,
+                        "has_main_web_app": false
+                    }
+                })
+            } else if request.contains("/setmysettings ") {
+                json!({"ok": true, "result": true})
+            } else {
+                panic!("unexpected mock API request: {request}");
+            };
+            let response = body.to_string();
+            write!(
+                client,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response.len(),
+                response
+            )
+            .unwrap();
+            calls.push(request);
+        }
+        calls
+    });
+
+    let bot = CacheMe::new(Bot::new("123:offline").set_api_url(url));
+    let cloned = bot.clone();
+
+    let first = bot.get_me().await.unwrap();
+    assert_eq!(first.user.first_name, "generation-1");
+    assert_eq!(cloned.get_me().await.unwrap().user.first_name, "generation-1");
+
+    // The update is lazy and should only invalidate after Telegram confirms it.
+    cloned.set_my_settings().await.unwrap();
+    assert_eq!(bot.get_me().await.unwrap().user.first_name, "generation-2");
+    assert_eq!(cloned.get_me().await.unwrap().user.first_name, "generation-2");
+
+    // clear() is shared, not a clone-local Arc::make_mut operation.
+    assert!(cloned.clear().is_some());
+    assert_eq!(bot.get_me().await.unwrap().user.first_name, "generation-3");
+
+    let calls = server.join().unwrap();
+    assert_eq!(calls.len(), 4);
+    assert_eq!(calls.iter().filter(|request| request.contains("/getme ")).count(), 3);
+    assert_eq!(calls.iter().filter(|request| request.contains("/setmysettings ")).count(), 1);
+}

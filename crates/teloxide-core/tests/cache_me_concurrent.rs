@@ -22,8 +22,8 @@ fn write_response(client: &mut TcpStream, result: serde_json::Value) {
     let body = json!({"ok": true, "result": result}).to_string();
     write!(
         client,
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \
-         {}\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: \
+         close\r\n\r\n{}",
         body.len(),
         body
     )

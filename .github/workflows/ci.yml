@@ -172,6 +172,15 @@ jobs:
         run: |
           cargo +${{ matrix.toolchain }} test --tests --no-run --verbose ${{ matrix.features }}
 
+      # Temporary artifact for synchronizing the newly resolved proptest lockfile.
+      - name: Export resolved Cargo.lock
+        if: ${{ matrix.rust == 'stable' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: resolved-cargo-lock
+          path: Cargo.lock
+          retention-days: 1
+
       - name: Setup redis
         run: |
           sudo apt-get update && sudo apt-get install -y redis-server

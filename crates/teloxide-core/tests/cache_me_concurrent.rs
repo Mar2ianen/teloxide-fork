@@ -10,8 +10,8 @@ use std::{
 
 mod support;
 
-use support::read_http_request;
 use serde_json::json;
+use support::read_http_request;
 use teloxide_core::{adaptors::CacheMe, prelude::*, Bot};
 
 fn read_request(client: &mut TcpStream) -> String {

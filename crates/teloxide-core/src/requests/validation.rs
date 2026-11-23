@@ -273,6 +273,22 @@ where
     Ok(())
 }
 
+/// Validate the only locally checkable numeric constraint of setMySettings.
+/// The API allows 0 to disable feedback or 1, 10, 100 and 1000.
+pub(crate) fn validate_set_my_settings(
+    payload: &crate::payloads::SetMySettings,
+) -> Result<(), RequestValidationError> {
+    if let Some(value) = payload.inline_feedback_share_denominator {
+        if !matches!(value, 0 | 1 | 10 | 100 | 1000) {
+            return Err(RequestValidationError::InvalidValue {
+                path: RequestFieldPath::field("inline_feedback_share_denominator"),
+                reason: InvalidValueReason::MustBeOneOf(&["0", "1", "10", "100", "1000"]),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Validates the non-rich `sendMessageDraft` payload.
 pub(crate) fn validate_send_message_draft(
     payload: &crate::payloads::SendMessageDraft,

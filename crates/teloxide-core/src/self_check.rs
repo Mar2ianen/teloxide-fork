@@ -2,9 +2,9 @@
 //!
 //! Telegram settings are not inherently valid or invalid: a mismatch exists
 //! only when the application explicitly declares what it needs. The checks
-//! never call \`setMySettings\` and do not silently modify the account.
+//! never call `setMySettings` and do not silently modify the account.
 //!
-//! When using \`CacheMe\`, pass its underlying requester to \`check_bot\` to
+//! When using `CacheMe`, pass its underlying requester to `check_bot` to
 //! fetch fresh information rather than a potentially stale cached snapshot.
 
 use crate::{
@@ -55,7 +55,7 @@ impl BotSelfCheckReport {
     }
 }
 
-/// Check an already obtained \`getMe\` response with no network activity.
+/// Check an already obtained `getMe` response with no network activity.
 #[must_use]
 pub fn inspect_bot(info: BotFullInfo, expected: &ExpectedBotCapabilities) -> BotSelfCheckReport {
     let mut issues = Vec::new();
@@ -111,10 +111,10 @@ pub fn inspect_bot(info: BotFullInfo, expected: &ExpectedBotCapabilities) -> Bot
     BotSelfCheckReport { info, issues }
 }
 
-/// Fetch \`getMe\` and check the requirements without changing Telegram settings.
+/// Fetch `getMe` and check the requirements without changing Telegram settings.
 ///
-/// A \`CacheMe\` requester can return stale values after \`setMySettings\`.
-/// Call \`check_bot(cache.inner(), ...)\` to bypass that cache when freshness
+/// A `CacheMe` requester can return stale values after `setMySettings`.
+/// Call `check_bot(cache.inner(), ...)` to bypass that cache when freshness
 /// matters. Transport failures are returned unchanged.
 pub async fn check_bot<B: Requester>(
     bot: &B,

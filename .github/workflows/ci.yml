@@ -214,6 +214,9 @@ jobs:
         run: |
           cargo +stable check --examples --features full
 
+      - name: Check all targets, including unit-test fixtures
+        run: cargo +stable check --workspace --all-targets --features full
+
       # TODO: prolly move it to a separate step?
       - name: Check with no default features
         run: |

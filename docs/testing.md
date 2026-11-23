@@ -32,7 +32,8 @@ The user-facing compile path remains stable, including the 1.85 MSRV.
 
 ## Deep quality
 
-`.github/workflows/deep-testing.yml` runs weekly and on explicit dispatch:
+`.github/workflows/deep-testing.yml` runs on pull requests, pushes to `next`,
+weekly, and on explicit dispatch. Mutation tests are reserved for non-PR runs:
 
 - `cargo-nextest` / `cargo-hack`: focused test suite and feature matrix;
 - `cargo-llvm-cov`: line coverage artifact (not a quality target by itself);
@@ -58,9 +59,15 @@ snapshot against application-declared expectations. They never invoke
 `setMySettings`. A disabled feature is not an error unless an application
 expects it to be enabled.
 
-`CacheMe` may contain a stale copy after `setMySettings`; when freshness is
-required, pass `cache.inner()` to `check_bot` (or bypass the adaptor).
-Unsupported fields must not be inferred from the returned `BotFullInfo`.
+`CacheMe` automatically invalidates the shared `getMe` cache for all clones
+after successful `setMySettings` and `setMyName` requests made **through the
+adaptor**. Failed, unsent and canceled requests do not invalidate it. In-flight
+`getMe` results belong to their original generation, so they cannot repopulate
+the new cache after invalidation. Explicit `clear()` also invalidates all clones.
+
+If the bot was reconfigured outside this adaptor, or a strongly fresh snapshot
+is required, pass `cache.inner()` to `check_bot` to bypass the cache.
+Unsupported capabilities must not be inferred from `BotFullInfo`.
 
 ## Live Telegram
 
@@ -68,3 +75,21 @@ The locally mocked HTTP API is **not** an authoritative emulator of Telegram
 server semantics. Verify behavioral compatibility against the official
 Telegram test environment in a separately configured, secret-protected CI
 job or before releasing; do not give tokens to untrusted pull requests.
+
+## Downstream compatibility
+
+The advisory `.github/workflows/downstream-compat.yml` checks public
+`NedoBot` and `teloxide-ui` against the current Teloxide checkout, overriding
+only their pinned Git dependency in **disposable worktrees**. The source
+projects are never modified. Targets are documented in `downstream.toml` and
+can be checked locally with:
+
+```sh
+python3 scripts/check_downstream.py teloxide-ui
+python3 scripts/check_downstream.py nedobot
+```
+
+These compatibility jobs are advisory until consumers migrate: an unrelated
+consumer build failure must not silently block a library release. The Telegram
+`Channel_Bot` and `GroupAnonymousBot` are internal synthetic identities,
+not downstream repositories; they are covered by offline fixtures.

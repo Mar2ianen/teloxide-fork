@@ -647,7 +647,6 @@ mod tests {
         assert_eq!(files.len(), 3);
     }
 
-
     #[test]
     fn expandable_quote_collects_nested_uploads_for_copy_and_move() {
         fn rich_message() -> InputRichMessage {

@@ -78,8 +78,10 @@ jobs:
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
-      - name: Audit Bot API 10.4 against the frozen official specification
-        run: python3 docs/bot-api-10.4/audit.py
+      - name: Audit Bot API 10.4 and 10.5 against frozen official specifications
+        run: |
+          python3 docs/bot-api-10.4/audit.py
+          python3 docs/bot-api-10.5/audit.py
 
       - name: Check formatting
         run: |
@@ -144,6 +146,10 @@ jobs:
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
+      - name: Select the pinned formatter for generator checks
+        run: |
+          echo "RUSTFMT=$(rustup which --toolchain ${{ env.rust_nightly }} rustfmt)" >> "$GITHUB_ENV"
+
       # Generally MSRV dump is not considered a breaking change in by the Rust community.
       # Thus a minor or a patch version dump of a dependency of ours, can bump MSRV.
       # (remember that `cargo` uses newest semver compatible versions by default)
@@ -164,7 +170,7 @@ jobs:
       # NB. Don't test (build) examples so we can use non-msrv features in them (--tests/--doc)
       - name: Compile
         run: |
-          cargo +${{ matrix.toolchain }} test --tests --no-run --verbose ${{ matrix.features }}
+          cargo +${{ matrix.toolchain }} test --locked --tests --no-run --verbose ${{ matrix.features }}
 
       - name: Setup redis
         run: |
@@ -184,12 +190,12 @@ jobs:
           PGPASSWORD: rewrite_it_in_rust
       - name: Test unit & integration tests
         run: |
-          cargo +${{ matrix.toolchain }} test --tests --verbose ${{ matrix.features }}
+          cargo +${{ matrix.toolchain }} test --locked --tests --verbose ${{ matrix.features }}
 
       - name: Test documentation tests
         if: ${{ matrix.rust != 'msrv' }}
         run: |
-          cargo +${{ matrix.toolchain }} test --doc --verbose ${{ matrix.features }}
+          cargo +${{ matrix.toolchain }} test --locked --doc --verbose ${{ matrix.features }}
 
   check-examples:
     runs-on: ubuntu-latest
@@ -210,12 +216,15 @@ jobs:
 
       - name: Check examples
         run: |
-          cargo +stable check --examples --features full
+          cargo +stable check --locked --examples --features full
+
+      - name: Check all targets, including unit-test fixtures
+        run: cargo +stable check --locked --workspace --all-targets --features full
 
       # TODO: prolly move it to a separate step?
       - name: Check with no default features
         run: |
-          cargo +stable check --no-default-features
+          cargo +stable check --locked --no-default-features
 
   clippy:
     name: Run linter

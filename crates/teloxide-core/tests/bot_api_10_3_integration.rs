@@ -24,7 +24,7 @@ fn rich_message_10_3_blocks_and_buttons_round_trip() {
             },
             {
                 "type": "expandable_blockquote",
-                "text": "Details",
+                "blocks": [{"type": "paragraph", "text": "Details"}],
                 "credit": "Source"
             },
             {

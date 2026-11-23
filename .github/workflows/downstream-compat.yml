@@ -1,0 +1,32 @@
+name: Downstream compatibility
+
+on:
+  pull_request:
+    branches: [master, next]
+  workflow_dispatch:
+  schedule:
+    - cron: "43 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    name: Compile ${{ matrix.project }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    continue-on-error: true # Advisory: external projects cannot block Teloxide.
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [teloxide-ui]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Compile public consumer against proposed fork
+        run: python3 scripts/check_downstream.py "${{ matrix.project }}"

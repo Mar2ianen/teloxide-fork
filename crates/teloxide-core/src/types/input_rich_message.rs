@@ -302,7 +302,7 @@ impl InputFileLike for InputRichBlock {
         match self {
             Self::List(value) => value.items.copy_into(into),
             Self::Blockquote(value) => value.blocks.copy_into(into),
-            Self::ExpandableBlockquote(_) => {}
+            Self::ExpandableBlockquote(value) => value.blocks.copy_into(into),
             Self::Collage(value) => value.blocks.copy_into(into),
             Self::Slideshow(value) => value.blocks.copy_into(into),
             Self::Details(value) => value.blocks.copy_into(into),
@@ -331,7 +331,7 @@ impl InputFileLike for InputRichBlock {
         match self {
             Self::List(value) => value.items.move_into(into),
             Self::Blockquote(value) => value.blocks.move_into(into),
-            Self::ExpandableBlockquote(_) => {}
+            Self::ExpandableBlockquote(value) => value.blocks.move_into(into),
             Self::Collage(value) => value.blocks.move_into(into),
             Self::Slideshow(value) => value.blocks.move_into(into),
             Self::Details(value) => value.blocks.move_into(into),
@@ -430,22 +430,28 @@ impl InputFileLike for InputRichBlockListItem {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde_with::skip_serializing_none]
 pub struct InputRichBlockBlockQuotation {
     pub blocks: Vec<InputRichBlock>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub credit: Option<RichText>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde_with::skip_serializing_none]
 pub struct InputRichBlockExpandableBlockQuotation {
-    pub text: RichText,
+    pub blocks: Vec<InputRichBlock>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub credit: Option<RichText>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde_with::skip_serializing_none]
 pub struct InputRichBlockPullQuotation {
     pub text: RichText,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub credit: Option<RichText>,
 }
 
@@ -639,6 +645,41 @@ mod tests {
         let mut files = Vec::new();
         message.copy_into(&mut |file| files.push(file));
         assert_eq!(files.len(), 3);
+    }
+
+    #[test]
+    fn expandable_quote_collects_nested_uploads_for_copy_and_move() {
+        fn rich_message() -> InputRichMessage {
+            InputRichMessage::blocks([InputRichBlock::ExpandableBlockquote(
+                InputRichBlockExpandableBlockQuotation {
+                    blocks: vec![
+                        InputRichBlock::Photo(InputRichBlockPhoto {
+                            photo: InputMediaPhoto::new(InputFile::memory("photo")),
+                            caption: None,
+                        }),
+                        InputRichBlock::Details(InputRichBlockDetails {
+                            summary: RichText::from("nested"),
+                            blocks: vec![InputRichBlock::Video(InputRichBlockVideo {
+                                video: InputMediaVideo::new(InputFile::memory("video"))
+                                    .thumbnail(InputFile::memory("thumbnail")),
+                                caption: None,
+                            })],
+                            is_open: None,
+                        }),
+                    ],
+                    credit: None,
+                },
+            )])
+        }
+
+        let mut copied = Vec::new();
+        rich_message().copy_into(&mut |file| copied.push(file));
+        assert_eq!(copied.len(), 3, "copy_into must descend into expandable quotes");
+
+        let mut message = rich_message();
+        let mut moved = Vec::new();
+        message.move_into(&mut |file| moved.push(file));
+        assert_eq!(moved.len(), 3, "move_into must descend into expandable quotes");
     }
 
     #[test]

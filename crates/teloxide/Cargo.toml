@@ -1,6 +1,6 @@
 [package]
 name = "teloxide"
-version = "0.21.0-rc.1"
+version = "0.21.0-rc.2"
 description = "An elegant Telegram bots framework for Rust"
 
 rust-version.workspace = true
@@ -19,6 +19,10 @@ categories = ["web-programming", "api-bindings", "asynchronous"]
 
 [features]
 default = ["native-tls", "ctrlc_handler", "teloxide-core/default"]
+
+# Backwards-compatible alias: outbound scheduling is now built into core.
+# Existing downstream crates still request this feature explicitly.
+outbound = []
 
 # Optional runtime layers that are useful to applications but are not part of
 # the core Telegram transport.
@@ -95,7 +99,7 @@ full = [
 
 [dependencies]
 # Keep workspace paths for local builds and versions for crates.io publishing.
-teloxide-core = { path = "../teloxide-core", version = "0.17.0-rc.1", default-features = false }
+teloxide-core = { path = "../teloxide-core", version = "0.17.0-rc.2", default-features = false }
 teloxide-macros = { path = "../teloxide-macros", version = "0.11.2-rc.1", optional = true }
 
 serde_json = "1.0"
@@ -116,7 +120,6 @@ derive_more = { version = "2.0.1", features = ["display", "from", "deref"] }
 thiserror = "2.0.11"
 futures = "0.3.15"
 pin-project = "1.0"
-aquamarine = "0.6.0"
 either = "1.9.0"
 
 sqlx = { version = "0.8.1", optional = true, default-features = false, features = [

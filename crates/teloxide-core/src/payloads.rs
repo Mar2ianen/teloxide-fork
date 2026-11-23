@@ -193,6 +193,7 @@ mod set_my_default_administrator_rights;
 mod set_my_description;
 mod set_my_name;
 mod set_my_profile_photo;
+mod set_my_settings;
 mod set_my_short_description;
 mod set_passport_data_errors;
 mod set_sticker_emoji_list;
@@ -454,6 +455,7 @@ pub use set_my_default_administrator_rights::{
 pub use set_my_description::{SetMyDescription, SetMyDescriptionSetters};
 pub use set_my_name::{SetMyName, SetMyNameSetters};
 pub use set_my_profile_photo::{SetMyProfilePhoto, SetMyProfilePhotoSetters};
+pub use set_my_settings::{SetMySettings, SetMySettingsSetters};
 pub use set_my_short_description::{SetMyShortDescription, SetMyShortDescriptionSetters};
 pub use set_passport_data_errors::{SetPassportDataErrors, SetPassportDataErrorsSetters};
 pub use set_sticker_emoji_list::{SetStickerEmojiList, SetStickerEmojiListSetters};

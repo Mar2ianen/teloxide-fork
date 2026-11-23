@@ -1,0 +1,42 @@
+name: Release package preflight
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - '.github/workflows/release-package-preflight.yml'
+      - 'docs/releases/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-list:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: stable
+      - name: Verify version consistency and package contents (no upload)
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '^version = "0.21.0-rc.2"$' crates/teloxide/Cargo.toml
+          grep -q '^version = "0.17.0-rc.2"$' crates/teloxide-core/Cargo.toml
+          grep -q '^version = "0.11.2-rc.1"$' crates/teloxide-macros/Cargo.toml
+          cargo metadata --locked --no-deps --format-version=1 > /dev/null
+          cargo package --list --locked -p teloxide-core > /tmp/core-package-files.txt
+          cargo package --list --locked -p teloxide-macros > /tmp/macros-package-files.txt
+          cargo package --list --locked -p teloxide > /tmp/teloxide-package-files.txt
+          test -s /tmp/core-package-files.txt
+          test -s /tmp/macros-package-files.txt
+          test -s /tmp/teloxide-package-files.txt
+          echo "Validated package file lists for all three crates; no package was published"

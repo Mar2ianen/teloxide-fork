@@ -40,7 +40,7 @@
 //! [github]: https://github.com/WaffleLapkin/tg-methods-schema
 
 Schema(
-    api_version: ApiVersion(ver: "10.4", date: "November 9, 2026"),
+    api_version: ApiVersion(ver: "10.5", date: "November 22, 2026"),
     methods: [
         Method(
             names: ("deleteBusinessAccountGift", "DeleteBusinessAccountGift", "delete_business_account_gift"),
@@ -329,14 +329,36 @@ Schema(
         ),
         Method(
             names: ("getMe", "GetMe", "get_me"),
-            return_ty: RawTy("Me"),
-            doc: Doc(
-                md: "A simple method for testing your bot's auth token. Requires no parameters. Returns basic information about the bot in form of a [User] object.",
-                md_links: {"User": "https://core.telegram.org/bots/api#user"}
-            ),
+            return_ty: RawTy("BotFullInfo"),
+            doc: Doc(md: "A simple method for testing your bot's authentication token. Requires no parameters. Returns information about the bot in form of a [BotFullInfo] object.", md_links: {"BotFullInfo": "https://core.telegram.org/bots/api#botfullinfo"}),
             tg_doc: "https://core.telegram.org/bots/api#getme",
             tg_category: "Available methods",
             params: [],
+        ),
+        Method(
+            names: ("setMySettings", "SetMySettings", "set_my_settings"),
+            validation: Some("crate::requests::validation::validate_set_my_settings"),
+            return_ty: True,
+            doc: Doc(md: "Use this method to change settings of the bot. Settings that aren't specified remain unchanged. Returns True on success."),
+            tg_doc: "https://core.telegram.org/bots/api#setmysettings",
+            tg_category: "Available methods",
+            params: [
+                Param(name: "supports_inline_queries", ty: Option(bool), descr: Doc(md: "Pass True to enable inline mode for the bot or False to disable it")),
+                Param(name: "inline_query_placeholder", ty: Option(String), descr: Doc(md: "New placeholder for inline queries, which is shown in the input field after the bot's username. Pass an empty string to use the default placeholder.")),
+                Param(name: "needs_inline_query_location", ty: Option(bool), descr: Doc(md: "Pass True to request the location of the user with every inline query to the bot or False to stop requesting it")),
+                Param(name: "inline_feedback_share_denominator", ty: Option(u16), descr: Doc(md: "Denominator of the share of chosen inline results received by the bot; the bot receives 1 out of inline_feedback_share_denominator chosen results. Must be one of 1, 10, 100, or 1000. Pass 0 to stop receiving chosen inline results.")),
+                Param(name: "can_join_groups", ty: Option(bool), descr: Doc(md: "Pass True to allow adding the bot to groups or False to disallow it")),
+                Param(name: "can_read_all_group_messages", ty: Option(bool), descr: Doc(md: "Pass True to disable privacy mode for the bot or False to enable it")),
+                Param(name: "can_connect_to_business", ty: Option(bool), descr: Doc(md: "Pass True to allow connecting the bot to user accounts to manage them or False to disallow it")),
+                Param(name: "can_manage_bots", ty: Option(bool), descr: Doc(md: "Pass True to allow creating other bots that will be controlled by the bot or False to disallow it")),
+                Param(name: "supports_guest_queries", ty: Option(bool), descr: Doc(md: "Pass True to allow guest queries to the bot from chats it isn't a member of or False to disallow them")),
+                Param(name: "supports_join_request_queries", ty: Option(bool), descr: Doc(md: "Pass True to allow assigning the bot to process join request queries or False to disallow it")),
+                Param(name: "has_topics_enabled", ty: Option(bool), descr: Doc(md: "Pass True to enable forum topic mode in private chats with the bot or False to disable it")),
+                Param(name: "allows_users_to_create_topics", ty: Option(bool), descr: Doc(md: "Pass True to allow users to create and delete topics in private chats with the bot or False to disallow it")),
+                Param(name: "has_topic_sidebar", ty: Option(bool), descr: Doc(md: "Pass True to show topics in private chats with the bot in a sidebar or False to stop showing them in a sidebar")),
+                Param(name: "can_communicate_with_bots", ty: Option(bool), descr: Doc(md: "Pass True to allow the bot to communicate with other bots in groups, private chats, and through business accounts or False to disallow it")),
+                Param(name: "callback_query_mode", ty: Option(RawTy("CallbackQueryMode")), descr: Doc(md: "Mode in which the bot receives callback queries from buttons in messages sent by the bot. Must be Default, Auto, or Inline.")),
+            ],
         ),
         Method(
             names: ("logOut", "LogOut", "log_out"),

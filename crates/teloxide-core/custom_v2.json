@@ -1,13 +1,13 @@
 {
   "version": {
     "major": 10,
-    "minor": 4,
+    "minor": 5,
     "patch": 0
   },
   "recent_changes": {
     "year": 2026,
     "month": 11,
-    "day": 9
+    "day": 22
   },
   "methods": [
     {
@@ -813,12 +813,12 @@
     },
     {
       "name": "getMe",
-      "description": "A simple method for testing your bot's authentication token. Requires no parameters. Returns basic information about the bot in form of a [User](https://core.telegram.org/bots/api#user) object.",
+      "description": "A simple method for testing your bot's authentication token. Requires no parameters. Returns information about the bot in form of a [BotFullInfo](https://core.telegram.org/bots/api#botfullinfo) object.",
       "arguments": [],
       "maybe_multipart": false,
       "return_type": {
         "type": "reference",
-        "reference": "User"
+        "reference": "BotFullInfo"
       },
       "documentation_link": "https://core.telegram.org/bots/api#getme"
     },
@@ -13259,6 +13259,150 @@
       },
       "documentation_link": "https://core.telegram.org/bots/api#sendrichmessagedraft",
       "maybe_multipart": false
+    },
+    {
+      "name": "setMySettings",
+      "description": "Use this method to change settings of the bot. Settings that aren't specified remain unchanged. Returns *True* on success.",
+      "arguments": [
+        {
+          "name": "supports_inline_queries",
+          "description": "Pass *True* to enable [inline mode](https://core.telegram.org/bots/api#inline-mode) for the bot or *False* to disable it",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "inline_query_placeholder",
+          "description": "New placeholder for inline queries, which is shown in the input field after the bot's username. Pass an empty string to use the default placeholder.",
+          "required": false,
+          "type_info": {
+            "type": "string",
+            "enumeration": []
+          }
+        },
+        {
+          "name": "needs_inline_query_location",
+          "description": "Pass *True* to request the location of the user with every inline query to the bot or *False* to stop requesting it",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "inline_feedback_share_denominator",
+          "description": "Denominator of the share of [chosen inline results](https://core.telegram.org/bots/api#choseninlineresult) received by the bot; the bot receives 1 out of *inline\\_feedback\\_share\\_denominator* chosen results. Must be one of 1, 10, 100, or 1000. Pass 0 to stop receiving chosen inline results.",
+          "required": false,
+          "type_info": {
+            "type": "integer",
+            "enumeration": [
+              1,
+              10,
+              100,
+              1000
+            ]
+          }
+        },
+        {
+          "name": "can_join_groups",
+          "description": "Pass *True* to allow adding the bot to groups or *False* to disallow it",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "can_read_all_group_messages",
+          "description": "Pass *True* to disable [privacy mode](https://core.telegram.org/bots/features#privacy-mode) for the bot or *False* to enable it",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "can_connect_to_business",
+          "description": "Pass *True* to allow connecting the bot to user accounts to manage them or *False* to disallow it",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "can_manage_bots",
+          "description": "Pass *True* to allow creating other bots that will be controlled by the bot or *False* to disallow it",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "supports_guest_queries",
+          "description": "Pass *True* to allow guest queries to the bot from chats it isn't a member of or *False* to disallow them",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "supports_join_request_queries",
+          "description": "Pass *True* to allow assigning the bot to process join request queries or *False* to disallow it",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "has_topics_enabled",
+          "description": "Pass *True* to enable forum topic mode in private chats with the bot or *False* to disable it",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "allows_users_to_create_topics",
+          "description": "Pass *True* to allow users to create and delete topics in private chats with the bot or *False* to disallow it",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "has_topic_sidebar",
+          "description": "Pass *True* to show topics in private chats with the bot in a sidebar or *False* to stop showing them in a sidebar",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "can_communicate_with_bots",
+          "description": "Pass *True* to allow the bot to communicate with other bots in groups, private chats, and through business accounts or *False* to disallow it",
+          "required": false,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "callback_query_mode",
+          "description": "Mode in which the bot receives [callback queries](https://core.telegram.org/bots/api#callbackquery) from buttons in messages sent by the bot. Must be one of “default” (the field *message* is always used and contains an [InaccessibleMessage](https://core.telegram.org/bots/api#inaccessiblemessage) if the message is inaccessible to the bot), “auto” (the field *inline\\_message\\_id* is used instead of the field *message* if the message is inaccessible to the bot; the field *message* can still contain an inaccessible message if the message has just been deleted), or “inline” (the field *inline\\_message\\_id* is always used instead of the field *message*).",
+          "required": false,
+          "type_info": {
+            "type": "string",
+            "enumeration": [
+              "default",
+              "auto",
+              "inline"
+            ]
+          }
+        }
+      ],
+      "maybe_multipart": false,
+      "return_type": {
+        "type": "bool",
+        "default": true
+      },
+      "documentation_link": "https://core.telegram.org/bots/api#setmysettings"
     }
   ],
   "objects": [
@@ -14767,7 +14911,7 @@
         },
         {
           "name": "language_code",
-          "description": "*Optional*. [IETF language tag](https://web.archive.org/web/20250817052931/https://en.wikipedia.org/wiki/IETF_language_tag) of the user's language",
+          "description": "*Optional*. [IETF language tag](https://en.wikipedia.org/wiki/IETF_language_tag) of the user's language",
           "required": false,
           "type_info": {
             "type": "string",
@@ -14790,46 +14934,6 @@
           "type_info": {
             "type": "bool",
             "default": true
-          }
-        },
-        {
-          "name": "can_join_groups",
-          "description": "*Optional*. *True*, if the bot can be invited to groups. Returned only in [getMe](https://core.telegram.org/bots/api#getme).",
-          "required": false,
-          "type_info": {
-            "type": "bool"
-          }
-        },
-        {
-          "name": "can_read_all_group_messages",
-          "description": "*Optional*. *True*, if [privacy mode](https://core.telegram.org/web/20250817052931/https://core.telegram.org/bots/features#privacy-mode) is disabled for the bot. Returned only in [getMe](https://core.telegram.org/bots/api#getme).",
-          "required": false,
-          "type_info": {
-            "type": "bool"
-          }
-        },
-        {
-          "name": "supports_inline_queries",
-          "description": "*Optional*. *True*, if the bot supports inline queries. Returned only in [getMe](https://core.telegram.org/bots/api#getme).",
-          "required": false,
-          "type_info": {
-            "type": "bool"
-          }
-        },
-        {
-          "name": "can_connect_to_business",
-          "description": "*Optional*. *True*, if the bot can be connected to a Telegram Business account to receive its messages. Returned only in [getMe](https://core.telegram.org/bots/api#getme).",
-          "required": false,
-          "type_info": {
-            "type": "bool"
-          }
-        },
-        {
-          "name": "has_main_web_app",
-          "description": "*Optional*. *True*, if the bot has a main Web App. Returned only in [getMe](https://core.telegram.org/bots/api#getme).",
-          "required": false,
-          "type_info": {
-            "type": "bool"
           }
         }
       ],
@@ -19277,12 +19381,12 @@
     },
     {
       "name": "WriteAccessAllowed",
-      "description": "This object represents a service message about a user allowing a bot to write messages after adding it to the attachment menu, launching a Web App from a link, or accepting an explicit request from a Web App sent by the method [requestWriteAccess](https://core.telegram.org/web/20250817052931/https://core.telegram.org/bots/webapps#initializing-mini-apps).",
+      "description": "This object represents a service message about a user allowing a bot to write messages after adding it to the attachment menu, launching a Web App from a link, or accepting an explicit request from a Web App sent by the method [requestWriteAccess](https://core.telegram.org/bots/webapps#initializing-mini-apps), or about a user being invited to the private chat with the bot by the owner of the bot.",
       "type": "properties",
       "properties": [
         {
           "name": "from_request",
-          "description": "*Optional*. *True*, if the access was granted after the user accepted an explicit request from a Web App sent by the method [requestWriteAccess](https://core.telegram.org/web/20250817052931/https://core.telegram.org/bots/webapps#initializing-mini-apps)",
+          "description": "*Optional*. *True*, if the access was granted after the user accepted an explicit request from a Web App sent by the method [requestWriteAccess](https://core.telegram.org/bots/webapps#initializing-mini-apps)",
           "required": false,
           "type_info": {
             "type": "bool"
@@ -19303,6 +19407,15 @@
           "required": false,
           "type_info": {
             "type": "bool"
+          }
+        },
+        {
+          "name": "inviter",
+          "description": "*Optional*. The owner of the bot, if the access was granted when the owner invited the user to the private chat with the bot. Bot owners can invite up to 10 users at once by pressing the link `https://t.me/botinvite/<bot_username>`.",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "User"
           }
         }
       ],
@@ -30514,6 +30627,245 @@
         }
       ],
       "documentation_link": "https://core.telegram.org/bots/api#gamehighscore"
+    },
+    {
+      "name": "BotFullInfo",
+      "description": "This object contains full information about the bot itself.",
+      "type": "properties",
+      "properties": [
+        {
+          "name": "id",
+          "description": "Unique identifier for this bot. This number may have more than 32 significant bits and some programming languages may have difficulty/silent defects in interpreting it. But it has at most 52 significant bits, so a 64-bit integer or double-precision float type are safe for storing this identifier.",
+          "required": true,
+          "type_info": {
+            "type": "integer",
+            "enumeration": []
+          }
+        },
+        {
+          "name": "is_bot",
+          "description": "Always *True*",
+          "required": true,
+          "type_info": {
+            "type": "bool",
+            "default": true
+          }
+        },
+        {
+          "name": "first_name",
+          "description": "Bot's first name",
+          "required": true,
+          "type_info": {
+            "type": "string",
+            "enumeration": []
+          }
+        },
+        {
+          "name": "username",
+          "description": "*Optional*. Bot's username",
+          "required": false,
+          "type_info": {
+            "type": "string",
+            "enumeration": []
+          }
+        },
+        {
+          "name": "active_usernames",
+          "description": "*Optional*. If non-empty, the list of all [active usernames](https://telegram.org/blog/topics-in-groups-collectible-usernames#collectible-usernames) of the bot",
+          "required": false,
+          "type_info": {
+            "type": "array",
+            "array": {
+              "type": "string",
+              "enumeration": []
+            }
+          }
+        },
+        {
+          "name": "can_join_groups",
+          "description": "*True*, if the bot can be added to groups",
+          "required": true,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "can_read_all_group_messages",
+          "description": "*True*, if [privacy mode](https://core.telegram.org/bots/features#privacy-mode) is disabled for the bot",
+          "required": true,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "supports_guest_queries",
+          "description": "*True*, if the bot supports guest queries from chats it is not a member of",
+          "required": true,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "supports_inline_queries",
+          "description": "*True*, if the bot supports inline queries",
+          "required": true,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "inline_query_placeholder",
+          "description": "*Optional*. Placeholder for inline queries, which is shown in the input field after the bot's username; omitted if the default placeholder is used",
+          "required": false,
+          "type_info": {
+            "type": "string",
+            "enumeration": []
+          }
+        },
+        {
+          "name": "needs_inline_query_location",
+          "description": "*True*, if the bot requests the location of the user with every inline query",
+          "required": true,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "can_connect_to_business",
+          "description": "*True*, if the bot can be connected to a user account to manage it",
+          "required": true,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "has_main_web_app",
+          "description": "*True*, if the bot has a main Web App",
+          "required": true,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "has_topics_enabled",
+          "description": "*True*, if the bot has forum topic mode enabled in private chats",
+          "required": true,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "allows_users_to_create_topics",
+          "description": "*True*, if the bot allows users to create and delete topics in private chats",
+          "required": true,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "has_topic_sidebar",
+          "description": "*True*, if topics in private chats with the bot are shown in a sidebar",
+          "required": true,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "can_manage_bots",
+          "description": "*True*, if other bots can be created to be controlled by the bot",
+          "required": true,
+          "type_info": {
+            "type": "bool"
+          }
+        },
+        {
+          "name": "supports_join_request_queries",
+          "description": "*True*, if the bot supports join request queries and can be assigned to process them",
+          "required": true,
+          "type_info": {
+            "type": "bool"
+          }
+        }
+      ],
+      "documentation_link": "https://core.telegram.org/bots/api#botfullinfo"
+    },
+    {
+      "name": "RichBlockExpandableBlockQuotation",
+      "description": "A block quotation, corresponding to the HTML tag `<blockquote>` with custom attribute `\"expandable\"`.",
+      "type": "properties",
+      "properties": [
+        {
+          "name": "type",
+          "description": "Type of the block, always “expandable\\_blockquote”",
+          "required": true,
+          "type_info": {
+            "type": "string",
+            "default": "expandable_blockquote",
+            "enumeration": []
+          }
+        },
+        {
+          "name": "blocks",
+          "description": "Content of the block",
+          "required": true,
+          "type_info": {
+            "type": "array",
+            "array": {
+              "type": "reference",
+              "reference": "RichBlock"
+            }
+          }
+        },
+        {
+          "name": "credit",
+          "description": "*Optional*. Credit of the block",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "RichText"
+          }
+        }
+      ],
+      "documentation_link": "https://core.telegram.org/bots/api#richblockexpandableblockquotation"
+    },
+    {
+      "name": "InputRichBlockExpandableBlockQuotation",
+      "description": "A block quotation, corresponding to the HTML tag `<blockquote>` with custom attribute `\"expandable\"`.",
+      "type": "properties",
+      "properties": [
+        {
+          "name": "type",
+          "description": "Type of the block, always “expandable\\_blockquote”",
+          "required": true,
+          "type_info": {
+            "type": "string",
+            "default": "expandable_blockquote",
+            "enumeration": []
+          }
+        },
+        {
+          "name": "blocks",
+          "description": "Content of the block",
+          "required": true,
+          "type_info": {
+            "type": "array",
+            "array": {
+              "type": "reference",
+              "reference": "InputRichBlock"
+            }
+          }
+        },
+        {
+          "name": "credit",
+          "description": "*Optional*. Credit of the block",
+          "required": false,
+          "type_info": {
+            "type": "reference",
+            "reference": "RichText"
+          }
+        }
+      ],
+      "documentation_link": "https://core.telegram.org/bots/api#inputrichblockexpandableblockquotation"
     }
   ]
 }

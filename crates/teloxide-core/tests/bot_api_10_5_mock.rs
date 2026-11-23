@@ -195,26 +195,29 @@ async fn cache_me_invalidates_all_clones_after_successful_settings_update() {
             let request = String::from_utf8_lossy(&request[..size]).to_ascii_lowercase();
             let (status, body) = if request.contains("/getme ") {
                 me_fetches += 1;
-                ("200 OK", json!({
-                    "ok": true,
-                    "result": {
-                        "id": 123,
-                        "is_bot": true,
-                        "first_name": format!("generation-{me_fetches}"),
-                        "can_join_groups": false,
-                        "can_read_all_group_messages": false,
-                        "supports_inline_queries": false,
-                        "needs_inline_query_location": false,
-                        "can_connect_to_business": false,
-                        "supports_guest_queries": false,
-                        "supports_join_request_queries": false,
-                        "has_topics_enabled": false,
-                        "allows_users_to_create_topics": false,
-                        "has_topic_sidebar": false,
-                        "can_manage_bots": false,
-                        "has_main_web_app": false
-                    }
-                }))
+                (
+                    "200 OK",
+                    json!({
+                        "ok": true,
+                        "result": {
+                            "id": 123,
+                            "is_bot": true,
+                            "first_name": format!("generation-{me_fetches}"),
+                            "can_join_groups": false,
+                            "can_read_all_group_messages": false,
+                            "supports_inline_queries": false,
+                            "needs_inline_query_location": false,
+                            "can_connect_to_business": false,
+                            "supports_guest_queries": false,
+                            "supports_join_request_queries": false,
+                            "has_topics_enabled": false,
+                            "allows_users_to_create_topics": false,
+                            "has_topic_sidebar": false,
+                            "can_manage_bots": false,
+                            "has_main_web_app": false
+                        }
+                    }),
+                )
             } else if request.contains("/setmysettings ") {
                 settings_calls += 1;
                 if settings_calls == 1 {

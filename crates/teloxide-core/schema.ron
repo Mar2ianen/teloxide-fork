@@ -337,6 +337,7 @@ Schema(
         ),
         Method(
             names: ("setMySettings", "SetMySettings", "set_my_settings"),
+            validation: Some("crate::requests::validation::validate_set_my_settings"),
             return_ty: True,
             doc: Doc(md: "Use this method to change settings of the bot. Settings that aren't specified remain unchanged. Returns True on success."),
             tg_doc: "https://core.telegram.org/bots/api#setmysettings",

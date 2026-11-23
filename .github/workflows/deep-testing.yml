@@ -72,7 +72,9 @@ jobs:
           retention-days: 14
 
   mutants:
-    if: github.event_name != 'pull_request'
+    # Expensive mutation tests run on the exact release PR SHA (base=master),
+    # and on non-PR events. Ordinary next-targeting PRs skip them.
+    if: github.event_name != 'pull_request' || github.base_ref == 'master'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

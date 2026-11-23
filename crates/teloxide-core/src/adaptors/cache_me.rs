@@ -14,7 +14,7 @@ use once_cell::sync::OnceCell;
 use url::Url;
 
 use crate::{
-    payloads::{GetMe, SetMySettings},
+    payloads::GetMe,
     requests::{HasPayload, Request, Requester},
     types::*,
 };
@@ -91,6 +91,12 @@ where
 
     fn set_my_settings(&self) -> Self::SetMySettings {
         InvalidateMeRequest(self.bot.set_my_settings(), Arc::clone(&self.me))
+    }
+
+    type SetMyName = InvalidateMeRequest<B::SetMyName>;
+
+    fn set_my_name(&self) -> Self::SetMyName {
+        InvalidateMeRequest(self.bot.set_my_name(), Arc::clone(&self.me))
     }
 
     requester_forward! {
@@ -179,7 +185,6 @@ where
         set_my_commands,
         get_business_connection,
         get_my_commands,
-        set_my_name,
         get_my_name,
         set_my_description,
         get_my_description,
@@ -360,17 +365,14 @@ impl<R: Request<Payload = GetMe>> IntoFuture for CachedMeRequest<R> {
     }
 }
 
-/// Forwards `setMySettings` and invalidates the shared cache only after
+/// Forwards a self-mutating method and invalidates the shared cache only after
 /// Telegram confirms success. Unsent or failed requests leave it untouched.
 #[must_use = "Requests are lazy and do nothing unless sent"]
-pub struct InvalidateMeRequest<R: Request<Payload = SetMySettings>>(
-    R,
-    Arc<RwLock<Arc<OnceCell<Me>>>>,
-);
+pub struct InvalidateMeRequest<R: Request>(R, Arc<RwLock<Arc<OnceCell<Me>>>>);
 
 impl<R> Request for InvalidateMeRequest<R>
 where
-    R: Request<Payload = SetMySettings>,
+    R: Request,
 {
     type Err = R::Err;
     type Send = InvalidateOnSuccess<R::Send>;
@@ -385,8 +387,8 @@ where
     }
 }
 
-impl<R: Request<Payload = SetMySettings>> HasPayload for InvalidateMeRequest<R> {
-    type Payload = SetMySettings;
+impl<R: Request> HasPayload for InvalidateMeRequest<R> {
+    type Payload = R::Payload;
 
     fn payload_mut(&mut self) -> &mut Self::Payload {
         self.0.payload_mut()
@@ -397,8 +399,8 @@ impl<R: Request<Payload = SetMySettings>> HasPayload for InvalidateMeRequest<R> 
     }
 }
 
-impl<R: Request<Payload = SetMySettings>> IntoFuture for InvalidateMeRequest<R> {
-    type Output = Result<<SetMySettings as crate::requests::Payload>::Output, R::Err>;
+impl<R: Request> IntoFuture for InvalidateMeRequest<R> {
+    type Output = Result<crate::requests::Output<R>, R::Err>;
     type IntoFuture = InvalidateOnSuccess<R::Send>;
 
     fn into_future(self) -> Self::IntoFuture {

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 0.17.0-rc.2 - 2026-11-23
+
 ### Added
 
 - Add Bot API 10.5 settings, full bot information, owner-invited write-access events and rich-block expandable quotations. See the repository's `docs/bot-api-10.5/README.md` audit.

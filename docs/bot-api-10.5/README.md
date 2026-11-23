@@ -29,5 +29,6 @@ coverage.
 | Invited users | Added optional `WriteAccessAllowed::inviter` for owner invitations. |
 | Expandable quotes | Replaced quote `text` with rich `blocks` in incoming and input quote models; nested input blocks use existing recursive request validation. |
 
-Package versions and release tags remain unchanged on the development branch;
-10.5 work targets `next` for review.
+The 10.5 release candidate is prepared on `release/bot-api-10-5-rc2` and
+must pass release CI before immutable tags are created. This audit verifies
+the published API contract snapshot, not live Telegram behavior.

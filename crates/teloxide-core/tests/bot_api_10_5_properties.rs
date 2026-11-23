@@ -2,8 +2,10 @@ use proptest::prelude::*;
 use serde_json::{json, Value};
 use teloxide_core::{
     payloads::SetMySettings,
-    types::{BotFullInfo, CallbackQueryMode, InputRichBlock, InputRichBlockExpandableBlockQuotation,
-        InputRichBlockParagraph, InputRichMessage, RichText},
+    types::{
+        BotFullInfo, CallbackQueryMode, InputRichBlock, InputRichBlockExpandableBlockQuotation,
+        InputRichBlockParagraph, InputRichMessage, RichText,
+    },
 };
 
 proptest! {

@@ -1,21 +1,21 @@
 #![cfg(feature = "cache_me")]
 
 use std::{
-    io::{Read, Write},
+    io::Write,
     net::{TcpListener, TcpStream},
     sync::mpsc,
     thread,
     time::Duration,
 };
 
+mod support;
+
+use support::read_http_request;
 use serde_json::json;
 use teloxide_core::{adaptors::CacheMe, prelude::*, Bot};
 
 fn read_request(client: &mut TcpStream) -> String {
-    client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-    let mut buffer = [0u8; 8192];
-    let length = client.read(&mut buffer).unwrap();
-    String::from_utf8_lossy(&buffer[..length]).to_ascii_lowercase()
+    String::from_utf8(read_http_request(client)).unwrap().to_ascii_lowercase()
 }
 
 fn write_response(client: &mut TcpStream, result: serde_json::Value) {

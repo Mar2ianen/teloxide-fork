@@ -1,17 +1,12 @@
 //! Offline wire-level checks: no Telegram credentials or external network
 //! needed.
 
-use std::{
-    io::Write,
-    net::TcpListener,
-    thread,
-    time::Duration,
-};
+use std::{io::Write, net::TcpListener, thread, time::Duration};
 
 mod support;
 
-use support::read_http_request;
 use serde_json::json;
+use support::read_http_request;
 use teloxide_core::{
     prelude::*,
     self_check::{
@@ -189,9 +184,8 @@ async fn cache_me_invalidates_all_clones_after_successful_settings_update() {
                 }
                 Err(error) => panic!("accept: {error}"),
             };
-            let request = String::from_utf8(read_http_request(&mut client))
-                .unwrap()
-                .to_ascii_lowercase();
+            let request =
+                String::from_utf8(read_http_request(&mut client)).unwrap().to_ascii_lowercase();
             let (status, body) = if request.contains("/getme ") {
                 me_fetches += 1;
                 (

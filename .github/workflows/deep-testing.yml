@@ -72,12 +72,17 @@ jobs:
           retention-days: 14
 
   mutants:
-    if: github.event_name != 'pull_request'
+    # Expensive mutation tests run on release PRs targeting master and
+    # on non-PR events. Ordinary next-targeting PRs skip them.
+    if: github.event_name != 'pull_request' || github.base_ref == 'master'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          # pull_request defaults to a synthetic merge commit: mutation
+          # analysis must use the actual reviewed release head commit instead.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
         with:

@@ -78,15 +78,14 @@ job or before releasing; do not give tokens to untrusted pull requests.
 
 ## Downstream compatibility
 
-The advisory `.github/workflows/downstream-compat.yml` checks public
-`NedoBot` and `teloxide-ui` against the current Teloxide checkout, overriding
-only their pinned Git dependency in **disposable worktrees**. The source
-projects are never modified. Targets are documented in `downstream.toml` and
-can be checked locally with:
+The advisory `.github/workflows/downstream-compat.yml` checks
+`teloxide-ui` against the current Teloxide checkout, overriding only its
+pinned Git dependency in a disposable worktree. This is independent of the
+required Teloxide CI. No NedoBot source or deployment is part of this pipeline.
+The check can also be run manually:
 
 ```sh
 python3 scripts/check_downstream.py teloxide-ui
-python3 scripts/check_downstream.py nedobot
 ```
 
 These compatibility jobs are advisory until consumers migrate: an unrelated

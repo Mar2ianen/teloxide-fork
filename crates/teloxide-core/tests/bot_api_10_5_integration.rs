@@ -374,4 +374,3 @@ fn set_my_settings_supports_all_fifteen_optional_fields() {
         })
     );
 }
-

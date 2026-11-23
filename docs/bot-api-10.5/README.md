@@ -22,7 +22,7 @@ coverage.
 
 | Official change | Implementation |
 |---|---|
-| Bot settings | Generated `set_my_settings` payload and `Requester` method with all 14 optional parameters; callback query mode is a typed enum. |
+| Bot settings | Generated `set_my_settings` payload and `Requester` method with all 15 optional parameters; callback query mode is a typed enum. |
 | Request adaptors | Forwarded through `Bot`, cache, parse-mode, trace, erased, throttle-compat and outbound requesters; global scheduler classification. |
 | Bot identity | `get_me` returns `BotFullInfo`, including active usernames, inline placeholder/location and topic-sidebar state. `Me` remains a compatibility alias. |
 | User model | Moved bot-configuration fields from `User` to `BotFullInfo`, matching the 10.5 split. |

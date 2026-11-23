@@ -4,8 +4,3 @@
 id = "teloxide-ui"
 repository = "Mar2ianen/teloxide-ui"
 ref = "main"
-
-[[project]]
-id = "nedobot"
-repository = "Mar2ianen/NedoBot"
-ref = "main"

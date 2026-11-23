@@ -61,7 +61,7 @@ pub fn add_preamble(generator: &'static str, mut text: String) -> String {
 }
 
 /// Checks that a generated file has the expected contents without modifying
-/// it. Set \`TELOXIDE_CODEGEN_WRITE=1\` to explicitly regenerate files.
+/// it. Set `TELOXIDE_CODEGEN_WRITE=1` to explicitly regenerate files.
 pub fn ensure_file_contents(file: &Path, contents: &str) {
     ensure_files_contents([(file, contents)])
 }

@@ -1287,6 +1287,12 @@ fn method_policy(name: &str) -> MethodPolicy {
             priority: "NORMAL",
             weight: WeightPolicy::One,
         },
+        "set_my_settings" => MethodPolicy {
+            scope: ScopePolicy::Global,
+            class: "OTHER",
+            priority: "NORMAL",
+            weight: WeightPolicy::One,
+        },
         "set_user_emoji_status" => MethodPolicy {
             scope: ScopePolicy::UserIdField("user_id"),
             class: "OTHER",

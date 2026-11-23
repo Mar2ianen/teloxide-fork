@@ -430,22 +430,28 @@ impl InputFileLike for InputRichBlockListItem {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde_with::skip_serializing_none]
 pub struct InputRichBlockBlockQuotation {
     pub blocks: Vec<InputRichBlock>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub credit: Option<RichText>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde_with::skip_serializing_none]
 pub struct InputRichBlockExpandableBlockQuotation {
-    pub text: RichText,
+    pub blocks: Vec<InputRichBlock>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub credit: Option<RichText>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde_with::skip_serializing_none]
 pub struct InputRichBlockPullQuotation {
     pub text: RichText,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub credit: Option<RichText>,
 }
 

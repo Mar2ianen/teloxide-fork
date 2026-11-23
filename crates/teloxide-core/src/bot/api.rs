@@ -1879,6 +1879,12 @@ impl Requester for Bot {
         Self::SetMyProfilePhoto::new(self.clone(), payloads::SetMyProfilePhoto::new(photo))
     }
 
+    type SetMySettings = JsonRequest<payloads::SetMySettings>;
+
+    fn set_my_settings(&self) -> Self::SetMySettings {
+        Self::SetMySettings::new(self.clone(), payloads::SetMySettings::new())
+    }
+
     type RemoveMyProfilePhoto = JsonRequest<payloads::RemoveMyProfilePhoto>;
 
     fn remove_my_profile_photo(&self) -> Self::RemoveMyProfilePhoto {

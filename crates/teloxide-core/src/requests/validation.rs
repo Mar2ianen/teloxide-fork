@@ -466,8 +466,8 @@ fn validate_block(
         }
         InputRichBlock::ExpandableBlockquote(value) => {
             path.push_field("expandable_blockquote");
-            path.push_field("text");
-            validate_rich_text_at(&value.text, context, path)?;
+            path.push_field("blocks");
+            validate_blocks(&value.blocks, context, path)?;
             path.pop();
             validate_optional_rich_text(value.credit.as_ref(), context, path, "credit")?;
             path.pop();

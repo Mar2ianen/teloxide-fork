@@ -2,14 +2,14 @@
 
 use serde::Serialize;
 
-use crate::types::Me;
+use crate::types::BotFullInfo;
 
 impl_payload! {
-    /// A simple method for testing your bot's auth token. Requires no parameters. Returns basic information about the bot in form of a [`User`] object.
+    /// A simple method for testing your bot's authentication token. Requires no parameters. Returns information about the bot in form of a [`BotFullInfo`] object.
     ///
-    /// [`User`]: crate::types::User
+    /// [`BotFullInfo`]: crate::types::BotFullInfo
     #[derive(Debug, PartialEq, Eq, Hash, Default, Clone, Serialize)]
-    pub GetMe (GetMeSetters) => Me {
+    pub GetMe (GetMeSetters) => BotFullInfo {
 
     }
 }

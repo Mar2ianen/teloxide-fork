@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- Add Bot API 10.5 settings, full bot information, owner-invited write-access events and rich-block expandable quotations. See the repository's `docs/bot-api-10.5/README.md` audit.
+- Generate `set_my_settings` and forward it through requester adaptors and the outbound scheduler.
+
+### Changed
+
+- [**BC**] Change `get_me` output to `BotFullInfo` and move bot configuration fields out of `User`; keep `Me` as an alias.
+- [**BC**] Replace `text` with nested `blocks` in expandable input and output quotations.
+
 ## 0.17.0-rc.1 - 2026-11-09
 
 ### Fixed

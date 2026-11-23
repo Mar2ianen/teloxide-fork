@@ -675,7 +675,7 @@ pub struct RichBlockBlockQuotation {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct RichBlockExpandableBlockQuotation {
-    pub text: RichText,
+    pub blocks: Vec<RichBlock>,
     pub credit: Option<RichText>,
 }
 

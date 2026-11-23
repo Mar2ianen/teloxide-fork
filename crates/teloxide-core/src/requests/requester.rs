@@ -253,6 +253,11 @@ pub trait Requester {
     /// For Telegram documentation see [`GetMe`].
     fn get_me(&self) -> Self::GetMe;
 
+    type SetMySettings: Request<Payload = SetMySettings, Err = Self::Err>;
+
+    /// For Telegram documentation see [`SetMySettings`].
+    fn set_my_settings(&self) -> Self::SetMySettings;
+
     type LogOut: Request<Payload = LogOut, Err = Self::Err>;
 
     /// For Telegram documentation see [`LogOut`].
@@ -2123,6 +2128,7 @@ macro_rules! forward_all {
             get_managed_bot_access_settings,
             set_managed_bot_access_settings,
             set_my_profile_photo,
+            set_my_settings,
             remove_my_profile_photo,
             get_user_gifts,
             get_chat_gifts,

@@ -1,6 +1,27 @@
 This document describes breaking changes of `teloxide` crate, as well as the ways to update code.
 Note that the list of required changes is not fully exhaustive and it may lack something in rare cases.
 
+## Unreleased
+
+### Bot API 10.5
+
+`get_me()` now returns `BotFullInfo`. Its `user` field still exposes the
+bot's common `User` identity, and `Me` remains an alias for source migration.
+Bot-only settings such as `can_join_groups`, `supports_inline_queries`,
+`has_topics_enabled` and `can_manage_bots` now live on `BotFullInfo`; remove
+these fields from `User` struct literals and initialize them on `BotFullInfo`
+when constructing one directly.
+
+`set_my_settings()` has no required arguments. Chain only the settings to
+change; omitted setters are not sent and Telegram leaves those settings as is.
+`callback_query_mode` takes `CallbackQueryMode::{Default, Auto, Inline}`. Code
+handling callback queries from bot-authored messages should accept the
+`inline_message_id` form selected by this setting.
+
+Expandable rich quotations now use `blocks: Vec<...>` instead of `text`; input
+blocks can contain any `InputRichBlock`. `WriteAccessAllowed` has a new optional
+`inviter` field for owner-invited users. See the [10.5 official-source audit](docs/bot-api-10.5/README.md).
+
 ## 0.21.0-rc.1 - 2026-11-09
 
 ### Bot API 10.4

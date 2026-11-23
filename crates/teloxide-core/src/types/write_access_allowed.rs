@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+use crate::types::User;
+
 /// This object represents a service message about a user allowing a bot to
 /// write messages after adding the bot to the attachment menu or launching a
-/// Web App from a link.
+/// Web App from a link, or about a user invited by the bot owner.
 ///
 /// [The official docs](https://core.telegram.org/bots/api#writeaccessallowed).
 #[serde_with::skip_serializing_none]
@@ -17,4 +19,7 @@ pub struct WriteAccessAllowed {
     /// `true`, if the access was granted when the bot was added to the
     /// attachment or side menu
     pub from_attachment_menu: Option<bool>,
+    /// The owner of the bot, if the user was invited to the private chat by
+    /// the owner.
+    pub inviter: Option<User>,
 }

@@ -280,6 +280,7 @@ where
         get_managed_bot_access_settings,
         set_managed_bot_access_settings,
         set_my_profile_photo,
+        set_my_settings,
         remove_my_profile_photo,
         get_user_gifts,
         get_chat_gifts,

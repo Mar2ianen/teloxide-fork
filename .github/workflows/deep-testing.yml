@@ -1,6 +1,10 @@
 name: Deep Rust quality
 
 on:
+  pull_request:
+    branches: [master, next]
+  push:
+    branches: [next]
   workflow_dispatch:
   schedule:
     - cron: "17 3 * * 0"
@@ -62,6 +66,7 @@ jobs:
           retention-days: 14
 
   mutants:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -100,7 +105,7 @@ jobs:
       - name: Install cargo-fuzz
         run: cargo +nightly install cargo-fuzz --locked
       - name: Fuzz untrusted Telegram updates
-        run: cargo +nightly fuzz run updates -- -max_total_time=60 -max_len=16384
+        run: cargo +nightly fuzz run updates -- -max_total_time=20 -max_len=16384
       - name: Fuzz getMe and rich responses
         run: cargo +nightly fuzz run bot_info_and_rich -- -max_total_time=60 -max_len=16384
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

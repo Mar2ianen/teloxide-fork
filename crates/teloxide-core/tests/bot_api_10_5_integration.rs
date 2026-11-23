@@ -287,3 +287,91 @@ fn set_my_settings_default_payload_does_not_reset_other_settings() {
     let payload = SetMySettings::new();
     assert_eq!(serde_json::to_value(payload).unwrap(), json!({}));
 }
+
+#[test]
+fn bot_full_info_capabilities_preserve_boolean_values() {
+    let baseline = json!({
+        "id": 777,
+        "is_bot": true,
+        "first_name": "Capabilities",
+        "can_join_groups": false,
+        "can_read_all_group_messages": false,
+        "supports_guest_queries": false,
+        "supports_inline_queries": false,
+        "needs_inline_query_location": false,
+        "can_connect_to_business": false,
+        "has_main_web_app": false,
+        "has_topics_enabled": false,
+        "allows_users_to_create_topics": false,
+        "has_topic_sidebar": false,
+        "can_manage_bots": false,
+        "supports_join_request_queries": false
+    });
+    let keys = [
+        "can_join_groups",
+        "can_read_all_group_messages",
+        "supports_guest_queries",
+        "supports_inline_queries",
+        "needs_inline_query_location",
+        "can_connect_to_business",
+        "has_main_web_app",
+        "has_topics_enabled",
+        "allows_users_to_create_topics",
+        "has_topic_sidebar",
+        "can_manage_bots",
+        "supports_join_request_queries",
+    ];
+
+    for field in keys {
+        for value in [true, false] {
+            let mut raw = baseline.clone();
+            raw[field] = json!(value);
+            let info: BotFullInfo = serde_json::from_value(raw).unwrap();
+            assert_eq!(serde_json::to_value(&info).unwrap()[field], json!(value), "{field}");
+        }
+    }
+}
+
+#[test]
+fn set_my_settings_supports_all_fifteen_optional_fields() {
+    use teloxide_core::payloads::SetMySettings;
+
+    let mut payload = SetMySettings::new();
+    payload.supports_inline_queries = Some(false);
+    payload.inline_query_placeholder = Some(String::new());
+    payload.needs_inline_query_location = Some(true);
+    payload.inline_feedback_share_denominator = Some(0);
+    payload.can_join_groups = Some(false);
+    payload.can_read_all_group_messages = Some(true);
+    payload.can_connect_to_business = Some(false);
+    payload.can_manage_bots = Some(true);
+    payload.supports_guest_queries = Some(false);
+    payload.supports_join_request_queries = Some(true);
+    payload.has_topics_enabled = Some(false);
+    payload.allows_users_to_create_topics = Some(true);
+    payload.has_topic_sidebar = Some(false);
+    payload.can_communicate_with_bots = Some(true);
+    payload.callback_query_mode = Some(CallbackQueryMode::Inline);
+
+    assert_eq!(
+        serde_json::to_value(payload).unwrap(),
+        json!({
+            "supports_inline_queries": false,
+            "inline_query_placeholder": "",
+            "needs_inline_query_location": true,
+            "inline_feedback_share_denominator": 0,
+            "can_join_groups": false,
+            "can_read_all_group_messages": true,
+            "can_connect_to_business": false,
+            "can_manage_bots": true,
+            "supports_guest_queries": false,
+            "supports_join_request_queries": true,
+            "has_topics_enabled": false,
+            "allows_users_to_create_topics": true,
+            "has_topic_sidebar": false,
+            "can_communicate_with_bots": true,
+            "callback_query_mode": "inline"
+        })
+    );
+}
+

@@ -2857,7 +2857,7 @@ checksum = "20f34339676cdcab560c9a82300c4c2581f68b9369aedf0fae86f2ff9565ff3e"
 
 [[package]]
 name = "teloxide"
-version = "0.21.0-rc.1"
+version = "0.21.0-rc.2"
 dependencies = [
  "axum",
  "bincode",
@@ -2893,7 +2893,7 @@ dependencies = [
 
 [[package]]
 name = "teloxide-core"
-version = "0.17.0-rc.1"
+version = "0.17.0-rc.2"
 dependencies = [
  "aho-corasick",
  "bitflags",

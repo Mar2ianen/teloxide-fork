@@ -2,12 +2,15 @@
 //! needed.
 
 use std::{
-    io::{Read, Write},
+    io::Write,
     net::TcpListener,
     thread,
     time::Duration,
 };
 
+mod support;
+
+use support::read_http_request;
 use serde_json::json;
 use teloxide_core::{
     prelude::*,
@@ -25,10 +28,7 @@ fn mock_response(
     let url: reqwest::Url = format!("http://{}", listener.local_addr().unwrap()).parse().unwrap();
     let handle = thread::spawn(move || {
         let (mut client, _) = listener.accept().unwrap();
-        client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-        let mut request = [0u8; 8192];
-        let size = client.read(&mut request).unwrap();
-        let request = String::from_utf8_lossy(&request[..size]).into_owned();
+        let request = String::from_utf8(read_http_request(&mut client)).unwrap();
         let response = response.to_string();
         write!(
             client,
@@ -189,10 +189,9 @@ async fn cache_me_invalidates_all_clones_after_successful_settings_update() {
                 }
                 Err(error) => panic!("accept: {error}"),
             };
-            client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-            let mut request = [0u8; 8192];
-            let size = client.read(&mut request).unwrap();
-            let request = String::from_utf8_lossy(&request[..size]).to_ascii_lowercase();
+            let request = String::from_utf8(read_http_request(&mut client))
+                .unwrap()
+                .to_ascii_lowercase();
             let (status, body) = if request.contains("/getme ") {
                 me_fetches += 1;
                 (

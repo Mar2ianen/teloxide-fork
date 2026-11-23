@@ -1,14 +1,9 @@
-use std::{
-    io::Write,
-    net::TcpListener,
-    thread,
-    time::Duration,
-};
+use std::{io::Write, net::TcpListener, thread, time::Duration};
 
 mod support;
 
-use support::read_http_request;
 use serde_json::{json, Value};
+use support::read_http_request;
 use teloxide_core::{
     prelude::*,
     types::{

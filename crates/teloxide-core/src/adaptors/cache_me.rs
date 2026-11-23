@@ -1,4 +1,8 @@
-use std::{future::IntoFuture, pin::Pin, sync::{Arc, RwLock}};
+use std::{
+    future::IntoFuture,
+    pin::Pin,
+    sync::{Arc, RwLock},
+};
 
 use futures::{
     future,
@@ -304,11 +308,7 @@ download_forward! {
 }
 
 #[must_use = "Requests are lazy and do nothing unless sent"]
-pub struct CachedMeRequest<R: Request<Payload = GetMe>>(
-    R,
-    Arc<RwLock<Arc<OnceCell<Me>>>>,
-    GetMe,
-);
+pub struct CachedMeRequest<R: Request<Payload = GetMe>>(R, Arc<RwLock<Arc<OnceCell<Me>>>>, GetMe);
 
 impl<R> Request for CachedMeRequest<R>
 where

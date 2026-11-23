@@ -10,7 +10,7 @@ use std::{
 use serde_json::json;
 use teloxide_core::{
     prelude::*,
-    self_check::{check_bot, ExpectedBotCapabilities},
+    self_check::{check_bot, check_delivery, BotDeliveryMode, ExpectedBotCapabilities, ExpectedBotDelivery},
     types::{CallbackQueryMode, UpdateKind, UserId},
 };
 
@@ -121,3 +121,47 @@ async fn rate_limit_is_not_silently_treated_as_success() {
     assert!(result.is_err());
     assert!(handler.join().unwrap().to_ascii_lowercase().contains("/setmysettings"));
 }
+
+#[tokio::test]
+async fn delivery_self_check_distinguishes_polling_from_webhook() {
+    let (url, handler) = mock_response(
+        "200 OK",
+        json!({
+            "ok": true,
+            "result": {
+                "url": "",
+                "has_custom_certificate": false,
+                "pending_update_count": 8
+            }
+        }),
+    );
+    let bot = Bot::new("123:offline").set_api_url(url);
+    let expected = ExpectedBotDelivery {
+        mode: Some(BotDeliveryMode::Polling),
+        max_pending_updates: Some(4),
+    };
+    let report = check_delivery(&bot, &expected).await.unwrap();
+    assert_eq!(report.issues.len(), 1);
+    assert!(report.info.url.is_none());
+    assert!(handler.join().unwrap().to_ascii_lowercase().contains("/getwebhookinfo"));
+}
+
+#[test]
+fn telegram_internal_sender_identifiers_are_disjoint() {
+    use teloxide_core::types::{User, UserId};
+
+    let telegram: User = serde_json::from_value(json!({
+        "id": 777000,
+        "is_bot": false,
+        "first_name": "Telegram"
+    }))
+    .unwrap();
+    assert!(telegram.is_telegram());
+    assert!(!telegram.is_channel());
+    assert!(!telegram.is_anonymous());
+
+    assert!(UserId(136817688).is_channel());
+    assert!(UserId(1087968824).is_anonymous());
+    assert!(!UserId(777000).is_channel());
+}
+

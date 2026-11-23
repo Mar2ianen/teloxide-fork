@@ -22,33 +22,26 @@ use std::{
 use aho_corasick::AhoCorasick;
 use xshell::{cmd, Shell};
 
-fn ensure_rustfmt(sh: &Shell) {
-    // FIXME(waffle): find a better way to set toolchain
-    let toolchain = "nightly-2025-06-12";
-
-    let version = cmd!(sh, "rustup run {toolchain} rustfmt --version").read().unwrap_or_default();
-
-    if !version.contains("nightly") {
-        panic!(
-            "Failed to run rustfmt from toolchain '{toolchain}'. Please run `rustup component add \
-             rustfmt --toolchain {toolchain}` to install it.",
-        );
-    }
-}
-
+/// Uses the rustfmt executable selected by the caller. CI should keep its
+/// version pinned when comparing checked-in generated code.
 pub fn reformat(text: String) -> String {
-    let toolchain = "nightly-2025-06-12";
-
+    let rustfmt = std::env::var("RUSTFMT").unwrap_or_else(|_| "rustfmt".to_owned());
     let sh = Shell::new().unwrap();
-    ensure_rustfmt(&sh);
+
+    let version = cmd!(sh, "{rustfmt} --version").read().unwrap_or_else(|error| {
+        panic!("Cannot run {rustfmt}: {error}. Set RUSTFMT to the formatter executable.");
+    });
+    assert!(version.contains("rustfmt"), "Expected rustfmt, got: {version}");
+
     let rustfmt_toml = project_root().join("../../rustfmt.toml");
     let mut stdout = cmd!(
         sh,
-        "rustup run {toolchain} rustfmt --config-path {rustfmt_toml} --config fn_single_line=true"
+        "{rustfmt} --config-path {rustfmt_toml} --config fn_single_line=true"
     )
     .stdin(text)
     .read()
-    .unwrap();
+    .unwrap_or_else(|error| panic!("rustfmt failed: {error}"));
+
     if !stdout.ends_with('\n') {
         stdout.push('\n');
     }
@@ -67,54 +60,43 @@ pub fn add_preamble(generator: &'static str, mut text: String) -> String {
     text
 }
 
-/// Checks that the `file` has the specified `contents`. If that is not the
-/// case, updates the file and then fails the test.
+/// Checks that a generated file has the expected contents without modifying
+/// it. Set \`TELOXIDE_CODEGEN_WRITE=1\` to explicitly regenerate files.
 pub fn ensure_file_contents(file: &Path, contents: &str) {
     ensure_files_contents([(file, contents)])
 }
 
+/// Check-only by default, so CI and a failed unit test never mutate sources.
 pub fn ensure_files_contents<'a>(
     files_and_contents: impl IntoIterator<Item = (&'a Path, &'a str)>,
 ) {
-    let mut err_count = 0;
+    let write = std::env::var_os("TELOXIDE_CODEGEN_WRITE").is_some();
+    let mut changed = 0usize;
 
     for (path, contents) in files_and_contents {
-        if path.exists() {
-            let old_contents = fs::read_to_string(path).unwrap();
-
-            if normalize_newlines(&old_contents) == normalize_newlines(contents) {
-                // File is already up to date.
+        if let Ok(existing) = fs::read_to_string(path) {
+            if normalize_newlines(&existing) == normalize_newlines(contents) {
                 continue;
             }
         }
 
-        err_count += 1;
-
+        changed += 1;
         let display_path = path.strip_prefix(project_root()).unwrap_or(path);
-        eprintln!(
-            "\n\x1b[31;1merror\x1b[0m: {} was not up-to-date, updating\n",
-            display_path.display()
-        );
-        if let Some(parent) = path.parent() {
-            let _ = fs::create_dir_all(parent);
+        if write {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(path, contents.as_bytes()).unwrap();
+            eprintln!("regenerated {}", display_path.display());
+        } else {
+            eprintln!("generated file is stale: {}", display_path.display());
         }
-        fs::write(path, contents.as_bytes()).unwrap();
     }
 
-    let (s, were) = match err_count {
-        // No erros, everything is up to date
-        0 => return,
-        // Singular
-        1 => ("", "was"),
-        // Plural
-        _ => ("s", "were"),
-    };
-
-    if std::env::var("CI").is_ok() {
-        eprintln!("    NOTE: run `cargo test` locally and commit the updated files\n");
-    }
-
-    panic!("some file{s} {were} not up to date and has been updated, simply re-run the tests");
+    assert!(
+        write || changed == 0,
+        "{changed} generated file(s) are stale; run with TELOXIDE_CODEGEN_WRITE=1 to regenerate"
+    );
 }
 
 pub fn replace_block(path: &Path, title: &str, new: &str) -> String {

@@ -1,10 +1,13 @@
 use std::{
-    io::{Read, Write},
+    io::Write,
     net::TcpListener,
     thread,
     time::Duration,
 };
 
+mod support;
+
+use support::read_http_request;
 use serde_json::{json, Value};
 use teloxide_core::{
     prelude::*,
@@ -118,27 +121,7 @@ async fn capture_settings_request() -> Vec<u8> {
     let url = format!("http://{}", listener.local_addr().unwrap());
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-        let mut request = Vec::new();
-        let mut buffer = [0; 4096];
-        loop {
-            let size = stream.read(&mut buffer).unwrap();
-            assert!(size > 0);
-            request.extend_from_slice(&buffer[..size]);
-            if let Some(end) = request.windows(4).position(|x| x == b"\r\n\r\n") {
-                let headers = String::from_utf8_lossy(&request[..end]).to_ascii_lowercase();
-                let length = headers
-                    .lines()
-                    .find_map(|line| line.strip_prefix("content-length:"))
-                    .unwrap()
-                    .trim()
-                    .parse::<usize>()
-                    .unwrap();
-                if request.len() >= end + 4 + length {
-                    break;
-                }
-            }
-        }
+        let request = read_http_request(&mut stream);
         let body = r#"{"ok":true,"result":true}"#;
         write!(
             stream,

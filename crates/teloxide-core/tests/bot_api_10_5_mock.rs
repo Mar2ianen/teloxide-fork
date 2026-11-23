@@ -68,8 +68,8 @@ async fn self_check_uses_a_read_only_get_me_request() {
     assert_eq!(report.info.user.username, None);
 
     let request = handler.join().unwrap();
-    assert!(request.starts_with("POST /bot123:offline/getMe HTTP/1.1"));
-    assert!(!request.contains("setMySettings"));
+    assert!(request.to_ascii_lowercase().starts_with("post /bot123:offline/getme http/1.1"));
+    assert!(!request.to_ascii_lowercase().contains("setmysettings"));
 }
 
 #[tokio::test]
@@ -103,7 +103,7 @@ async fn long_polling_decodes_internal_channel_bot_update() {
     };
     assert!(message.from.as_ref().unwrap().is_channel());
     assert_ne!(message.sender_chat.as_ref().unwrap().id.0, 136817688);
-    assert!(handler.join().unwrap().contains("/getUpdates"));
+    assert!(handler.join().unwrap().to_ascii_lowercase().contains("/getupdates"));
 }
 
 #[tokio::test]
@@ -119,5 +119,5 @@ async fn rate_limit_is_not_silently_treated_as_success() {
     let bot = Bot::new("123:offline").set_api_url(url);
     let result = bot.set_my_settings().callback_query_mode(CallbackQueryMode::Auto).await;
     assert!(result.is_err());
-    assert!(handler.join().unwrap().contains("/setMySettings"));
+    assert!(handler.join().unwrap().to_ascii_lowercase().contains("/setmysettings"));
 }

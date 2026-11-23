@@ -262,6 +262,45 @@ mod tests {
             report.issues,
             vec![BotDeliveryIssue::TooManyPendingUpdates { maximum: 3, actual: 9 }]
         );
+        assert!(!report.is_healthy());
+    }
+
+    #[test]
+    fn webhook_identity_and_exact_backlog_limit_are_healthy() {
+        let endpoint: reqwest::Url = "https://example.org/hook".parse().unwrap();
+        let status: WebhookInfo = serde_json::from_value(json!({
+            "url": "https://example.org/hook",
+            "has_custom_certificate": false,
+            "pending_update_count": 3
+        }))
+        .unwrap();
+
+        // A matching webhook is healthy even if the backlog equals the limit.
+        let expected = ExpectedBotDelivery {
+            mode: Some(BotDeliveryMode::Webhook(endpoint)),
+            max_pending_updates: Some(3),
+        };
+        let report = inspect_delivery(status.clone(), &expected);
+        assert!(report.is_healthy());
+        assert!(report.issues.is_empty());
+
+        // A different webhook and a backlog above the limit are both errors.
+        let other: reqwest::Url = "https://example.org/other".parse().unwrap();
+        let expected = ExpectedBotDelivery {
+            mode: Some(BotDeliveryMode::Webhook(other.clone())),
+            max_pending_updates: Some(2),
+        };
+        let report = inspect_delivery(status, &expected);
+        assert!(!report.is_healthy());
+        assert_eq!(report.issues.len(), 2);
+        assert!(report.issues.contains(&BotDeliveryIssue::ModeMismatch {
+            expected: BotDeliveryMode::Webhook(other),
+            actual: Some("https://example.org/hook".parse().unwrap()),
+        }));
+        assert!(report.issues.contains(&BotDeliveryIssue::TooManyPendingUpdates {
+            maximum: 2,
+            actual: 3,
+        }));
     }
 
     #[test]
@@ -292,6 +331,7 @@ mod tests {
         };
         let result = inspect_bot(info(), &expected);
         assert_eq!(result.issues.len(), 4);
+        assert!(!result.is_healthy());
         assert!(result
             .issues
             .contains(&BotSelfCheckIssue::IdMismatch { expected: UserId(43), actual: UserId(42) }));
@@ -312,6 +352,7 @@ mod tests {
         };
         let report = inspect_bot(bot, &expected);
         assert_eq!(report.issues.len(), 2);
+        assert!(!report.is_healthy());
         assert!(report.issues.contains(&BotSelfCheckIssue::NotABot));
     }
 }

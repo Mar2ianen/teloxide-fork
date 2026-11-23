@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 0.21.0-rc.2 - 2026-11-23
+
 ### Added
 
 - Support Telegram Bot API 10.5: `set_my_settings`, `BotFullInfo`, owner-invited `WriteAccessAllowed` events and expandable rich quotes containing blocks. See `docs/bot-api-10.5/README.md` for the official-source audit.

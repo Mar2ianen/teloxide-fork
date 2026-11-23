@@ -3,6 +3,8 @@ Note that the list of required changes is not fully exhaustive and it may lack s
 
 ## Unreleased
 
+## 0.21.0-rc.2 - 2026-11-23
+
 ### Bot API 10.5
 
 `get_me()` now returns `BotFullInfo`. Its `user` field still exposes the

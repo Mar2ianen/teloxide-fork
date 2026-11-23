@@ -1,0 +1,11 @@
+# Public downstream consumers checked against the proposed Teloxide source.
+# Channel_Bot and GroupAnonymousBot are Telegram service identities, not repositories.
+[[project]]
+id = "teloxide-ui"
+repository = "Mar2ianen/teloxide-ui"
+ref = "main"
+
+[[project]]
+id = "nedobot"
+repository = "Mar2ianen/NedoBot"
+ref = "main"

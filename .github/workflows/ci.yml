@@ -170,16 +170,7 @@ jobs:
       # NB. Don't test (build) examples so we can use non-msrv features in them (--tests/--doc)
       - name: Compile
         run: |
-          cargo +${{ matrix.toolchain }} test --tests --no-run --verbose ${{ matrix.features }}
-
-      # Temporary artifact for synchronizing the newly resolved proptest lockfile.
-      - name: Export resolved Cargo.lock
-        if: ${{ matrix.rust == 'stable' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: resolved-cargo-lock
-          path: Cargo.lock
-          retention-days: 1
+          cargo +${{ matrix.toolchain }} test --locked --tests --no-run --verbose ${{ matrix.features }}
 
       - name: Setup redis
         run: |
@@ -199,12 +190,12 @@ jobs:
           PGPASSWORD: rewrite_it_in_rust
       - name: Test unit & integration tests
         run: |
-          cargo +${{ matrix.toolchain }} test --tests --verbose ${{ matrix.features }}
+          cargo +${{ matrix.toolchain }} test --locked --tests --verbose ${{ matrix.features }}
 
       - name: Test documentation tests
         if: ${{ matrix.rust != 'msrv' }}
         run: |
-          cargo +${{ matrix.toolchain }} test --doc --verbose ${{ matrix.features }}
+          cargo +${{ matrix.toolchain }} test --locked --doc --verbose ${{ matrix.features }}
 
   check-examples:
     runs-on: ubuntu-latest
@@ -225,15 +216,15 @@ jobs:
 
       - name: Check examples
         run: |
-          cargo +stable check --examples --features full
+          cargo +stable check --locked --examples --features full
 
       - name: Check all targets, including unit-test fixtures
-        run: cargo +stable check --workspace --all-targets --features full
+        run: cargo +stable check --locked --workspace --all-targets --features full
 
       # TODO: prolly move it to a separate step?
       - name: Check with no default features
         run: |
-          cargo +stable check --no-default-features
+          cargo +stable check --locked --no-default-features
 
   clippy:
     name: Run linter

@@ -146,6 +146,10 @@ jobs:
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
+      - name: Select the pinned formatter for generator checks
+        run: |
+          echo "RUSTFMT=$(rustup which --toolchain ${{ env.rust_nightly }} rustfmt)" >> "$GITHUB_ENV"
+
       # Generally MSRV dump is not considered a breaking change in by the Rust community.
       # Thus a minor or a patch version dump of a dependency of ours, can bump MSRV.
       # (remember that `cargo` uses newest semver compatible versions by default)

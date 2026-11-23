@@ -15,11 +15,11 @@ jobs:
     name: Compile ${{ matrix.project }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    continue-on-error: true # Advisory until consumers migrate to Bot API 10.5.
+    continue-on-error: true # Advisory: external projects cannot block Teloxide.
     strategy:
       fail-fast: false
       matrix:
-        project: [teloxide-ui, nedobot]
+        project: [teloxide-ui]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

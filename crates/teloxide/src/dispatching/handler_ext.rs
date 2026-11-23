@@ -261,7 +261,16 @@ mod tests {
             can_join_groups: false,
             can_read_all_group_messages: false,
             supports_inline_queries: false,
+            active_usernames: None,
+            inline_query_placeholder: None,
+            needs_inline_query_location: false,
             can_connect_to_business: false,
+            supports_guest_queries: false,
+            supports_join_request_queries: false,
+            has_topics_enabled: false,
+            allows_users_to_create_topics: false,
+            has_topic_sidebar: false,
+            can_manage_bots: false,
             has_main_web_app: false,
         }
     }

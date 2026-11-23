@@ -48,7 +48,7 @@ Run locally:
 cargo +stable nextest run -p teloxide-core --features full
 cargo +stable hack check -p teloxide-core --each-feature --exclude-features nightly --no-dev-deps
 cargo +stable llvm-cov -p teloxide-core --features full --lcov --output-path coverage.lcov
-cargo +stable mutants -p teloxide-core --file crates/teloxide-core/src/self_check.rs -- --features full
+cargo +stable mutants -p teloxide-core --file crates/teloxide-core/src/self_check.rs --timeout 180 -- --lib --features full self_check::tests::
 cargo +nightly fuzz run updates -- -max_total_time=60
 ```
 

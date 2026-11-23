@@ -1,4 +1,4 @@
-use std::{future::IntoFuture, pin::Pin, sync::Arc};
+use std::{future::IntoFuture, pin::Pin, sync::{Arc, RwLock}};
 
 use futures::{
     future,
@@ -10,7 +10,7 @@ use once_cell::sync::OnceCell;
 use url::Url;
 
 use crate::{
-    payloads::GetMe,
+    payloads::{GetMe, SetMySettings},
     requests::{HasPayload, Request, Requester},
     types::*,
 };
@@ -22,7 +22,7 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct CacheMe<B> {
     bot: B,
-    me: Arc<OnceCell<Me>>,
+    me: Arc<RwLock<Arc<OnceCell<Me>>>>,
 }
 
 impl<B> CacheMe<B> {
@@ -32,7 +32,7 @@ impl<B> CacheMe<B> {
     ///
     /// [`RequesterExt::cache_me`]: crate::requests::RequesterExt::cache_me
     pub fn new(bot: B) -> CacheMe<B> {
-        Self { bot, me: Arc::new(OnceCell::new()) }
+        Self { bot, me: Arc::new(RwLock::new(Arc::new(OnceCell::new()))) }
     }
 
     /// Allows to access inner bot
@@ -45,14 +45,17 @@ impl<B> CacheMe<B> {
         self.bot
     }
 
-    /// Clear cache.
+    /// Clears the cached `get_me` result for **all clones**.
     ///
-    /// Returns cached response from `get_me`, if it was cached.
+    /// In-flight `get_me` responses can still resolve for their original
+    /// caller, but cannot populate the new cache generation.
     ///
-    /// Note: internally this uses [`Arc::make_mut`] so this will **not**
-    /// clear cache of clones of self.
-    pub fn clear(&mut self) -> Option<Me> {
-        Arc::make_mut(&mut self.me).take()
+    /// Returns the previous cached response, if present.
+    pub fn clear(&self) -> Option<Me> {
+        let mut current = self.me.write().unwrap();
+        let previous = current.get().cloned();
+        *current = Arc::new(OnceCell::new());
+        previous
     }
 }
 
@@ -77,13 +80,13 @@ where
     type GetMe = CachedMeRequest<B::GetMe>;
 
     fn get_me(&self) -> Self::GetMe {
-        match self.me.get() {
-            Some(me) => CachedMeRequest(Inner::Ready(me.clone()), GetMe::new()),
-            None => CachedMeRequest(
-                Inner::Pending(self.bot.get_me(), Arc::clone(&self.me)),
-                GetMe::new(),
-            ),
-        }
+        CachedMeRequest(self.bot.get_me(), Arc::clone(&self.me), GetMe::new())
+    }
+
+    type SetMySettings = InvalidateMeRequest<B::SetMySettings>;
+
+    fn set_my_settings(&self) -> Self::SetMySettings {
+        InvalidateMeRequest(self.bot.set_my_settings(), Arc::clone(&self.me))
     }
 
     requester_forward! {
@@ -250,7 +253,6 @@ where
         get_managed_bot_access_settings,
         set_managed_bot_access_settings,
         set_my_profile_photo,
-        set_my_settings,
         remove_my_profile_photo,
         get_user_gifts,
         get_chat_gifts,
@@ -302,12 +304,11 @@ download_forward! {
 }
 
 #[must_use = "Requests are lazy and do nothing unless sent"]
-pub struct CachedMeRequest<R: Request<Payload = GetMe>>(Inner<R>, GetMe);
-
-enum Inner<R: Request<Payload = GetMe>> {
-    Ready(Me),
-    Pending(R, Arc<OnceCell<Me>>),
-}
+pub struct CachedMeRequest<R: Request<Payload = GetMe>>(
+    R,
+    Arc<RwLock<Arc<OnceCell<Me>>>>,
+    GetMe,
+);
 
 impl<R> Request for CachedMeRequest<R>
 where
@@ -318,19 +319,21 @@ where
     type SendRef = SendRef<R>;
 
     fn send(self) -> Self::Send {
-        let fut = match self.0 {
-            Inner::Ready(me) => future::Either::Left(ok(me)),
-            Inner::Pending(req, cell) => future::Either::Right(Init(req.send(), cell)),
+        // Resolve the cache generation at send time, not when constructing
+        // the lazy request. This also handles requests made before clear().
+        let cell = self.1.read().unwrap().clone();
+        let fut = match cell.get() {
+            Some(me) => future::Either::Left(ok(me.clone())),
+            None => future::Either::Right(Init(self.0.send(), cell)),
         };
         Send(fut)
     }
 
     fn send_ref(&self) -> Self::SendRef {
-        let fut = match &self.0 {
-            Inner::Ready(me) => future::Either::Left(ok(me.clone())),
-            Inner::Pending(req, cell) => {
-                future::Either::Right(Init(req.send_ref(), Arc::clone(cell)))
-            }
+        let cell = self.1.read().unwrap().clone();
+        let fut = match cell.get() {
+            Some(me) => future::Either::Left(ok(me.clone())),
+            None => future::Either::Right(Init(self.0.send_ref(), cell)),
         };
         SendRef(fut)
     }
@@ -340,11 +343,11 @@ impl<R: Request<Payload = GetMe>> HasPayload for CachedMeRequest<R> {
     type Payload = GetMe;
 
     fn payload_mut(&mut self) -> &mut Self::Payload {
-        &mut self.1
+        &mut self.2
     }
 
     fn payload_ref(&self) -> &Self::Payload {
-        &self.1
+        &self.2
     }
 }
 
@@ -354,6 +357,77 @@ impl<R: Request<Payload = GetMe>> IntoFuture for CachedMeRequest<R> {
 
     fn into_future(self) -> Self::IntoFuture {
         self.send()
+    }
+}
+
+/// Forwards `setMySettings` and invalidates the shared cache only after
+/// Telegram confirms success. Unsent or failed requests leave it untouched.
+#[must_use = "Requests are lazy and do nothing unless sent"]
+pub struct InvalidateMeRequest<R: Request<Payload = SetMySettings>>(
+    R,
+    Arc<RwLock<Arc<OnceCell<Me>>>>,
+);
+
+impl<R> Request for InvalidateMeRequest<R>
+where
+    R: Request<Payload = SetMySettings>,
+{
+    type Err = R::Err;
+    type Send = InvalidateOnSuccess<R::Send>;
+    type SendRef = InvalidateOnSuccess<R::SendRef>;
+
+    fn send(self) -> Self::Send {
+        InvalidateOnSuccess { inner: self.0.send(), cache: self.1 }
+    }
+
+    fn send_ref(&self) -> Self::SendRef {
+        InvalidateOnSuccess { inner: self.0.send_ref(), cache: Arc::clone(&self.1) }
+    }
+}
+
+impl<R: Request<Payload = SetMySettings>> HasPayload for InvalidateMeRequest<R> {
+    type Payload = SetMySettings;
+
+    fn payload_mut(&mut self) -> &mut Self::Payload {
+        self.0.payload_mut()
+    }
+
+    fn payload_ref(&self) -> &Self::Payload {
+        self.0.payload_ref()
+    }
+}
+
+impl<R: Request<Payload = SetMySettings>> IntoFuture for InvalidateMeRequest<R> {
+    type Output = Result<<SetMySettings as crate::requests::Payload>::Output, R::Err>;
+    type IntoFuture = InvalidateOnSuccess<R::Send>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        self.send()
+    }
+}
+
+#[pin_project::pin_project]
+pub struct InvalidateOnSuccess<F> {
+    #[pin]
+    inner: F,
+    cache: Arc<RwLock<Arc<OnceCell<Me>>>>,
+}
+
+impl<F, T, E> Future for InvalidateOnSuccess<F>
+where
+    F: Future<Output = Result<T, E>>,
+{
+    type Output = Result<T, E>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        match this.inner.poll(cx) {
+            Poll::Ready(Ok(result)) => {
+                *this.cache.write().unwrap() = Arc::new(OnceCell::new());
+                Poll::Ready(Ok(result))
+            }
+            other => other,
+        }
     }
 }
 

@@ -1,0 +1,106 @@
+name: Deep Rust quality
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deep-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  property-and-features:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install nextest and cargo-hack
+        run: |
+          cargo +stable install cargo-nextest --locked
+          cargo +stable install cargo-hack --locked
+      - name: Property tests and offline API contracts
+        run: |
+          cargo +stable nextest run -p teloxide-core --features full --test bot_api_10_5_properties --test bot_api_10_5_mock --test bot_api_10_5_integration
+      - name: Cargo feature matrix (excluding intentionally nightly-only feature)
+        run: |
+          cargo +stable hack check -p teloxide-core --each-feature --exclude-features nightly --no-dev-deps
+
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - name: Install coverage tool
+        run: cargo +stable install cargo-llvm-cov --locked
+      - name: Measure core coverage
+        run: |
+          mkdir -p coverage
+          cargo +stable llvm-cov -p teloxide-core --features full --lcov --output-path coverage/core.lcov
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: teloxide-core-lcov
+          path: coverage/core.lcov
+          if-no-files-found: warn
+          retention-days: 14
+
+  mutants:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install mutation runner
+        run: cargo +stable install cargo-mutants --locked
+      - name: Mutate new capability self checks
+        run: |
+          cargo +stable mutants -p teloxide-core --file crates/teloxide-core/src/self_check.rs --timeout 90 -- --features full
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutation-results
+          path: mutants.out/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz --locked
+      - name: Fuzz untrusted Telegram updates
+        run: cargo +nightly fuzz run updates -- -max_total_time=60 -max_len=16384
+      - name: Fuzz getMe and rich responses
+        run: cargo +nightly fuzz run bot_info_and_rich -- -max_total_time=60 -max_len=16384
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-reproducers
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+          retention-days: 14

@@ -180,3 +180,110 @@ async fn set_my_settings_serializes_partial_updates_to_its_endpoint() {
         })
     );
 }
+
+#[test]
+fn telegram_service_senders_are_not_real_chat_identity() {
+    use teloxide_core::types::ChatId;
+
+    for (sender, sender_chat, is_channel) in [
+        (
+            json!({
+                "id": 136817688,
+                "is_bot": true,
+                "first_name": "Channel",
+                "username": "Channel_Bot"
+            }),
+            json!({"id": -1001234567890_i64, "type": "channel", "title": "News"}),
+            true,
+        ),
+        (
+            json!({
+                "id": 1087968824,
+                "is_bot": true,
+                "first_name": "Group",
+                "username": "GroupAnonymousBot"
+            }),
+            json!({"id": -1009876543210_i64, "type": "supergroup", "title": "Group"}),
+            false,
+        ),
+    ] {
+        let update: Update = serde_json::from_value(json!({
+            "update_id": 123,
+            "message": {
+                "message_id": 123,
+                "date": 0,
+                "chat": {"id": -1009876543210_i64, "type": "supergroup", "title": "Group"},
+                "from": sender,
+                "sender_chat": sender_chat,
+                "text": "message from a chat"
+            }
+        }))
+        .unwrap();
+        let UpdateKind::Message(message) = update.kind else {
+            panic!("expected a message update");
+        };
+        let from = message.from.as_ref().unwrap();
+        assert_eq!(from.is_channel(), is_channel);
+        assert_eq!(from.is_anonymous(), !is_channel);
+
+        let actual_chat = message.sender_chat.as_ref().unwrap();
+        assert_ne!(actual_chat.id, ChatId(from.id.0 as i64));
+        assert!(actual_chat.id.0 < 0);
+    }
+}
+
+#[test]
+fn bot_full_info_optional_metadata_and_required_capabilities() {
+    let minimal = json!({
+        "id": 777,
+        "is_bot": true,
+        "first_name": "No Username",
+        "can_join_groups": false,
+        "can_read_all_group_messages": false,
+        "supports_guest_queries": false,
+        "supports_inline_queries": false,
+        "needs_inline_query_location": false,
+        "can_connect_to_business": false,
+        "has_main_web_app": false,
+        "has_topics_enabled": false,
+        "allows_users_to_create_topics": false,
+        "has_topic_sidebar": false,
+        "can_manage_bots": false,
+        "supports_join_request_queries": false
+    });
+    let info: BotFullInfo = serde_json::from_value(minimal.clone()).unwrap();
+    assert_eq!(info.user.username, None);
+    assert_eq!(info.active_usernames, None);
+    assert_eq!(info.inline_query_placeholder, None);
+    assert!(info.user.is_bot);
+
+    let mut missing_required = minimal;
+    missing_required.as_object_mut().unwrap().remove("has_topic_sidebar");
+    assert!(serde_json::from_value::<BotFullInfo>(missing_required).is_err());
+}
+
+#[test]
+fn callback_query_inline_mode_does_not_require_a_message() {
+    use teloxide_core::types::CallbackQuery;
+
+    let query: CallbackQuery = serde_json::from_value(json!({
+        "id": "callback-id",
+        "from": {"id": 42, "is_bot": false, "first_name": "Tester"},
+        "inline_message_id": "AAED-inline-id",
+        "chat_instance": "chat-instance",
+        "data": "button"
+    }))
+    .unwrap();
+    assert!(query.message.is_none());
+    assert!(query.regular_message().is_none());
+    assert_eq!(query.inline_message_id.as_deref(), Some("AAED-inline-id"));
+    assert_eq!(query.data.as_deref(), Some("button"));
+}
+
+#[test]
+fn set_my_settings_default_payload_does_not_reset_other_settings() {
+    use teloxide_core::payloads::SetMySettings;
+
+    let payload = SetMySettings::new();
+    assert_eq!(serde_json::to_value(payload).unwrap(), json!({}));
+}

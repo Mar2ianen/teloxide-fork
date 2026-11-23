@@ -82,7 +82,7 @@ impl BotFullInfo {
         self.user.mention()
     }
 
-    /// Returns a \`t.me\` URL only if a username is available.
+    /// Returns a `t.me` URL only if a username is available.
     #[must_use]
     pub fn tme_url_opt(&self) -> Option<reqwest::Url> {
         self.user.tme_url()
